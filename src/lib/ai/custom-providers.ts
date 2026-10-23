@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { decryptSecret, encryptSecret, maskSecret } from "@/lib/crypto";
 import { registerSecretForRedaction, redactSecrets } from "@/lib/ai/client";
 import {
+  EGRESS_CUSTOM_PROVIDERS_KEY,
   loadEgressPool,
   pickProxies,
   proxiedFetch,
@@ -35,12 +36,16 @@ import {
  * in a failure message. Error messages are static strings + HTTP status +
  * host (host is config, safe to display).
  *
- * Egress (task 13-b conventions): chatCompleteCustom resolves
- * routeFor("default", readRoutingMap()) once per call. "direct" → plain
- * fetch; "proxy" → loadEgressPool → pickProxies → proxiedFetch (BUFFERED —
- * non-streaming only). Transport/pool failures map to NETWORK_ERROR and are
- * NEVER UNAUTHORIZED — only an HTTP 401 answered by the upstream itself is
- * a key error.
+ * Egress (task 13-b conventions, R17 refinement): chatCompleteCustom AND
+ * probeCustomProvider resolve routeFor("custom-providers", readRoutingMap())
+ * once per call — a dedicated routing key that falls back to map["default"]
+ * when unset. [MEASURED R17] aihubmix.com answers direct from the sandbox but
+ * fails at the pool transport layer, so the dedicated key lets the owner route
+ * custom providers independently of the Groq-driven "default" choice.
+ * "direct" → plain fetch; "proxy" → loadEgressPool → pickProxies →
+ * proxiedFetch (BUFFERED — non-streaming only). Transport/pool failures map to
+ * NETWORK_ERROR and are NEVER UNAUTHORIZED — only an HTTP 401 answered by the
+ * upstream itself is a key error.
  *
  * STREAMING IS HONESTLY DEFERRED: proxiedFetch returns a complete buffered
  * envelope and cannot stream (same honesty constraint as the brain's
@@ -111,7 +116,19 @@ export function isValidCustomBaseUrl(value: unknown): value is string {
 }
 
 export function normalizeCustomBaseUrl(value: string): string {
-  return value.trim().replace(/\/+$/, "");
+  // Trim, then strip trailing slashes. R17: also strip ONE trailing "/models"
+  // segment — owners naturally paste the full models URL they copied from
+  // provider docs (e.g. "https://aihubmix.com/api/v1/models" [MEASURED]), but
+  // every request builder appends its own segment ("/models", "/models" +
+  // "/v1/models" for anthropic, "/chat/completions", "/v1/messages"). Keeping
+  // the segment would 404 every call; stripping it at this single choke point
+  // fixes probe + chat for both styles. No real OpenAI-/Anthropic-style API
+  // serves models at ".../models/models", so the ambiguity is theoretical.
+  return value
+    .trim()
+    .replace(/\/+$/, "")
+    .replace(/\/models$/, "")
+    .replace(/\/+$/, "");
 }
 
 /** Public host of the endpoint (safe for the panel — config, not a secret). */
@@ -340,18 +357,35 @@ function parseModelListPayload(text: string): string[] | null {
       ? ((data as { data: unknown[] }).data as unknown[])
       : null;
   if (!list) return null;
-  return list
+  // R17: accept the common id-field variants. OpenAI-style rows carry `id`;
+  // [MEASURED] aihubmix.com rows carry `model_id` (+ human `model_name`).
+  // First non-empty string wins per row; duplicates dropped; order preserved.
+  const ids = list
     .map((m) => {
       const o = (m ?? {}) as Record<string, unknown>;
-      return typeof o.id === "string" ? o.id : null;
+      if (typeof o.id === "string" && o.id.trim()) return o.id.trim();
+      if (typeof o.model_id === "string" && o.model_id.trim()) return o.model_id.trim();
+      if (typeof o.model === "string" && o.model.trim()) return o.model.trim();
+      if (typeof o.name === "string" && o.name.trim()) return o.name.trim();
+      return null;
     })
     .filter((id): id is string => id !== null);
+  return [...new Set(ids)];
 }
 
 /**
  * Probe with or without a key — both are honest measurements. Without a key
  * the upstream's 401 IS the honest answer ("this endpoint demands a key").
  * Bodies on failure are truncated + scrubbed against the key (P7). 8s timeout.
+ *
+ * Task 17-b: egress-aware exactly like chatCompleteCustom — the probe follows
+ * routeFor("custom-providers", readRoutingMap()) (falls back to "default"):
+ * "direct" keeps the plain sandbox
+ * fetch, "proxy" goes through the Webshare pool (2 proxies, buffered). A
+ * WAF-blocked host (measured: sandbox egress can 403/timeout where the pool
+ * passes) is therefore still measurable. Transport/pool failures return
+ * NETWORK_ERROR — NEVER UNAUTHORIZED (transport is not auth). The probe RESULT
+ * shape is unchanged.
  */
 export async function probeCustomProvider(slug: string): Promise<CustomProviderProbe> {
   const { config, key } = await resolveCustomProvider(slug);
@@ -361,30 +395,73 @@ export async function probeCustomProvider(slug: string): Promise<CustomProviderP
 
   const host = customProviderHost(config.baseUrl);
   const url = probeTargetUrl(config.style, config.baseUrl);
+  const headers = probeHeaders(config.style, key);
 
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      method: "GET",
-      headers: probeHeaders(config.style, key),
-      cache: "no-store",
-      signal: AbortSignal.timeout(CUSTOM_PROBE_TIMEOUT_MS),
-    });
-  } catch (err) {
-    const name = err instanceof Error ? err.name : "";
-    const causeCode =
-      err && typeof err === "object" && "code" in err && typeof (err as { code?: unknown }).code === "string"
-        ? (err as { code: string }).code
-        : "unknown";
-    const timedOut = name === "TimeoutError" || name === "AbortError";
-    return {
-      ok: false,
-      code: "NETWORK_ERROR",
-      httpStatus: null,
-      message: timedOut
-        ? `${host} did not respond within ${CUSTOM_PROBE_TIMEOUT_MS / 1000}s (GET ${probeTargetUrl(config.style, "")})`
-        : `network error reaching ${host} (${causeCode})`,
-    };
+  // Egress routing — same conventions as chatCompleteCustom (resolved once).
+  const mode = routeFor(EGRESS_CUSTOM_PROVIDERS_KEY, await readRoutingMap());
+
+  let status: number;
+  let bodyText: string;
+
+  if (mode === "proxy") {
+    const pool = await loadEgressPool();
+    if (!pool.ok) {
+      return {
+        ok: false,
+        code: "NETWORK_ERROR",
+        httpStatus: null,
+        message: `egress proxy pool unavailable for the ${host} probe (${pool.code}) — configure the Webshare connector or set egress.routing default back to direct`,
+      };
+    }
+    const candidates = pickProxies(pool.pool, CUSTOM_MAX_PROXY_ATTEMPTS);
+    let answered: { status: number; bodyText: string } | null = null;
+    let lastCode: string | null = null;
+    for (const proxy of candidates) {
+      const r = await proxiedFetch(url, { method: "GET", headers }, { proxy, timeoutMs: CUSTOM_PROBE_TIMEOUT_MS });
+      if ("code" in r) {
+        lastCode = r.code; // proxy/transport failure — try the next pool proxy
+        continue;
+      }
+      answered = { status: r.status, bodyText: r.bodyText };
+      break;
+    }
+    if (!answered) {
+      return {
+        ok: false,
+        code: "NETWORK_ERROR",
+        httpStatus: null,
+        message: `${host} probe could not be completed through the egress proxy pool (${lastCode ?? "PROXY_FAILED"}) — proxy/transport failure, never a key error`,
+      };
+    }
+    status = answered.status;
+    bodyText = answered.bodyText;
+  } else {
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: "GET",
+        headers,
+        cache: "no-store",
+        signal: AbortSignal.timeout(CUSTOM_PROBE_TIMEOUT_MS),
+      });
+    } catch (err) {
+      const name = err instanceof Error ? err.name : "";
+      const causeCode =
+        err && typeof err === "object" && "code" in err && typeof (err as { code?: unknown }).code === "string"
+          ? (err as { code: string }).code
+          : "unknown";
+      const timedOut = name === "TimeoutError" || name === "AbortError";
+      return {
+        ok: false,
+        code: "NETWORK_ERROR",
+        httpStatus: null,
+        message: timedOut
+          ? `${host} did not respond within ${CUSTOM_PROBE_TIMEOUT_MS / 1000}s (GET ${probeTargetUrl(config.style, "")})`
+          : `network error reaching ${host} (${causeCode})`,
+      };
+    }
+    status = res.status;
+    bodyText = await res.text().catch(() => "");
   }
 
   // Scrubs the live key out of any snippet and caps the length (P7).
@@ -394,7 +471,7 @@ export async function probeCustomProvider(slug: string): Promise<CustomProviderP
     return out.slice(0, 200);
   };
 
-  if (res.status === 401) {
+  if (status === 401) {
     return {
       ok: false,
       code: "UNAUTHORIZED",
@@ -404,29 +481,28 @@ export async function probeCustomProvider(slug: string): Promise<CustomProviderP
         : `${host} answered HTTP 401 — this endpoint demands a key and none is stored yet`,
     };
   }
-  if (res.status === 403) {
+  if (status === 403) {
     return { ok: false, code: "FORBIDDEN", httpStatus: 403, message: `${host} refused access (HTTP 403) — key lacks access or a WAF is in the way` };
   }
-  if (res.status === 429) {
+  if (status === 429) {
     return { ok: false, code: "RATE_LIMITED", httpStatus: 429, message: `${host} rate-limited the probe (HTTP 429)` };
   }
 
-  const text = await res.text().catch(() => "");
-  if (!res.ok) {
+  if (status < 200 || status >= 300) {
     return {
       ok: false,
       code: "BAD_RESPONSE",
-      httpStatus: res.status,
-      message: `${host} answered HTTP ${res.status}${text ? `: ${scrub(text)}` : ""}`,
+      httpStatus: status,
+      message: `${host} answered HTTP ${status}${bodyText ? `: ${scrub(bodyText)}` : ""}`,
     };
   }
 
-  const models = parseModelListPayload(text);
+  const models = parseModelListPayload(bodyText);
   if (!models) {
-    return { ok: false, code: "BAD_RESPONSE", httpStatus: res.status, message: `${host} returned a non-JSON or unrecognized models payload` };
+    return { ok: false, code: "BAD_RESPONSE", httpStatus: status, message: `${host} returned a non-JSON or unrecognized models payload` };
   }
 
-  return { ok: true, httpStatus: res.status, models };
+  return { ok: true, httpStatus: status, models };
 }
 
 // ---------------------------------------------------------------------------
@@ -566,7 +642,7 @@ function parseAnthropicChatPayload(text: string): { content: string | null; usag
 
 /**
  * Non-streaming completion against a custom provider. Egress-aware
- * (routeFor("default")). 60s timeout. Transport/pool failures are
+ * (routeFor("custom-providers") → "default" fallback). 60s timeout. Transport/pool failures are
  * NETWORK_ERROR — NEVER UNAUTHORIZED (only an upstream-answered 401 is).
  */
 export async function chatCompleteCustom(
@@ -632,7 +708,7 @@ export async function chatCompleteCustom(
 
   // Egress routing (task 13-b conventions): resolved once per call.
   const routingMap = await readRoutingMap();
-  const mode = routeFor("default", routingMap);
+  const mode = routeFor(EGRESS_CUSTOM_PROVIDERS_KEY, routingMap);
 
   const recordFailure = async (
     code: CustomChatFailureCode,

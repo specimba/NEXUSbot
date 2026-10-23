@@ -16,15 +16,24 @@ import {
  * GET /api/vyce/status (session-guarded) — honest Vyce connector state.
  *
  * Probes GET {base}/v1/models live with the stored key. Key source order:
- * vault → Supabase Edge-Function secret fallback (owner stored VYCE_API_KEY
- * there). A reachable host with a rejected key is NEVER reported connected.
+ * vault → Supabase edge-relay fallback — the nexus-relay Edge Function
+ * (task 17-a, harness project vwottesqbdgcsmvvvzok) holds the EF-secret
+ * plaintext in its runtime and proxies authenticated calls to vyceai.com.
+ * The relay is the ONLY honest way to use EF-stored keys [MEASURED]: the
+ * Management API GET /v1/projects/{ref}/secrets returns `value` = SHA256
+ * DIGEST (64-hex), never plaintext — reading that digest and sending it as a
+ * Bearer key produced the eternal, unfixable 401 "invalid_api_key". This route
+ * therefore probes the RELAY URL with the panel relay secret; probeTarget is
+ * always the host actually probed (the relay host <ref>.supabase.co).
+ * A reachable host with a rejected key is NEVER reported connected.
  *
  * Task 13-b ADDITIVE field: the top-level `groq` sibling carries the Groq
  * provider slot status (getGroqSlotStatus) — the `status` object itself is
  * byte-identical to the pre-13-b contract, so existing consumers are unaffected.
  *
  * P7: only a masked key preview (••••tail) and host names ever leave this
- * route — key material is decrypted transiently server-side and dropped.
+ * route — key material (vault key AND relay secret) is decrypted transiently
+ * server-side and dropped.
  */
 export async function GET(req: Request) {
   const denied = await requireSession();
@@ -90,30 +99,35 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: true, status: payload, groq });
   }
 
-  // --- No vault key → report the Supabase edge-secret fallback state honestly.
+  // --- No vault key → report the Supabase edge-relay fallback state honestly.
+  // The relay carries the real EF-secret plaintext; probing it is probing the
+  // actual upstream auth path (task 16-a doctrine: probeTarget = probed host,
+  // here the relay host <ref>.supabase.co).
   let fallback: VyceStatusPayload["fallback"] = { available: false, reason: null, projectRef: null };
   try {
     const fb = await resolveVyceKeyFallback();
     if (fb.ok) {
       // Task 16-a: probeTarget must be the host of the URL ACTUALLY probed —
-      // the fallback may carry its own base URL (never claim vyceai.com while
-      // probing something else).
+      // via the relay that is <ref>.supabase.co (never claim vyceai.com while
+      // probing the relay edge).
       const probedBase = fb.baseUrl ?? baseUrl;
       const probe = await probeVyce(fb.key, probedBase);
-      // Task 16-a: name the rejected secret plainly when the EF key fails.
+      // Task 16-a/17-b: name the rejected secret plainly when the EF key fails
+      // (the 401 passed through the relay verbatim from Vyce — honest key
+      // rejection, not a relay-auth failure).
       const error = probe.ok
         ? null
         : probe.code === "UNAUTHORIZED"
           ? {
               code: probe.code,
               message:
-                "The VYCE_API_KEY stored in the Supabase Edge-Function secrets was rejected by Vyce (HTTP 401 invalid_api_key) — update it there or paste a fresh key in the panel.",
+                "The VYCE_API_KEY stored in the Supabase Edge-Function secrets was rejected by Vyce (HTTP 401 invalid_api_key) — reached via the nexus-relay edge function; update the secret in the Supabase dashboard (harness project) or paste a fresh key in the panel.",
             }
           : { code: probe.code, message: probe.message };
       const payload: VyceStatusPayload = {
         configured: false, // no vault key — fallback is a usable but secondary source
         connected: probe.ok,
-        keySource: "supabase-edge-secret",
+        keySource: "supabase-edge-relay",
         modelCount: probe.ok ? probe.models.length : null,
         tiers: probe.ok ? computeTierAvailability(probe.models) : emptyTierMap(),
         maskedKey: null, // fallback key material is never even masked-displayed

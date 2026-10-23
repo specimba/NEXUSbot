@@ -287,7 +287,7 @@ export async function probeVyce(apiKey: string, baseUrl: string): Promise<VycePr
 export type VyceStatusPayload = {
   configured: boolean; // vault key present
   connected: boolean; // live probe accepted the key
-  keySource: "vault" | "supabase-edge-secret" | null;
+  keySource: "vault" | "supabase-edge-relay" | null;
   modelCount: number | null;
   tiers: VyceTierMap;
   maskedKey: string | null;

@@ -1,6 +1,6 @@
 # NEXUS OS — STATE
 
-_Last updated: 2026-10-23 (R16 — Vyce EF-secret verdict measured + Custom AI providers + durability revived)_
+_Last updated: 2026-10-23 (R17 — digest root cause + nexus-relay edge function: Vyce CONNECTED via EF relay)_
 
 ## Status line
 
@@ -11,9 +11,9 @@ _Last updated: 2026-10-23 (R16 — Vyce EF-secret verdict measured + Custom AI p
 - Durability: **REVIVED + LIVE** — 6 h cadence + one-click run; auto-hygiene guards every snapshot (R15/R16)
 - Private `.git`: **880K** (was 255M of platform-sync junk blobs; stripped R15) [MEASURED]
 - Panel session: **iframe-proof** — cookie + `Authorization: Bearer` fallback (R15); owner reported "right pass but cannot move" root-caused and fixed
-- All 5 connectors **CONNECTED** [MEASURED] · durability **REVIVED**: public repo @ `68e6f52` (R16 proof push, ff-only)
-- Brain keys: EF-secret values for VYCE + GROQ both measured **rejected by their upstreams** — owner rotation pending (see ⑪)
-- Panel vault: **EMPTY** (reset wiped all connector credentials — owner must re-enter)
+- All 5 connectors **CONNECTED** [MEASURED] · durability **LIVE**: 6 h cadence auto-resumed after GitHub reconnect (22:57 run `result=ok`, head `b9d406b6`)
+- **Vyce brain: CONNECTED via the nexus-relay edge function** — 8 models, all 6 tiers available; Groq slot 11 models [MEASURED R17]
+- R16's "EF keys are rejected" verdict is **OVERTURNED** — the real root cause was digest-vs-plaintext (see ⑫)
 
 ## ① What happened (R11 incident + recovery)
 
@@ -203,6 +203,43 @@ _Last updated: 2026-10-23 (R16 — Vyce EF-secret verdict measured + Custom AI p
   run → auto-hygiene (git add refused every ignored dir live) → scan gate →
   divergence pre-check → **PUSH OK `7dcee0d..68e6f52` fast-forward** → daily tag
   immutably skipped. Cadence continues on the 6 h timer.
+
+## ⑫ Round-17 additions (all [MEASURED])
+
+- **TRUE root cause of the Vyce EF-fallback 401 (overturns ⑪)**: Supabase Mgmt
+  `GET /v1/projects/{ref}/secrets` returns `value` = **SHA256 HEX DIGEST** of each
+  secret (64-hex) — never the plaintext (the dashboard's "Digest" column shows the
+  same). The panel's fallback was therefore sending sha256(VYCE_API_KEY) to Vyce →
+  guaranteed `401 invalid_api_key` **that no owner-side rotation could ever fix**.
+  Proof: every row — even SUPABASE_URL / UPSTASH_REDIS_REST_URL, which must be URLs —
+  returns 64-hex. The plaintext exists ONLY inside the Edge Function runtime.
+- **Fix: `nexus-relay` edge function** (harness project, verify_jwt=false, additive —
+  nexus-cortex / nexus-cortex-harness untouched; answer to "is it the 2 functions?":
+  no — EF secrets are project-scoped, both functions see the same env; the bug was
+  digest-vs-plaintext). OpenAI-compatible facade with relay-secret auth:
+  `GET /health`, `GET|POST /vyce/v1/{models,chat/completions,images/generations}`,
+  `GET|POST /groq/openai/v1/{models,chat/completions}`; constant-time Bearer compare
+  vs `NEXUS_PANEL_RELAY_SECRET`; upstream status/body passed through verbatim
+  (unbuffered SSE — streaming works through it). Source: `supabase/functions/nexus-relay/index.ts`;
+  idempotent deploy+provision: `bun run scripts/deploy-nexus-relay.ts` [working deploy
+  shape: multipart parts `metadata` + `file`; secrets upsert body rows `{name,value}`].
+- **Panel rewired** (`src/lib/ai/edge-relay.ts` + client.ts): resolvers now
+  vault → **edge relay** (`supabase-edge-relay`) → NO_KEY; the digest-reading path is
+  DELETED. Relay secret auto-provisions on missing (vault `supabase`/`relay-secret` ⇄
+  EF `NEXUS_PANEL_RELAY_SECRET`, mutex-guarded). Status route probes THROUGH the relay
+  (probeTarget = relay host, honest 401 pass-through names the EF secret).
+  `mgmtUpsertSecrets` wire shape fixed (`{name,value}` — `{key,value}` answered 400).
+- **Verdict [MEASURED]**: EF VYCE_API_KEY and GROQ_API_KEY were **VALID all along**.
+  Vyce: `connected:true`, 8 models, ROUTER/WORKER/FRONTIER/FREE/BATCH/IMAGE all
+  `available`; Groq: 11 models; relay chat + SSE verified end-to-end. Browser E2E:
+  0 page errors, 390px scrollWidth==390.
+- **Custom providers hardening**: probe now egress-aware under a NEW dedicated routing
+  key `custom-providers` (falls back to `default`; card row added) — [MEASURED]
+  aihubmix.com answers direct (200) but fails at the pool transport layer while the
+  owner's default=proxy is needed by Groq; custom-providers set to **direct**.
+  Base-URL paste hygiene: trailing `/models` stripped at the normalize choke point
+  (owner pasted the full models URL); model-list parser accepts `id` / `model_id` /
+  `model` / `name` rows → aihubmix probe: **837 models · HTTP 200** live in the panel.
 
 ## Owner comms protocol (standing)
 

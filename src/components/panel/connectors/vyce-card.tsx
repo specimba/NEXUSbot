@@ -23,7 +23,8 @@ import { BrainCircuit, KeyRound, PlugZap, RefreshCw, Trash2 } from "lucide-react
  *
  * P7: the key is typed once into a password input, POSTed, and never rendered
  * again — the card only ever receives a masked ••••tail preview. The Supabase
- * edge-secret fallback path is surfaced as a note (no value ever displayed).
+ * edge-relay fallback path (nexus-relay Edge Function, task 17-b) is surfaced
+ * as a note (no value ever displayed).
  *
  * Toast note: the task mandates sonner; the root layout mounts only the radix
  * <Toaster/>, so the sonner <Toaster/> is mounted at this card's root (same
@@ -31,6 +32,15 @@ import { BrainCircuit, KeyRound, PlugZap, RefreshCw, Trash2 } from "lucide-react
  */
 
 type StatusResponse = { ok: true; status: VyceStatusPayload };
+
+/**
+ * Copy-level source matcher: the edge-relay source ("supabase-edge-relay",
+ * task 17-b) — with a defensive map for the pre-17-b "supabase-edge-secret"
+ * string so a stale payload can never render as an unknown state.
+ */
+function isEdgeRelaySource(keySource: VyceStatusPayload["keySource"]): boolean {
+  return keySource === "supabase-edge-relay" || keySource === "supabase-edge-secret";
+}
 
 const ROLE_LABELS: Record<string, string> = {
   router: "ROUTER",
@@ -61,15 +71,16 @@ function reachability(s: VyceStatusPayload): { label: string; badgeClass: string
     return { label: "VAULT ERROR", badgeClass: "border-accent/60 text-accent", detail: s.error?.message ?? "Vault unreadable." };
   }
   if (code === "UNAUTHORIZED") {
-    // Task 16-a: distinguish WHERE the rejected key lives — vault vs the
-    // Supabase Edge-Function secret — so the guidance names the right place.
-    if (s.keySource === "supabase-edge-secret") {
+    // Task 16-a/17-b: distinguish WHERE the rejected key lives — vault vs the
+    // Supabase Edge-Function secret (reached via the nexus-relay edge function)
+    // — so the guidance names the right place.
+    if (isEdgeRelaySource(s.keySource)) {
       return {
         label: "KEY REJECTED",
         badgeClass: "border-destructive/50 text-destructive",
         detail:
           s.error?.message ??
-          "Vyce rejected the Edge-Function secret VYCE_API_KEY — update it in the Supabase secrets or paste a fresh key in the panel.",
+          "Vyce rejected the Edge-Function secret VYCE_API_KEY — update it in the Supabase secrets (harness project) or paste a fresh key in the panel.",
       };
     }
     return {
@@ -158,7 +169,7 @@ export function VyceCard() {
 
   const s = status.data?.status ?? null;
   const reach = s ? reachability(s) : null;
-  const showForm = s !== null && !s.configured && s.keySource !== "supabase-edge-secret";
+  const showForm = s !== null && !s.configured && !isEdgeRelaySource(s.keySource);
 
   return (
     <Card>
@@ -209,7 +220,7 @@ export function VyceCard() {
               </Badge>
             </div>
 
-            {s.keySource === "supabase-edge-secret" && (
+            {isEdgeRelaySource(s.keySource) && (
               <p
                 className={cn(
                   "rounded-md border p-2 text-xs",
@@ -219,7 +230,7 @@ export function VyceCard() {
                 )}
               >
                 {s.connected
-                  ? "Working via the Supabase Edge-Function secret fallback (VYCE_API_KEY) — no vault key stored. Paste a vault key below to make it primary."
+                  ? "Working via the Supabase Edge-Function relay (nexus-relay on the harness project) — paste a vault key to make it primary"
                   : "The VYCE_API_KEY in the Supabase Edge-Function secrets was rejected by Vyce — update the secret there (harness project) or paste a fresh key in the panel below."}
               </p>
             )}
@@ -317,7 +328,7 @@ export function VyceCard() {
               </div>
             )}
 
-            {s.configured || s.keySource === "supabase-edge-secret" ? (
+            {s.configured || isEdgeRelaySource(s.keySource) ? (
               <p className="flex flex-wrap items-center gap-1.5 font-mono text-[11px] [overflow-wrap:anywhere] text-muted-foreground">
                 <PlugZap className="size-3" aria-hidden="true" />
                 probe {s.probeTarget} · GET /v1/models

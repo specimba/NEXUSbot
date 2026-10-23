@@ -11,11 +11,9 @@ import {
   loadVyceBaseUrlOverride,
   loadVyceKey,
   normalizeVyceBaseUrl,
-  probeVyce,
-  sanitizeSecretText,
   type VyceRole,
 } from "@/lib/connectors/vyce";
-import { SUPABASE_MGMT_BASE, getMgmtPat, mgmtListProjects } from "@/lib/connectors/supabase";
+import { getRelayCredentials, relayGroqBaseUrl, relayVyceBaseUrl } from "@/lib/ai/edge-relay";
 import {
   DEFAULT_GROQ_BASE_URL,
   GROQ_STATIC_MODELS,
@@ -157,13 +155,23 @@ export class BrainError extends Error {
 }
 
 // ---------------------------------------------------------------------------
-// Key resolution — vault → Supabase Edge-Function secret fallback → NO_KEY
+// Key resolution — vault → Supabase edge-relay (nexus-relay) → NO_KEY
+//
+// Task 17-b ROOT CAUSE [MEASURED]: the Supabase Management API
+// GET /v1/projects/{ref}/secrets returns `value` = SHA256 DIGEST (64-hex),
+// never plaintext — the old "read EF secrets via Mgmt and send the value"
+// path was sending sha256(VYCE_API_KEY) to Vyce → eternal 401 that NO
+// owner-side rotation could fix. That digest-reading path is DELETED. The
+// EF-secret plaintext reaches the upstreams only through the nexus-relay
+// Edge Function (task 17-a): this module points its OpenAI-style calls at the
+// relay base URLs and authenticates with the panel relay secret (plumbing in
+// src/lib/ai/edge-relay.ts — PAT checks, vault relay-secret, auto-provision).
 // ---------------------------------------------------------------------------
 
 export type VyceCredentials = {
   key: string;
   baseUrl: string;
-  source: "vault" | "supabase-edge-secret";
+  source: "vault" | "supabase-edge-relay";
 };
 
 function envVyceBaseUrl(): string | null {
@@ -172,137 +180,27 @@ function envVyceBaseUrl(): string | null {
 }
 
 /**
- * Supabase Edge-Function secret fallback: the owner stored VYCE_API_KEY
- * (+ VYCE_BASE_URL) as Edge Function secrets on the harness project. This
- * reads them server-side, transiently, via the stored Management PAT.
- * Values NEVER leave this function except through the return value, which
- * callers must treat per the hygiene rules above.
- *
- * Task 16-a: the ok-branch carries `projectRef` — WHICH project's secret won
- * (additive, null-safe) — so the panel can attribute fallback results honestly.
+ * Supabase edge-relay fallback (task 17-b): the brain calls Vyce THROUGH the
+ * nexus-relay Edge Function using the panel relay secret — the only honest way
+ * to use EF-stored keys, because Mgmt-API secret VALUES are digests [MEASURED].
+ * The ok-branch carries `projectRef` (the harness project hosting the relay;
+ * shape kept null-safe from 16-a) so the panel can attribute fallback results.
  */
 export type VyceFallback =
   | { ok: true; key: string; baseUrl: string | null; projectRef: string | null }
   | { ok: false; reason: string };
 
-const FALLBACK_NOT_FOUND = "VYCE_API_KEY not found among Edge Function secrets";
 let fallbackCache: { at: number; result: VyceFallback } | null = null;
 const FALLBACK_TTL = 60_000;
-
-/**
- * Deterministic candidate order (task 16-a): Mgmt API project ORDER is not
- * guaranteed, so a stale key on one project could shadow a good one on another
- * when resolvers returned the first hit. The two measured owner projects rank
- * first — harness, then gspp — everything else keeps a stable tail.
- */
-const PREFERRED_EDGE_PROJECT_REFS: readonly string[] = ["vwottesqbdgcsmvvvzok", "thgvcrwejojlwcjpsgsu"];
-
-function deterministicProjectOrder(projects: { ref: string }[]): { ref: string }[] {
-  const rank = (ref: string): number => {
-    const i = PREFERRED_EDGE_PROJECT_REFS.indexOf(ref);
-    return i === -1 ? PREFERRED_EDGE_PROJECT_REFS.length : i;
-  };
-  return [...projects].sort((a, b) => rank(a.ref) - rank(b.ref));
-}
-
-async function readEdgeSecretValues(
-  pat: string,
-  projectRef: string,
-  wanted: readonly string[],
-): Promise<Map<string, string> | null> {
-  try {
-    const res = await fetch(`${SUPABASE_MGMT_BASE}/v1/projects/${encodeURIComponent(projectRef)}/secrets`, {
-      method: "GET",
-      headers: { Authorization: `Bearer ${pat}`, Accept: "application/json" },
-      cache: "no-store",
-      signal: AbortSignal.timeout(8_000),
-    });
-    if (!res.ok) return null;
-    const data: unknown = await res.json().catch(() => null);
-    if (!Array.isArray(data)) return null;
-    const found = new Map<string, string>();
-    for (const raw of data) {
-      const o = (raw ?? {}) as Record<string, unknown>;
-      const name = typeof o.name === "string" ? o.name : "";
-      const value = typeof o.value === "string" ? o.value : "";
-      if (!wanted.includes(name) || value.length === 0) continue;
-      // Task 16-a paste hygiene: Edge secrets can carry wrapping quotes or
-      // stray whitespace from a dashboard paste — sanitize before use.
-      const sanitized = sanitizeSecretText(value);
-      if (sanitized.length > 0) found.set(name, sanitized);
-    }
-    return found;
-  } catch {
-    return null;
-  }
-}
 
 export async function resolveVyceKeyFallback(): Promise<VyceFallback> {
   const now = Date.now();
   if (fallbackCache && now - fallbackCache.at < FALLBACK_TTL) return fallbackCache.result;
 
   const result = await (async (): Promise<VyceFallback> => {
-    const pat = await getMgmtPat();
-    if (!pat) {
-      return { ok: false, reason: "supabase PAT not stored — connect the Supabase connector first" };
-    }
-    registerSecretForRedaction(pat);
-
-    const projects = await mgmtListProjects(pat);
-    if (!projects.ok) {
-      return {
-        ok: false,
-        reason:
-          projects.status === 401 || projects.status === 403
-            ? "supabase PAT rejected by the Mgmt API"
-            : "supabase Mgmt API unreachable from sandbox",
-      };
-    }
-    if (projects.projects.length === 0) return { ok: false, reason: "no accessible supabase projects" };
-
-    // Task 16-a: collect candidates from ALL scanned projects (first 5,
-    // deterministic order, honoring per-project VYCE_BASE_URL) instead of
-    // returning the first hit — a stale key on one project must not shadow a
-    // good one just because the Mgmt API listed it first.
-    type Candidate = { key: string; baseUrl: string | null; projectRef: string };
-    const candidates: Candidate[] = [];
-    for (const project of deterministicProjectOrder(projects.projects.slice(0, 5))) {
-      const found = await readEdgeSecretValues(pat, project.ref, ["VYCE_API_KEY", "VYCE_BASE_URL"]);
-      if (found === null) continue; // project unreachable — try the next
-      const key = found.get("VYCE_API_KEY");
-      if (key && key.length >= 8) {
-        const baseUrlRaw = found.get("VYCE_BASE_URL")?.trim();
-        candidates.push({
-          key,
-          baseUrl: baseUrlRaw && isValidVyceBaseUrl(baseUrlRaw) ? normalizeVyceBaseUrl(baseUrlRaw) : null,
-          projectRef: project.ref,
-        });
-      }
-    }
-    if (candidates.length === 0) return { ok: false, reason: FALLBACK_NOT_FOUND };
-
-    const toResult = (c: Candidate): VyceFallback => ({
-      ok: true,
-      key: c.key,
-      baseUrl: c.baseUrl,
-      projectRef: c.projectRef,
-    });
-
-    // Exactly one candidate value: no probe here — the status route probes
-    // anyway, so every status poll must not double-hit Vyce (the 60s TTL
-    // cache keeps this resolver off the hot path).
-    if (new Set(candidates.map((c) => c.key)).size === 1) return toResult(candidates[0]!);
-
-    // More than one distinct candidate value: probe-to-resolve. The first key
-    // the gateway actually accepts wins (probeVyce carries its own bounded
-    // per-fetch timeout); deterministic candidate order keeps all-fail stable.
-    for (const c of candidates) {
-      const probe = await probeVyce(c.key, c.baseUrl ?? envVyceBaseUrl() ?? DEFAULT_VYCE_BASE_URL);
-      if (probe.ok) return toResult(c);
-    }
-    // None authenticated (or the gateway was unreachable): return the first
-    // candidate deterministically — the status route surfaces the honest 401.
-    return toResult(candidates[0]!);
+    const relay = await getRelayCredentials();
+    if (!relay.ok) return { ok: false, reason: relay.reason };
+    return { ok: true, key: relay.relaySecret, baseUrl: relayVyceBaseUrl(), projectRef: relay.projectRef };
   })();
 
   if (result.ok) registerSecretForRedaction(result.key);
@@ -310,7 +208,7 @@ export async function resolveVyceKeyFallback(): Promise<VyceFallback> {
   return result;
 }
 
-/** Resolution order: vault ("vyce"/"api") → Supabase edge-secret → null. */
+/** Resolution order: vault ("vyce"/"api") → Supabase edge-relay → null. */
 export async function resolveVyceCredentials(): Promise<VyceCredentials | null> {
   void refreshRedactionList(); // fire-and-forget, TTL-throttled
 
@@ -327,14 +225,14 @@ export async function resolveVyceCredentials(): Promise<VyceCredentials | null> 
 
   const fb = await resolveVyceKeyFallback();
   if (fb.ok) {
-    return { key: fb.key, baseUrl: fb.baseUrl ?? envVyceBaseUrl() ?? DEFAULT_VYCE_BASE_URL, source: "supabase-edge-secret" };
+    return { key: fb.key, baseUrl: fb.baseUrl ?? envVyceBaseUrl() ?? DEFAULT_VYCE_BASE_URL, source: "supabase-edge-relay" };
   }
   return null;
 }
 
 // ---------------------------------------------------------------------------
 // Groq provider slot (task 13-b) — key chain mirrors the Vyce one exactly:
-// vault ("groq"/"api-key") → Supabase Edge-Function secret GROQ_API_KEY → null.
+// vault ("groq"/"api-key") → Supabase edge-relay (nexus-relay) → null.
 // Own TTL cache — no cross-contamination with the Vyce fallback cache.
 // ---------------------------------------------------------------------------
 
@@ -342,103 +240,29 @@ export type BrainProvider = "vyce" | "groq";
 
 export type GroqCredentials = {
   key: string;
-  baseUrl: string; // fixed DEFAULT_GROQ_BASE_URL — no override surface by design
-  source: "vault" | "supabase-edge-secret";
+  baseUrl: string; // fixed relay base (or DEFAULT_GROQ_BASE_URL for vault) — no override surface
+  source: "vault" | "supabase-edge-relay";
 };
 
 /**
- * Groq Supabase Edge-Function secret fallback: the owner stored GROQ_API_KEY
- * as an Edge Function secret. SAME Mgmt-API mechanism as the Vyce fallback
- * (shared readEdgeSecretValues helper), but a SEPARATE cache so the two
+ * Groq Supabase edge-relay fallback (task 17-b): same relay mechanism as the
+ * Vyce fallback (shared getRelayCredentials), but a SEPARATE cache so the two
  * providers' cached credentials never cross-contaminate. Values NEVER leave
  * this function except through the return value, handled per the hygiene rules.
- *
- * Task 16-a: same deterministic treatment as the Vyce resolver — candidates
- * from all scanned projects, probe-to-resolve ONLY when more than one distinct
- * value exists (a probe failure here must NEVER fail resolution: Groq can be
- * WAF/403 direct from the sandbox); the deterministic order decides otherwise.
  */
 export type GroqFallback = { ok: true; key: string; projectRef: string | null } | { ok: false; reason: string };
 
-const GROQ_FALLBACK_NOT_FOUND = "GROQ_API_KEY not found among Edge Function secrets";
 let groqFallbackCache: { at: number; result: GroqFallback } | null = null;
 const GROQ_FALLBACK_TTL = 60_000;
-
-/**
- * Direct Groq /models probe for candidate selection only. true = key
- * authenticates, false = key actively rejected (HTTP 401), null = unverifiable
- * (WAF/403, rate limit, network — Groq is often unreachable direct from the
- * sandbox). Never throws; a null verdict is never a resolution failure.
- */
-async function probeGroqDirect(apiKey: string): Promise<boolean | null> {
-  try {
-    const res = await fetch(`${DEFAULT_GROQ_BASE_URL}/models`, {
-      method: "GET",
-      headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" },
-      cache: "no-store",
-      signal: AbortSignal.timeout(GROQ_TIMEOUT_MS),
-    });
-    if (res.status === 401) return false;
-    if (res.ok) {
-      const text = await res.text().catch(() => "");
-      return parseGroqModelsPayload(text) !== null;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
 
 export async function resolveGroqKeyFallback(): Promise<GroqFallback> {
   const now = Date.now();
   if (groqFallbackCache && now - groqFallbackCache.at < GROQ_FALLBACK_TTL) return groqFallbackCache.result;
 
   const result = await (async (): Promise<GroqFallback> => {
-    const pat = await getMgmtPat();
-    if (!pat) {
-      return { ok: false, reason: "supabase PAT not stored — connect the Supabase connector first" };
-    }
-    registerSecretForRedaction(pat);
-
-    const projects = await mgmtListProjects(pat);
-    if (!projects.ok) {
-      return {
-        ok: false,
-        reason:
-          projects.status === 401 || projects.status === 403
-            ? "supabase PAT rejected by the Mgmt API"
-            : "supabase Mgmt API unreachable from sandbox",
-      };
-    }
-    if (projects.projects.length === 0) return { ok: false, reason: "no accessible supabase projects" };
-
-    // Task 16-a: candidates from ALL scanned projects, deterministic order —
-    // same shape as the Vyce resolver.
-    type GroqCandidate = { key: string; projectRef: string };
-    const candidates: GroqCandidate[] = [];
-    for (const project of deterministicProjectOrder(projects.projects.slice(0, 5))) {
-      const found = await readEdgeSecretValues(pat, project.ref, ["GROQ_API_KEY"]);
-      if (found === null) continue; // project unreachable — try the next
-      const key = found.get("GROQ_API_KEY");
-      if (key && key.length >= 8) candidates.push({ key, projectRef: project.ref });
-    }
-    if (candidates.length === 0) return { ok: false, reason: GROQ_FALLBACK_NOT_FOUND };
-
-    const toResult = (c: GroqCandidate): GroqFallback => ({ ok: true, key: c.key, projectRef: c.projectRef });
-
-    // Exactly one candidate value: no probe here — the slot status probe covers
-    // it (no double-hit per poll; the 60s TTL cache holds).
-    if (new Set(candidates.map((c) => c.key)).size === 1) return toResult(candidates[0]!);
-
-    // Multiple distinct candidates: probe in deterministic order (harness →
-    // gspp → others). A probe verdict of false (rejected) or null (unverifiable
-    // — WAF/403 direct) is skipped, never a resolution failure; if nothing
-    // authenticates, the deterministic-first candidate wins and the slot
-    // status surfaces whatever the live probe measures.
-    for (const c of candidates) {
-      if ((await probeGroqDirect(c.key)) === true) return toResult(c);
-    }
-    return toResult(candidates[0]!);
+    const relay = await getRelayCredentials();
+    if (!relay.ok) return { ok: false, reason: relay.reason };
+    return { ok: true, key: relay.relaySecret, projectRef: relay.projectRef };
   })();
 
   if (result.ok) registerSecretForRedaction(result.key);
@@ -446,7 +270,7 @@ export async function resolveGroqKeyFallback(): Promise<GroqFallback> {
   return result;
 }
 
-/** Resolution order: vault ("groq"/"api-key") → Supabase edge-secret → null. */
+/** Resolution order: vault ("groq"/"api-key") → Supabase edge-relay → null. */
 export async function resolveGroqCredentials(): Promise<GroqCredentials | null> {
   void refreshRedactionList(); // fire-and-forget, TTL-throttled
 
@@ -457,7 +281,7 @@ export async function resolveGroqCredentials(): Promise<GroqCredentials | null> 
   }
 
   const fb = await resolveGroqKeyFallback();
-  if (fb.ok) return { key: fb.key, baseUrl: DEFAULT_GROQ_BASE_URL, source: "supabase-edge-secret" };
+  if (fb.ok) return { key: fb.key, baseUrl: relayGroqBaseUrl(), source: "supabase-edge-relay" };
   return null;
 }
 
@@ -726,7 +550,7 @@ type BrainUsageTap = {
   tokens?: { prompt: number | null; completion: number | null } | null;
   error?: string; // static code only
   /** vyce rows carry the credential source; groq rows carry "groq" (provider). */
-  source?: "vault" | "supabase-edge-secret" | "groq";
+  source?: "vault" | "supabase-edge-relay" | "groq";
   role?: BrainRole | null;
   streamed?: boolean;
   /** Static egress mode actually used for the transport attempt. */
@@ -783,8 +607,8 @@ export type ChatCompleteOpts = {
   /**
    * Provider slot for this call — default "vyce" preserves the pre-existing
    * behavior exactly. provider:"groq" resolves the Groq key chain (vault
-   * "groq"/"api-key" → Supabase GROQ_API_KEY edge-secret → NO_KEY), routes via
-   * the egress.routing key "groq", and tags UsageEvent meta source "groq".
+   * "groq"/"api-key" → Supabase edge-relay via nexus-relay → NO_KEY), routes
+   * via the egress.routing key "groq", and tags UsageEvent meta source "groq".
    * Roles are Vyce-registry-only — pass explicit model ids for Groq.
    */
   provider?: BrainProvider;
@@ -897,8 +721,8 @@ export async function chatComplete(
     throw new BrainError(
       "NO_KEY",
       provider === "groq"
-        ? "no Groq key available — vault empty and Supabase edge-secret fallback unavailable"
-        : "no Vyce key available — vault empty and Supabase edge-secret fallback unavailable",
+        ? "no Groq key available — vault empty and Supabase edge-relay fallback unavailable"
+        : "no Vyce key available — vault empty and Supabase edge-relay fallback unavailable",
     );
   }
   if (!Array.isArray(messages) || messages.length === 0) {
@@ -907,7 +731,7 @@ export async function chatComplete(
 
   const timeoutMs = opts.timeoutMs ?? DEFAULT_CHAT_TIMEOUT_MS;
   // UsageEvent meta source: groq rows carry the PROVIDER marker ("groq"); vyce
-  // rows keep the credential source ("vault" | "supabase-edge-secret").
+  // rows keep the credential source ("vault" | "supabase-edge-relay").
   const tapSource: BrainUsageTap["source"] = provider === "groq" ? "groq" : creds.source;
 
   // EGRESS ROUTING (task 13-b): resolved once per call. "direct" keeps the
@@ -1049,8 +873,8 @@ export async function* streamComplete(
     throw new BrainError(
       "NO_KEY",
       provider === "groq"
-        ? "no Groq key available — vault empty and Supabase edge-secret fallback unavailable"
-        : "no Vyce key available — vault empty and Supabase edge-secret fallback unavailable",
+        ? "no Groq key available — vault empty and Supabase edge-relay fallback unavailable"
+        : "no Vyce key available — vault empty and Supabase edge-relay fallback unavailable",
     );
   }
   if (!Array.isArray(messages) || messages.length === 0) {
@@ -1207,7 +1031,7 @@ export async function getGroqModelCatalog(): Promise<GroqModelCatalog> {
         checkedAt: null,
         error: {
           code: "NO_KEY",
-          message: "no Groq key available — vault empty and Supabase edge-secret fallback unavailable",
+          message: "no Groq key available — vault empty and Supabase edge-relay fallback unavailable",
         },
       };
     }
@@ -1263,8 +1087,8 @@ export async function getGroqModelCatalog(): Promise<GroqModelCatalog> {
 // ---------------------------------------------------------------------------
 
 export type GroqSlotStatus = {
-  configured: boolean; // key resolvable from vault or EF fallback
-  keySource: "vault" | "supabase-edge-secret" | null;
+  configured: boolean; // key resolvable from vault or the edge-relay fallback
+  keySource: "vault" | "supabase-edge-relay" | null;
   maskedKey: string | null; // masked preview (••••tail) only — vault-sourced
   modelCount: number | null; // live count only when actually measured
   models: string[]; // live list when measured, else the labeled static fallback
@@ -1304,7 +1128,7 @@ export async function getGroqSlotStatus(): Promise<GroqSlotStatus> {
       probedAt: null,
       error: {
         code: "NO_KEY",
-        message: "no Groq key available — vault empty and Supabase edge-secret fallback unavailable",
+        message: "no Groq key available — vault empty and Supabase edge-relay fallback unavailable",
       },
     };
   }

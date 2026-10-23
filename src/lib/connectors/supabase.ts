@@ -248,7 +248,12 @@ export async function mgmtListSecrets(
   return { ...res, secrets };
 }
 
-/** POST /v1/projects/{ref}/secrets — body [{key, value}] (Mgmt API contract). */
+/**
+ * POST /v1/projects/{ref}/secrets — upsert secret values.
+ * [MEASURED R17] the API expects rows as {name, value} — sending {key, value}
+ * answers 400 "0.name: Invalid input". Callers may still pass {key} — it is
+ * mapped to the wire shape here so every consumer stays correct.
+ */
 export async function mgmtUpsertSecrets(
   pat: string,
   ref: string,
@@ -256,7 +261,7 @@ export async function mgmtUpsertSecrets(
 ): Promise<MgmtResult> {
   return mgmtRequest(pat, `/v1/projects/${encodeURIComponent(ref)}/secrets`, {
     method: "POST",
-    body: items.map((i) => ({ key: i.key, value: i.value })),
+    body: items.map((i) => ({ name: i.key, value: i.value })),
   });
 }
 

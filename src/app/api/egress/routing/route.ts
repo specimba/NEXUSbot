@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth";
 import { clientKey, rateLimit } from "@/lib/guard";
 import {
+  EGRESS_CUSTOM_PROVIDERS_KEY,
   EGRESS_PROBE_TARGETS,
   EGRESS_ROUTING_KEY,
   readRoutingMap,
@@ -18,8 +19,9 @@ export const dynamic = "force-dynamic";
  * src/lib/egress.ts consumes via readRoutingMap()/routeFor(). Per-upstream
  * decisions DEFAULT to "direct" (the sandbox egress IP); "proxy" sends an
  * upstream through the owner's paid Webshare pool. Only the whitelisted probe
- * targets (Object.keys(EGRESS_PROBE_TARGETS) = groq, vyce, generic-echo) plus
- * the literal "default" fallback key are settable — everything else is refused.
+ * targets (Object.keys(EGRESS_PROBE_TARGETS) = groq, vyce, generic-echo), the
+ * R17 "custom-providers" section key, plus the literal "default" fallback key
+ * are settable — everything else is refused.
  *
  * Contracts:
  *   GET  → { ok:true, routing: Record<string,"direct"|"proxy">, targets: string[] }
@@ -36,9 +38,10 @@ export const dynamic = "force-dynamic";
  * probe/use time, not here).
  */
 
-/** Whitelist: probe targets + the "default" fallback key. */
+/** Whitelist: probe targets + the custom-providers section key + the "default" fallback key. */
 const SETTABLE_UPSTREAMS: ReadonlySet<string> = new Set([
   ...Object.keys(EGRESS_PROBE_TARGETS),
+  EGRESS_CUSTOM_PROVIDERS_KEY,
   "default",
 ]);
 
@@ -64,7 +67,7 @@ export async function GET(req: Request) {
   return NextResponse.json({
     ok: true,
     routing,
-    targets: Object.keys(EGRESS_PROBE_TARGETS),
+    targets: [...Object.keys(EGRESS_PROBE_TARGETS), EGRESS_CUSTOM_PROVIDERS_KEY],
   });
 }
 

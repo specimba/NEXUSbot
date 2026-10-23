@@ -96,6 +96,16 @@ export type EgressClassification =
   | "PROXY_POOL_FAILED";
 
 export const EGRESS_ROUTING_KEY = "egress.routing";
+/**
+ * R17 — dedicated routing key for the custom AI providers section (probe +
+ * non-streaming chat). Falls back to map.default when unset, so behavior is
+ * unchanged for owners who never touch it. [MEASURED R17] aihubmix.com answers
+ * direct from the sandbox (200, 1.1s) while the SAME request through the
+ * Webshare pool fails at the transport layer (UPSTREAM_BAD_RESPONSE) — a
+ * dedicated key lets the owner route custom providers direct while Groq stays
+ * proxied via "default".
+ */
+export const EGRESS_CUSTOM_PROVIDERS_KEY = "custom-providers";
 
 /** Probe targets (task contract whitelist). `kind:"country"` parses Cloudflare trace loc= ONLY. */
 export const EGRESS_PROBE_TARGETS = {

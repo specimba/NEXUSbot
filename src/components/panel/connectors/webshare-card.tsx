@@ -74,10 +74,11 @@ const EGRESS_LABELS: Record<string, string> = {
   groq: "Groq API",
   vyce: "Vyce API",
   "generic-echo": "Generic egress",
+  "custom-providers": "Custom providers",
   default: "Default",
 };
 
-const EGRESS_FALLBACK_ROWS: readonly string[] = ["groq", "vyce", "generic-echo"];
+const EGRESS_FALLBACK_ROWS: readonly string[] = ["groq", "vyce", "generic-echo", "custom-providers"];
 
 /** Honest badge colors — token classes only, never a fabricated success. */
 function egressBadgeCls(side: EgressProbeSide): string {
