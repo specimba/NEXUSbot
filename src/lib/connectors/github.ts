@@ -378,6 +378,40 @@ export function deleteDeviceFlowSession(flowId: string): void {
 }
 
 // ---------------------------------------------------------------------------
+// Terminal-flow tombstones (Round-9 fix, re-applied in R11 restore).
+// Once a flow reaches a terminal state we remember it briefly so a replayed
+// GET ?flow=… returns the SAME terminal status instead of a 404 FLOW_NOT_FOUND
+// (which the panel surfaced as a false "device flow interrupted" toast when
+// panel invalidation raced the final poll). Bounded, TTL'd, swept lazily.
+// ---------------------------------------------------------------------------
+
+const TOMBSTONE_TTL_MS = 5 * 60 * 1000;
+const TOMBSTONE_MAX = 50;
+const completedFlows = new Map<string, { status: string; ts: number }>();
+
+function sweepCompletedFlows(now = Date.now()): void {
+  if (completedFlows.size === 0) return;
+  for (const [k, v] of completedFlows) {
+    if (now - v.ts > TOMBSTONE_TTL_MS) completedFlows.delete(k);
+  }
+}
+
+export function rememberTerminalFlow(flowId: string, status: string): void {
+  sweepCompletedFlows();
+  completedFlows.set(flowId, { status, ts: Date.now() });
+  while (completedFlows.size > TOMBSTONE_MAX) {
+    const oldest = completedFlows.keys().next().value;
+    if (oldest === undefined) break;
+    completedFlows.delete(oldest);
+  }
+}
+
+export function getTerminalFlow(flowId: string): string | null {
+  sweepCompletedFlows();
+  return completedFlows.get(flowId)?.status ?? null;
+}
+
+// ---------------------------------------------------------------------------
 // L0 event tap — connector lifecycle lands in the stream (best-effort; the
 // panel Stream tab then shows real connector state, not a mock).
 // ---------------------------------------------------------------------------

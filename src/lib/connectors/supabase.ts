@@ -131,6 +131,8 @@ async function mgmtRequest(
       },
       body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
       cache: "no-store",
+      // Round-9 hardening (re-applied R11): never hang the panel on the Mgmt API.
+      signal: AbortSignal.timeout(8_000),
     });
   } catch {
     return { status: 0, ok: false, retryAfterSeconds: null, data: null };
@@ -194,12 +196,18 @@ export async function mgmtListProjects(pat: string): Promise<MgmtResult & { proj
 
 export type MgmtHealthReport = { service: string; healthy: boolean; status: string | null };
 
-/** GET /v1/projects/{ref}/health — per-project MEASURED health reports. */
+/** GET /v1/projects/{ref}/health — per-project MEASURED health reports.
+ * R11 re-applied Round-9 fix: the endpoint REQUIRES the `services` query param —
+ * without it the Management API answers 400 (MEASURED 2026-10-22). */
 export async function mgmtProjectHealth(
   pat: string,
   ref: string,
 ): Promise<MgmtResult & { reports: MgmtHealthReport[] }> {
-  const res = await mgmtRequest(pat, `/v1/projects/${encodeURIComponent(ref)}/health`);
+  const services = "auth,db,pooler,rest,storage,realtime";
+  const res = await mgmtRequest(
+    pat,
+    `/v1/projects/${encodeURIComponent(ref)}/health?services=${services}`,
+  );
   let reports: MgmtHealthReport[] = [];
   if (res.ok && Array.isArray(res.data)) {
     reports = res.data.map((raw) => {

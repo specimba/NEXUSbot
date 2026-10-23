@@ -96,13 +96,17 @@ export function GitHubCard() {
     } else {
       toast({ title: "GitHub connection failed", description: reason ?? "Token exchange failed.", variant: "destructive" });
     }
-    void queryClient.invalidateQueries({ queryKey: ["connectors", "github"] });
+    void queryClient.invalidateQueries({ queryKey: ["connectors", "github"], exact: true });
   }, [toast, queryClient]);
 
   const [deviceOpen, setDeviceOpen] = useState(false);
   const [flow, setFlow] = useState<NonNullable<DeviceFlowStartResp["flow"]> | null>(null);
   const [patValue, setPatValue] = useState("");
   const [patRefused, setPatRefused] = useState(false);
+  // Round-9 fix: once a terminal poll status is observed, later 404s caused by
+  // invalidation races are suppressed client-side (the server also replays
+  // terminal flows via tombstones instead of answering 404).
+  const terminalSeenRef = useRef(false);
 
   const startDevice = useMutation({
     mutationFn: async (): Promise<DeviceFlowStartResp> => {
@@ -111,6 +115,7 @@ export function GitHubCard() {
     },
     onSuccess: (data) => {
       if (data.ok && data.flow) {
+        terminalSeenRef.current = false;
         setFlow(data.flow);
       } else {
         toast({ title: "Device flow unavailable", description: data.error?.message ?? "Not configured.", variant: "destructive" });
@@ -130,14 +135,17 @@ export function GitHubCard() {
       // Terminal states are handled at the fetch boundary (not in an effect)
       // so polling stops cleanly and the dialog closes on success.
       if (data.status === "connected") {
-        void queryClient.invalidateQueries({ queryKey: ["connectors", "github"] });
+        terminalSeenRef.current = true;
+        void queryClient.invalidateQueries({ queryKey: ["connectors", "github"], exact: true });
         toast({ title: "GitHub connected", description: "Access token stored in the encrypted vault." });
         setDeviceOpen(false);
         setFlow(null);
       } else if (data.status === "expired") {
+        terminalSeenRef.current = true;
         toast({ title: "Device code expired", description: "Start the device flow again.", variant: "destructive" });
         setFlow(null);
       } else if (data.status === "denied") {
+        terminalSeenRef.current = true;
         toast({ title: "Device authorization denied", variant: "destructive" });
         setFlow(null);
       }
@@ -156,7 +164,7 @@ export function GitHubCard() {
       return res.json();
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["connectors", "github"] });
+      void queryClient.invalidateQueries({ queryKey: ["connectors", "github"], exact: true });
       toast({ title: "GitHub disconnected", description: "Vault credential deleted." });
     },
     onError: (e: Error) =>

@@ -3,10 +3,12 @@ import { requireSession } from "@/lib/auth";
 import {
   deleteDeviceFlowSession,
   getDeviceFlowSession,
+  getTerminalFlow,
   githubAppConfig,
   looksLikeGitHubPat,
   pollDeviceFlow,
   putDeviceFlowSession,
+  rememberTerminalFlow,
   startDeviceFlow,
 } from "@/lib/connectors/github";
 
@@ -91,6 +93,13 @@ export async function GET(req: Request) {
   const flowId = new URL(req.url).searchParams.get("flow") ?? "";
   const session = getDeviceFlowSession(flowId);
   if (!session) {
+    // Round-9 tombstone replay: a terminal flow must answer with its terminal
+    // status, never a 404 — the panel invalidation can legitimately refetch
+    // this exact query right after the terminal response (MEASURED race).
+    const replayed = getTerminalFlow(flowId);
+    if (replayed) {
+      return NextResponse.json({ ok: true, status: replayed, replayed: true });
+    }
     return NextResponse.json(
       {
         ok: false,
@@ -102,6 +111,7 @@ export async function GET(req: Request) {
 
   const result = await pollDeviceFlow(session.deviceCode);
   if (result.status === "connected" || result.status === "expired" || result.status === "denied") {
+    rememberTerminalFlow(flowId, result.status);
     deleteDeviceFlowSession(flowId);
   }
 
