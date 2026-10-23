@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth";
+import { clientKey, rateLimit } from "@/lib/guard";
 import {
   deleteDeviceFlowSession,
   getDeviceFlowSession,
   getTerminalFlow,
-  githubAppConfig,
   looksLikeGitHubPat,
   pollDeviceFlow,
   putDeviceFlowSession,
@@ -21,14 +21,64 @@ import {
  *        the device_code SERVER-SIDE; the browser only receives user_code,
  *        verification_uri, interval, expires_in.
  * GET  ?flow=<id> → performs ONE polling round against the token endpoint.
- *        On success the user token is written to the encrypted vault.
+ *        On success the user token is written to the encrypted vault AND
+ *        mirrored to ops/vault/github.token (0600) for snapshot-backup.sh.
  *
  * A8 enforcement: any PAT-shaped value in a body is refused with 403
  * PAT_REFUSED — never parsed, never stored, never echoed.
+ *
+ * Error honesty: a Client ID GitHub refuses (unauthorized_client etc.) is
+ * classified as APP_CREDENTIALS_REJECTED — the operator is told to fix the
+ * stored credentials, not shown a generic failure or a hang.
  */
+
+/** GitHub error codes that mean "the stored App credentials are wrong". */
+const CRED_REJECTION_CODES = new Set([
+  "unauthorized_client",
+  "incorrect_client_credentials",
+  "bad_verification_code",
+  "http_400",
+  "http_401",
+  "http_404", // MEASURED 2026-10-23: unknown client_id on /login/device/code → 404 {"error":"Not Found"}
+  "Not Found",
+]);
+
+function classifyStartError(error: string): { code: string; message: string } {
+  if (error === "http_404" || error === "Not Found") {
+    return {
+      code: "APP_CREDENTIALS_REJECTED",
+      message:
+        "GitHub does not recognize the stored Client ID (404 Not Found) — the OAuth App was deleted or the ID is wrong. Fix it in the GitHub card, then retry.",
+    };
+  }
+  if (CRED_REJECTION_CODES.has(error)) {
+    return {
+      code: "APP_CREDENTIALS_REJECTED",
+      message: `GitHub rejected the stored App credentials (github said: ${error}). Fix the Client ID / Client Secret in the GitHub card, then retry.`,
+    };
+  }
+  if (error === "network") {
+    return {
+      code: "DEVICE_FLOW_FAILED",
+      message: "Could not reach github.com to start the device flow (network error).",
+    };
+  }
+  return {
+    code: "DEVICE_FLOW_FAILED",
+    message: `Device flow could not start (github said: ${error}).`,
+  };
+}
+
 export async function POST(req: Request) {
   const denied = await requireSession();
   if (denied) return denied;
+
+  if (!rateLimit(`github-device-post:${clientKey(req)}`, 10, 60_000)) {
+    return NextResponse.json(
+      { ok: false, error: { code: "RATE_LIMITED", message: "Too many requests — retry in a minute." } },
+      { status: 429 },
+    );
+  }
 
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
   if (body && looksLikeGitHubPat(body.pat ?? body.token)) {
@@ -44,32 +94,10 @@ export async function POST(req: Request) {
     );
   }
 
-  if (!githubAppConfig().configured) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: {
-          code: "NOT_CONFIGURED",
-          message:
-            "GitHub OAuth App is not configured (device flow needs GITHUB_CLIENT_ID in .env).",
-        },
-      },
-      { status: 501 },
-    );
-  }
-
   const start = await startDeviceFlow();
   if (!start.ok) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: {
-          code: "DEVICE_FLOW_FAILED",
-          message: `Device flow could not start (${start.error}).`,
-        },
-      },
-      { status: 502 },
-    );
+    const { code, message } = classifyStartError(start.error);
+    return NextResponse.json({ ok: false, error: { code, message } }, { status: code === "APP_CREDENTIALS_REJECTED" ? 400 : 502 });
   }
 
   const flow = putDeviceFlowSession(start);
@@ -80,13 +108,10 @@ export async function GET(req: Request) {
   const denied = await requireSession();
   if (denied) return denied;
 
-  if (!githubAppConfig().configured) {
+  if (!rateLimit(`github-device-poll:${clientKey(req)}`, 120, 60_000)) {
     return NextResponse.json(
-      {
-        ok: false,
-        error: { code: "NOT_CONFIGURED", message: "GitHub OAuth App is not configured." },
-      },
-      { status: 501 },
+      { ok: false, error: { code: "RATE_LIMITED", message: "Polling too fast — retry shortly." } },
+      { status: 429 },
     );
   }
 
@@ -113,6 +138,11 @@ export async function GET(req: Request) {
   if (result.status === "connected" || result.status === "expired" || result.status === "denied") {
     rememberTerminalFlow(flowId, result.status);
     deleteDeviceFlowSession(flowId);
+  }
+
+  if (result.status === "error") {
+    const { code, message } = classifyStartError(result.error);
+    return NextResponse.json({ ok: true, status: "error", error: { code, message } });
   }
 
   return NextResponse.json({ ok: true, status: result.status });

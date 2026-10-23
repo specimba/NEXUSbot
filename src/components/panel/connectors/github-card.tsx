@@ -33,16 +33,31 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Copy, Fingerprint, Github, KeyRound, Loader2, ShieldAlert, Unplug } from "lucide-react";
+import {
+  Copy,
+  Eye,
+  EyeOff,
+  Fingerprint,
+  Github,
+  KeyRound,
+  Loader2,
+  Save,
+  ShieldAlert,
+  Unplug,
+} from "lucide-react";
 
 type GitHubStatus = {
   ok: boolean;
   appConfigured: boolean;
+  credentialSource: "vault" | "env" | "none";
+  webFlowConfigured: boolean;
+  deviceFlowConfigured: boolean;
   connected: boolean;
   login: string | null;
   probe: { ok: boolean; httpStatus: number } | null;
   scopes: string[];
   callbackUrl: string;
+  tokenMirror: string;
   patPolicy: string;
 };
 
@@ -58,11 +73,24 @@ type DevicePollResp = {
   error?: { code: string; message: string };
 };
 
+/** Honest human text for the callback ?reason= codes (short codes, no secrets). */
+const CALLBACK_REASONS: Record<string, string> = {
+  code_reused_or_invalid:
+    "The GitHub authorization code is single-use and was already consumed (or expired). Press Connect again.",
+  app_credentials_rejected:
+    "GitHub rejected the Client ID / Client Secret — correct them in the GitHub card, then connect again.",
+  redirect_uri_mismatch:
+    "The OAuth App callback URL does not match the panel callback URL shown on the card.",
+  not_configured: "GitHub App credentials are missing on the server.",
+};
+
 /**
- * T-202 — GitHub connector card.
+ * T-202 — GitHub connector card (12-b vault upgrade).
  * A8: the OAuth CONNECT click is always the first path; device flow is the
  * documented fallback; any PAT entry attempt is refused with a visible reason
- * and the value is never transmitted anywhere.
+ * and the value is never transmitted anywhere. App credentials (Client ID +
+ * Client Secret) are entered HERE and stored encrypted in the vault — the old
+ * ".env setup instructions" block is gone.
  */
 export function GitHubCard() {
   const { toast } = useToast();
@@ -94,10 +122,65 @@ export function GitHubCard() {
     } else if (flag === "state_error") {
       toast({ title: "OAuth state check failed", description: "Link expired (>10 min) or replayed — press Connect again.", variant: "destructive" });
     } else {
-      toast({ title: "GitHub connection failed", description: reason ?? "Token exchange failed.", variant: "destructive" });
+      toast({
+        title: "GitHub connection failed",
+        description: (reason && CALLBACK_REASONS[reason]) || reason || "Token exchange failed.",
+        variant: "destructive",
+      });
     }
     void queryClient.invalidateQueries({ queryKey: ["connectors", "github"], exact: true });
   }, [toast, queryClient]);
+
+  // ---- App credentials form (vault-backed, 12-b) ----
+  const [clientId, setClientId] = useState("");
+  const [clientSecret, setClientSecret] = useState("");
+  const [showSecret, setShowSecret] = useState(false);
+
+  const saveApp = useMutation({
+    mutationFn: async (vars: { clientId: string; clientSecret: string }) => {
+      const res = await fetch("/api/github/app", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(vars),
+      });
+      const data = (await res.json().catch(() => null)) as
+        | { ok?: boolean; error?: { code: string; message: string } }
+        | null;
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error?.message ?? "Save failed.");
+      }
+      return data;
+    },
+    onSuccess: () => {
+      setClientId("");
+      setClientSecret("");
+      setShowSecret(false);
+      void queryClient.invalidateQueries({ queryKey: ["connectors", "github"], exact: true });
+      toast({
+        title: "GitHub App credentials saved",
+        description: "Client ID + Secret are encrypted in the vault — never in .env, never echoed.",
+      });
+    },
+    onError: (e: Error) =>
+      toast({ title: "Could not save App credentials", description: e.message, variant: "destructive" }),
+  });
+
+  const removeApp = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/github/app", { method: "DELETE" });
+      const data = (await res.json().catch(() => null)) as
+        | { ok?: boolean; error?: { code: string; message: string } }
+        | null;
+      if (!res.ok || !data?.ok) throw new Error(data?.error?.message ?? "Removal failed.");
+      return data;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["connectors", "github"], exact: true });
+      toast({ title: "GitHub App credentials removed", description: "Both vault rows deleted (idempotent)." });
+    },
+    onError: (e: Error) =>
+      toast({ title: "Removal failed", description: e.message, variant: "destructive" }),
+  });
 
   const [deviceOpen, setDeviceOpen] = useState(false);
   const [flow, setFlow] = useState<NonNullable<DeviceFlowStartResp["flow"]> | null>(null);
@@ -118,7 +201,11 @@ export function GitHubCard() {
         terminalSeenRef.current = false;
         setFlow(data.flow);
       } else {
-        toast({ title: "Device flow unavailable", description: data.error?.message ?? "Not configured.", variant: "destructive" });
+        toast({
+          title: data.error?.code === "APP_CREDENTIALS_REJECTED" ? "App credentials rejected" : "Device flow unavailable",
+          description: data.error?.message ?? "Not configured.",
+          variant: "destructive",
+        });
       }
     },
     onError: (e: Error) =>
@@ -148,12 +235,22 @@ export function GitHubCard() {
         terminalSeenRef.current = true;
         toast({ title: "Device authorization denied", variant: "destructive" });
         setFlow(null);
+      } else if (data.status === "error") {
+        // Honest terminal failure (e.g. GitHub rejected the stored Client ID) —
+        // surface it and STOP polling instead of spinning forever.
+        terminalSeenRef.current = true;
+        toast({
+          title: "Device flow failed",
+          description: data.error?.message ?? "GitHub rejected the request.",
+          variant: "destructive",
+        });
+        setFlow(null);
       }
       return data;
     },
     refetchInterval: (query) => {
       const s = query.state.data?.status;
-      return s === "connected" || s === "expired" || s === "denied" ? false : pollInterval;
+      return s === "connected" || s === "expired" || s === "denied" || s === "error" ? false : pollInterval;
     },
   });
 
@@ -181,6 +278,12 @@ export function GitHubCard() {
       description: "Personal access tokens are permanently refused. Input discarded, nothing was sent.",
       variant: "destructive",
     });
+  };
+
+  const copyCallback = async () => {
+    if (!s?.callbackUrl) return;
+    await navigator.clipboard.writeText(s.callbackUrl);
+    toast({ title: "Callback URL copied" });
   };
 
   const s = status.data;
@@ -215,7 +318,7 @@ export function GitHubCard() {
           )}
         </div>
         <CardDescription>
-          OAuth web-flow first · device flow fallback · PAT permanently refused (directive A8).
+          Vault-backed OAuth App · web-flow first · device flow fallback · PAT permanently refused (directive A8).
         </CardDescription>
       </CardHeader>
 
@@ -230,14 +333,11 @@ export function GitHubCard() {
             GitHub connector status unavailable — retrying automatically.
           </p>
         ) : !s!.appConfigured ? (
-          /* -------- NOT CONFIGURED: honest owner instructions -------- */
-          <div className="space-y-3 rounded-md border border-border/60 p-4">
-            <p className="flex items-center gap-2 text-sm font-medium">
-              <ShieldAlert className="size-4 text-accent" aria-hidden="true" />
-              Owner setup required — OAuth App credentials are not set on the server.
-            </p>
-            <ol className="list-inside list-decimal space-y-2 text-sm text-muted-foreground">
-              <li>
+          /* -------- NOT CONFIGURED: vault App credentials form (12-b) -------- */
+          <div className="space-y-4 rounded-md border border-border/60 p-4">
+            <p className="flex items-start gap-2 text-sm font-medium">
+              <ShieldAlert className="mt-0.5 size-4 shrink-0 text-accent" aria-hidden="true" />
+              <span>
                 Register an OAuth App at{" "}
                 <a
                   className="text-primary underline underline-offset-2"
@@ -246,27 +346,105 @@ export function GitHubCard() {
                   rel="noreferrer"
                 >
                   github.com/settings/developers
-                </a>{" "}
-                (no scope beyond what the panel needs).
-              </li>
-              <li>
-                Callback URL:{" "}
-                <code className="break-all rounded bg-background/60 px-1.5 py-0.5 font-mono text-xs text-foreground">
-                  {s.callbackUrl}
-                </code>
-              </li>
-              <li>
-                Set in <code className="font-mono text-xs text-foreground">.env</code> (names only, values stay
-                server-side):{" "}
-                <code className="font-mono text-xs text-foreground">GITHUB_CLIENT_ID</code>,{" "}
-                <code className="font-mono text-xs text-foreground">GITHUB_CLIENT_SECRET</code>, optional{" "}
-                <code className="font-mono text-xs text-foreground">GITHUB_REDIRECT_URI</code>.
-              </li>
-            </ol>
-            <p className="text-xs text-muted-foreground">
-              The user access token granted by the flow is stored in the encrypted vault — never in{" "}
-              <code className="font-mono">.env</code>, never echoed.
+                </a>
+                . Callback URL:
+              </span>
             </p>
+            <div className="flex items-start gap-2">
+              <code
+                className="min-w-0 flex-1 break-all rounded bg-background/60 px-1.5 py-0.5 font-mono text-xs text-foreground"
+                aria-label="Panel OAuth callback URL"
+              >
+                {s.callbackUrl}
+              </code>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="size-11 shrink-0"
+                aria-label="Copy callback URL to clipboard"
+                onClick={copyCallback}
+              >
+                <Copy className="size-4" aria-hidden="true" />
+              </Button>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              The Client Secret lives encrypted in the vault — never in <code className="font-mono">.env</code>, never
+              echoed.
+            </p>
+
+            <form
+              className="space-y-3"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (clientId.trim().length >= 8 && clientSecret.trim().length >= 16) {
+                  saveApp.mutate({ clientId: clientId.trim(), clientSecret: clientSecret.trim() });
+                }
+              }}
+            >
+              <div className="space-y-1.5">
+                <Label htmlFor="github-app-client-id">Client ID</Label>
+                <Input
+                  id="github-app-client-id"
+                  type="text"
+                  inputMode="text"
+                  autoComplete="off"
+                  spellCheck={false}
+                  className="min-h-11 font-mono"
+                  placeholder="Iv1.… or 20-char hex"
+                  value={clientId}
+                  onChange={(e) => setClientId(e.target.value)}
+                  required
+                  minLength={8}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="github-app-client-secret">Client Secret</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="github-app-client-secret"
+                    type={showSecret ? "text" : "password"}
+                    autoComplete="off"
+                    spellCheck={false}
+                    className="min-h-11 font-mono"
+                    placeholder="paste secret — encrypted on arrival"
+                    value={clientSecret}
+                    onChange={(e) => setClientSecret(e.target.value)}
+                    required
+                    minLength={16}
+                    aria-describedby="github-app-secret-note"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="size-11 shrink-0"
+                    aria-label={showSecret ? "Hide client secret" : "Show client secret"}
+                    aria-pressed={showSecret}
+                    onClick={() => setShowSecret((v) => !v)}
+                  >
+                    {showSecret ? <EyeOff className="size-4" aria-hidden="true" /> : <Eye className="size-4" aria-hidden="true" />}
+                  </Button>
+                </div>
+                <p id="github-app-secret-note" className="text-xs text-muted-foreground">
+                  Stored AES-256-GCM (service github, labels app-client-id / app-client-secret). Shown once here, never
+                  displayed again.
+                </p>
+              </div>
+              <Button
+                type="submit"
+                className="min-h-11 font-mono"
+                disabled={saveApp.isPending || clientId.trim().length < 8 || clientSecret.trim().length < 16}
+              >
+                {saveApp.isPending ? (
+                  <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Save className="size-4" aria-hidden="true" />
+                )}
+                {saveApp.isPending ? "Saving…" : "Save credentials"}
+              </Button>
+            </form>
+
             <PatRefusalForm patValue={patValue} setPatValue={setPatValue} patRefused={patRefused} onSubmit={refusePat} />
           </div>
         ) : !s!.connected ? (
@@ -279,7 +457,7 @@ export function GitHubCard() {
                 aria-label="Connect GitHub via OAuth"
               >
                 <Github className="size-4" aria-hidden="true" />
-                Connect with GitHub (OAuth)
+                Connect with GitHub
               </Button>
 
               <Dialog
@@ -364,11 +542,46 @@ export function GitHubCard() {
                   )}
                 </DialogContent>
               </Dialog>
+
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="min-h-11 font-mono text-destructive hover:text-destructive"
+                    aria-label="Remove stored GitHub App credentials"
+                  >
+                    <Unplug className="size-4" aria-hidden="true" />
+                    Remove credentials
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Remove the GitHub App credentials?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Deletes the Client ID + Client Secret vault rows. The card returns to the credential-entry form
+                      until you paste them again.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel className="min-h-11">Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      className="min-h-11 bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      onClick={() => removeApp.mutate()}
+                    >
+                      Remove
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </div>
 
             <p className="font-mono text-xs text-muted-foreground">
-              scope: <span className="text-foreground">{s.scopes.join(" ")}</span> · token → encrypted vault
-              (service github, label oauth)
+              App credentials:{" "}
+              <span className="text-foreground">
+                {s.credentialSource === "vault" ? "vault (encrypted)" : s.credentialSource}
+              </span>{" "}
+              · scope: <span className="text-foreground">{s.scopes.join(" ")}</span> · token → encrypted vault +{" "}
+              <span className="text-foreground">{s.tokenMirror}</span>
             </p>
 
             <PatRefusalForm patValue={patValue} setPatValue={setPatValue} patRefused={patRefused} onSubmit={refusePat} />
@@ -403,8 +616,9 @@ export function GitHubCard() {
                   <AlertDialogHeader>
                     <AlertDialogTitle>Disconnect GitHub?</AlertDialogTitle>
                     <AlertDialogDescription>
-                      Deletes the OAuth token from the encrypted vault. GitHub-side authorization stays active
-                      until revoked — remove it under github.com/settings/applications.
+                      Deletes the OAuth token from the encrypted vault. The ops/vault/github.token mirror used by the
+                      backup script stays in place. GitHub-side authorization stays active until revoked — remove it
+                      under github.com/settings/applications.
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
@@ -421,7 +635,7 @@ export function GitHubCard() {
             </div>
             <p className="font-mono text-xs text-muted-foreground">
               vault credential: service <span className="text-foreground">github</span> · label{" "}
-              <span className="text-foreground">oauth</span> · value never displayed
+              <span className="text-foreground">user-token</span> · value never displayed
             </p>
           </div>
         )}

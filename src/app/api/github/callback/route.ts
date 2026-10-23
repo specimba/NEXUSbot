@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import {
   consumeOAuthState,
   exchangeCodeForToken,
-  githubAppConfig,
   logGitHubEvent,
   requestOrigin,
+  resolveGitHubAppConfig,
   storeGitHubToken,
 } from "@/lib/connectors/github";
 
@@ -14,10 +14,13 @@ import {
  * SECURITY MODEL: this route intentionally does NOT require a panel session
  * (the browser arrives from github.com). Instead it validates the single-use,
  * 10-minute-TTL OAuth state issued by /api/github/authorize. A state that is
- * missing, unknown, expired, or replayed is refused.
+ * missing, unknown, expired, or replayed is refused. GitHub error params
+ * (error=access_denied …) are turned into an honest redirect-back summary.
  *
- * Outcomes redirect to "/" with a short flag: github=connected|denied|state_error|error.
- * P7: the code and the token are NEVER logged; error reasons are short codes.
+ * Outcomes redirect to "/" with a short flag: github=connected|denied|state_error|error
+ * plus a short machine reason. P7: the code and the token are NEVER logged;
+ * error reasons are short codes. Duplicate/used codes (GitHub single-use) are
+ * surfaced as code_reused_or_invalid instead of a generic failure.
  */
 export async function GET(req: Request) {
   const q = new URL(req.url).searchParams;
@@ -34,13 +37,15 @@ export async function GET(req: Request) {
   //    claims `error=access_denied`) never reaches app logic.
   const state = q.get("state");
   if (!state) return back("state_error");
-  const entry = consumeOAuthState(state);
+  const entry = await consumeOAuthState(state);
   if (!entry) return back("state_error");
 
-  // 2. A state can only exist if authorize ran; env unset mid-flow is the
-  //    only path here — still reported honestly.
-  if (!githubAppConfig().configured) return back("error", "not_configured");
+  // 2. A state can only exist if authorize ran; credentials removed mid-flow is
+  //    the only path here — still reported honestly.
+  const app = await resolveGitHubAppConfig();
+  if (!app.configured) return back("error", "not_configured");
 
+  // 3. GitHub-reported user denial or upstream error (state was echoed back).
   const oauthError = q.get("error");
   if (oauthError) return back("denied", oauthError);
 
@@ -48,9 +53,21 @@ export async function GET(req: Request) {
   if (!code) return back("state_error");
 
   const exchange = await exchangeCodeForToken({ code, redirectUri: entry.redirectUri });
-  if (!exchange.ok) return back("error", exchange.error);
+  if (!exchange.ok) {
+    // Honest mapping of GitHub's OAuth error codes (values are short codes only).
+    const reason =
+      exchange.error === "bad_verification_code"
+        ? "code_reused_or_invalid" // single-use code replayed/expired — start again
+        : exchange.error === "incorrect_client_credentials" || exchange.error === "unauthorized_client"
+          ? "app_credentials_rejected" // Client ID/Secret wrong — fix in the panel
+          : exchange.error === "redirect_uri_mismatch"
+            ? "redirect_uri_mismatch" // OAuth App callback URL differs from the panel's
+            : exchange.error;
+    await logGitHubEvent("github.connect_failed", { reason, via: "oauth" });
+    return back("error", reason);
+  }
 
-  await storeGitHubToken(exchange.accessToken);
+  await storeGitHubToken(exchange.accessToken); // vault + ops/vault mirror (atomic)
   await logGitHubEvent("github.connected", { via: "oauth" });
 
   return back("connected");

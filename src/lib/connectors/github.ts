@@ -1,9 +1,11 @@
 import { randomBytes } from "node:crypto";
+import { chmod, mkdir, rename, unlink, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { db } from "@/lib/db";
-import { decryptSecret, encryptSecret } from "@/lib/crypto";
+import { decryptSecret, encryptSecret, VaultIntegrityError } from "@/lib/crypto";
 
 /**
- * NEXUS OS — GitHub connector (T-202).
+ * NEXUS OS — GitHub connector (T-202, 12-b vault upgrade).
  *
  * Auth model (directive A8 — binding):
  *   1. OAuth 2.0 web-flow click is ALWAYS the first option:
@@ -13,20 +15,33 @@ import { decryptSecret, encryptSecret } from "@/lib/crypto";
  *   3. PATs are PERMANENTLY REFUSED. Any PAT-looking string submitted to a GitHub
  *      route is rejected with code PAT_REFUSED and never processed or stored.
  *
- * Credential layout in the encrypted vault: service "github", label "oauth",
- * value = the OAuth USER access token. App credentials (GITHUB_CLIENT_ID /
- * GITHUB_CLIENT_SECRET / GITHUB_REDIRECT_URI) are non-user app config and live
- * in .env (optional — absent means an honest "not configured" state).
+ * Credential layout in the encrypted vault (service "github"):
+ *   label "user-token"        — the OAuth USER access token (12-b: renamed from
+ *                               the old "oauth" label; delete-migration covers both)
+ *   label "app-client-id"     — OAuth App Client ID (owner-entered via panel)
+ *   label "app-client-secret" — OAuth App Client Secret (owner-entered via panel)
+ * Env GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET remain a names-only fallback
+ * (absent in this deployment); vault ALWAYS wins when present.
+ *
+ * Durability mirror: on every successful token store, the plaintext token is
+ * ALSO mirrored to ops/vault/github.token (0600, atomic tmp+rename) so
+ * scripts/snapshot-backup.sh (GIT_ASKPASS) keeps working. The mirror file is
+ * deny-listed from snapshots and .gitignore'd; it is never logged or echoed.
  *
  * P7: this module never logs, echoes, or embeds tokens/codes/secrets. Errors
  * carry short codes only.
  */
 
 export const GITHUB_SERVICE = "github" as const;
-export const GITHUB_LABEL = "oauth" as const;
+export const GITHUB_TOKEN_LABEL = "user-token" as const;
+export const GITHUB_LEGACY_TOKEN_LABEL = "oauth" as const; // pre-12-b label, migrated on read
+export const GITHUB_APP_ID_LABEL = "app-client-id" as const;
+export const GITHUB_APP_SECRET_LABEL = "app-client-secret" as const;
 
-export const GITHUB_SCOPES = ["repo", "read:user"] as const;
+/** Minimum viable scopes: identity probe + pushing the sanitized durability backup. */
+export const GITHUB_SCOPES = ["read:user", "public_repo"] as const;
 export const OAUTH_STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes, single-use
+export const OAUTH_STATE_KEY = "github:oauth:state"; // Setting KV row
 export const DEVICE_FLOW_TTL_MS = 15 * 60 * 1000;
 
 export const AUTHORIZE_URL = "https://github.com/login/oauth/authorize";
@@ -35,13 +50,53 @@ export const DEVICE_CODE_URL = "https://github.com/login/device/code";
 const API_USER_URL = "https://api.github.com/user";
 const USER_AGENT = "NEXUS-OS-panel (T-202)";
 
-export type GitHubAppConfig = { clientId: string | null; configured: boolean };
+// ---------------------------------------------------------------------------
+// App credential resolution — VAULT FIRST, env fallback (names-only).
+// ---------------------------------------------------------------------------
 
-/** App creds come from env; absent env = honest not-configured, never a stub. */
-export function githubAppConfig(): GitHubAppConfig {
-  const clientId = process.env.GITHUB_CLIENT_ID?.trim() || null;
-  const clientSecret = process.env.GITHUB_CLIENT_SECRET?.trim() || null;
-  return { clientId, configured: Boolean(clientId && clientSecret) };
+export type GitHubAppConfig = {
+  clientId: string | null;
+  clientSecret: string | null;
+  configured: boolean; // clientId + clientSecret both resolvable (web flow ready)
+  source: "vault" | "env" | "none";
+};
+
+async function readVaultCredential(label: string): Promise<string | null> {
+  const row = await db.credential.findUnique({
+    where: { service_label: { service: GITHUB_SERVICE, label } },
+  });
+  if (!row) return null;
+  try {
+    return decryptSecret(row.cipher);
+  } catch (e) {
+    if (!(e instanceof VaultIntegrityError)) throw e;
+    return null; // integrity failure — treat as absent; status reports honestly
+  }
+}
+
+/**
+ * Resolve the OAuth App credentials. Vault rows win; .env is the documented
+ * fallback (values absent in this deployment — the vault is the canonical store).
+ */
+export async function resolveGitHubAppConfig(): Promise<GitHubAppConfig> {
+  let clientId = await readVaultCredential(GITHUB_APP_ID_LABEL);
+  let clientSecret = await readVaultCredential(GITHUB_APP_SECRET_LABEL);
+  let source: GitHubAppConfig["source"] = clientId || clientSecret ? "vault" : "none";
+
+  if (!clientId || !clientSecret) {
+    const envId = process.env.GITHUB_CLIENT_ID?.trim() || null;
+    const envSecret = process.env.GITHUB_CLIENT_SECRET?.trim() || null;
+    if (envId && !clientId) clientId = envId;
+    if (envSecret && !clientSecret) clientSecret = envSecret;
+    if ((envId || envSecret) && source === "none") source = "env";
+  }
+
+  return {
+    clientId,
+    clientSecret,
+    configured: Boolean(clientId && clientSecret),
+    source: clientId || clientSecret ? source : "none",
+  };
 }
 
 /** Origin of the incoming request (gateway-aware via x-forwarded-*). */
@@ -64,39 +119,39 @@ export function buildRedirectUri(req: Request): string {
 }
 
 // ---------------------------------------------------------------------------
-// OAuth state store — in-memory Map (single-process dev scale), 10-min TTL,
-// single-use consume. Survives nothing (documented limitation).
+// OAuth state store — DB-backed Setting KV (survives dev-server code reloads,
+// which an in-memory Map does NOT — measured source of stale "state_error"
+// callbacks). 10-min TTL, single-use consume, one live state (single operator).
 // ---------------------------------------------------------------------------
 
 type OAuthStateEntry = { redirectUri: string; createdAt: number };
-const oauthStates = new Map<string, OAuthStateEntry>();
 
-function pruneOAuthStates(now = Date.now()): void {
-  for (const [k, v] of oauthStates) {
-    if (now - v.createdAt > OAUTH_STATE_TTL_MS) oauthStates.delete(k);
-  }
-}
-
-export function createOAuthState(redirectUri: string): string {
-  pruneOAuthStates();
+export async function createOAuthState(redirectUri: string): Promise<string> {
   const state = randomBytes(24).toString("base64url");
-  oauthStates.set(state, { redirectUri, createdAt: Date.now() });
+  const entry: OAuthStateEntry = { redirectUri, createdAt: Date.now() };
+  await db.setting.upsert({
+    where: { key: OAUTH_STATE_KEY },
+    create: { key: OAUTH_STATE_KEY, value: JSON.stringify({ state, ...entry }) },
+    update: { value: JSON.stringify({ state, ...entry }) },
+  });
   return state;
 }
 
-/** Single-use: a valid state is deleted on first read. */
-export function consumeOAuthState(state: string): OAuthStateEntry | null {
-  pruneOAuthStates();
-  const entry = oauthStates.get(state);
-  if (!entry) return null;
-  oauthStates.delete(state);
-  if (Date.now() - entry.createdAt > OAUTH_STATE_TTL_MS) return null;
-  return entry;
-}
-
-export function oauthStateCount(): number {
-  pruneOAuthStates();
-  return oauthStates.size;
+/** Single-use: the KV row is deleted on first read, even if validation then fails. */
+export async function consumeOAuthState(state: string): Promise<OAuthStateEntry | null> {
+  const row = await db.setting.findUnique({ where: { key: OAUTH_STATE_KEY } });
+  if (!row) return null;
+  await db.setting.deleteMany({ where: { key: OAUTH_STATE_KEY } }); // single-use either way
+  let parsed: (OAuthStateEntry & { state?: unknown }) | null = null;
+  try {
+    parsed = JSON.parse(row.value) as (OAuthStateEntry & { state?: unknown }) | null;
+  } catch {
+    return null;
+  }
+  if (!parsed || parsed.state !== state) return null;
+  if (typeof parsed.createdAt !== "number" || typeof parsed.redirectUri !== "string") return null;
+  if (Date.now() - parsed.createdAt > OAUTH_STATE_TTL_MS) return null;
+  return { redirectUri: parsed.redirectUri, createdAt: parsed.createdAt };
 }
 
 // ---------------------------------------------------------------------------
@@ -119,33 +174,80 @@ export function looksLikeGitHubPat(value: unknown): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Vault access (service "github", label "oauth") — token never returned to UI.
+// Vault access — user token (service "github", label "user-token").
+// Token never returned to UI; stores are mirrored to ops/vault/github.token.
 // ---------------------------------------------------------------------------
 
-export async function getGitHubToken(): Promise<string | null> {
-  const row = await db.credential.findUnique({
-    where: { service_label: { service: GITHUB_SERVICE, label: GITHUB_LABEL } },
+async function readTokenRow(): Promise<{ cipher: string; label: string } | null> {
+  const current = await db.credential.findUnique({
+    where: { service_label: { service: GITHUB_SERVICE, label: GITHUB_TOKEN_LABEL } },
   });
+  if (current) return { cipher: current.cipher, label: GITHUB_TOKEN_LABEL };
+  const legacy = await db.credential.findUnique({
+    where: { service_label: { service: GITHUB_SERVICE, label: GITHUB_LEGACY_TOKEN_LABEL } },
+  });
+  return legacy ? { cipher: legacy.cipher, label: GITHUB_LEGACY_TOKEN_LABEL } : null;
+}
+
+export async function getGitHubToken(): Promise<string | null> {
+  const row = await readTokenRow();
   if (!row) return null;
   try {
     return decryptSecret(row.cipher);
-  } catch {
+  } catch (e) {
+    if (!(e instanceof VaultIntegrityError)) throw e;
     return null; // integrity failure — treat as absent; route reports honestly
+  }
+}
+
+/** Where the durability mirror lives (scripts/snapshot-backup.sh reads this). */
+export const TOKEN_MIRROR_PATH = "ops/vault/github.token";
+
+/**
+ * Atomic 0600 mirror of the user token for GIT_ASKPASS durability. Creates
+ * ops/vault (0700) as needed; writes tmp + rename so the askpass helper never
+ * observes a half-written file. The token value is NEVER logged here (P7).
+ */
+export async function mirrorTokenForScripts(token: string): Promise<void> {
+  const target = path.resolve(process.cwd(), TOKEN_MIRROR_PATH);
+  const dir = path.dirname(target);
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  const tmp = path.join(dir, `.github.token.${randomBytes(6).toString("hex")}.tmp`);
+  try {
+    await writeFile(tmp, token, { mode: 0o600 });
+    await chmod(tmp, 0o600);
+    await rename(tmp, target); // same-directory rename = atomic on POSIX
+    await chmod(target, 0o600).catch(() => undefined);
+  } catch (e) {
+    await unlink(tmp).catch(() => undefined);
+    throw e;
   }
 }
 
 export async function storeGitHubToken(token: string): Promise<void> {
   const { keyId, cipher } = encryptSecret(token);
   await db.credential.upsert({
-    where: { service_label: { service: GITHUB_SERVICE, label: GITHUB_LABEL } },
-    create: { service: GITHUB_SERVICE, label: GITHUB_LABEL, keyId, cipher },
+    where: { service_label: { service: GITHUB_SERVICE, label: GITHUB_TOKEN_LABEL } },
+    create: { service: GITHUB_SERVICE, label: GITHUB_TOKEN_LABEL, keyId, cipher },
     update: { keyId, cipher },
   });
+  // Clean up the pre-12-b label if a legacy row exists (single source of truth).
+  await db.credential
+    .deleteMany({ where: { service: GITHUB_SERVICE, label: GITHUB_LEGACY_TOKEN_LABEL } })
+    .catch(() => undefined);
+  // Durability mirror is best-effort: a mirror failure must never mask a
+  // successful vault store, but it is observable in the stream (P7: code only).
+  try {
+    await mirrorTokenForScripts(token);
+  } catch (e) {
+    const code = typeof e === "object" && e !== null && "code" in e ? String((e as { code: unknown }).code) : "unknown";
+    await logGitHubEvent("github.token_mirror_failed", { code });
+  }
 }
 
 export async function deleteGitHubToken(): Promise<boolean> {
   const res = await db.credential.deleteMany({
-    where: { service: GITHUB_SERVICE, label: GITHUB_LABEL },
+    where: { service: GITHUB_SERVICE, label: { in: [GITHUB_TOKEN_LABEL, GITHUB_LEGACY_TOKEN_LABEL] } },
   });
   return res.count > 0;
 }
@@ -164,8 +266,10 @@ export async function exchangeCodeForToken(params: {
   code: string;
   redirectUri: string;
 }): Promise<TokenExchangeResult> {
-  const app = githubAppConfig();
-  if (!app.configured || !app.clientId) return { ok: false, error: "not_configured" };
+  const app = await resolveGitHubAppConfig();
+  if (!app.configured || !app.clientId || !app.clientSecret) {
+    return { ok: false, error: "not_configured" };
+  }
 
   let res: Response;
   try {
@@ -178,7 +282,7 @@ export async function exchangeCodeForToken(params: {
       },
       body: JSON.stringify({
         client_id: app.clientId,
-        client_secret: process.env.GITHUB_CLIENT_SECRET ?? "",
+        client_secret: app.clientSecret,
         code: params.code,
         redirect_uri: params.redirectUri,
       }),
@@ -228,8 +332,8 @@ export type DeviceFlowStart =
   | { ok: false; error: string };
 
 export async function startDeviceFlow(): Promise<DeviceFlowStart> {
-  const app = githubAppConfig();
-  if (!app.configured || !app.clientId) return { ok: false, error: "not_configured" };
+  const app = await resolveGitHubAppConfig();
+  if (!app.clientId) return { ok: false, error: "not_configured" };
 
   let res: Response;
   try {
@@ -254,6 +358,7 @@ export async function startDeviceFlow(): Promise<DeviceFlowStart> {
         verification_uri?: unknown;
         interval?: unknown;
         expires_in?: unknown;
+        error?: unknown;
       }
     | null;
   if (
@@ -262,7 +367,12 @@ export async function startDeviceFlow(): Promise<DeviceFlowStart> {
     typeof data?.user_code !== "string" ||
     typeof data?.verification_uri !== "string"
   ) {
-    return { ok: false, error: `http_${res.status}` };
+    // Pass GitHub's own error code through (e.g. unauthorized_client) so the
+    // route can classify it honestly as APP_CREDENTIALS_REJECTED.
+    return {
+      ok: false,
+      error: typeof data?.error === "string" ? data.error : `http_${res.status}`,
+    };
   }
   return {
     ok: true,
@@ -284,8 +394,8 @@ export type DevicePollResult =
 
 /** One polling round against the token endpoint. Stores the vault on success. */
 export async function pollDeviceFlow(deviceCode: string): Promise<DevicePollResult> {
-  const app = githubAppConfig();
-  if (!app.configured || !app.clientId) return { status: "error", error: "not_configured" };
+  const app = await resolveGitHubAppConfig();
+  if (!app.clientId) return { status: "error", error: "not_configured" };
 
   let res: Response;
   try {
@@ -312,7 +422,7 @@ export async function pollDeviceFlow(deviceCode: string): Promise<DevicePollResu
     | null;
 
   if (typeof data?.access_token === "string" && data.access_token.length > 0) {
-    await storeGitHubToken(data.access_token);
+    await storeGitHubToken(data.access_token); // vault + ops/vault mirror (atomic)
     await logGitHubEvent("github.connected", { via: "device-flow" });
     return { status: "connected" };
   }

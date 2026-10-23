@@ -54,3 +54,25 @@ model Setting {
   value     String
   updatedAt DateTime @updatedAt
 }
+
+// Usage ledger (T-207) — counters only, NEVER prompt/response content (P7).
+// kind "image" rows are the ONLY user-facing credit surface (grok-imagine
+// creations, charged per print, not per electricity); kind "llm" rows are
+// internal telemetry (model, latency, tokens-if-reported, ok) and are never
+// surfaced as user-facing cost. meta holds static scalar fields only
+// (httpStatus, error code, role) — redacted via src/lib/ai/client.ts.
+model UsageEvent {
+  id         String   @id @default(cuid())
+  ts         DateTime @default(now())
+  kind       String // "image" | "llm"
+  model      String
+  userHandle String? // @username for IMAGE credits only
+  credits    Float    @default(0)
+  ok         Boolean  @default(true)
+  latencyMs  Int?
+  meta       String   @default("{}")
+  createdAt  DateTime @default(now())
+
+  @@index([ts])
+  @@index([kind, userHandle])
+}
