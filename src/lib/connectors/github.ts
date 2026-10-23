@@ -543,3 +543,5 @@ export async function logGitHubEvent(type: string, payload: Record<string, unkno
     // L0 write is best-effort; never mask the primary result
   }
 }
+
+// 12-b: match-guarded single-use state consume (see consumeOAuthState)

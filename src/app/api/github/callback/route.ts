@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import {
-  consumeOAuthState,
+  consumeOAuthState, // DB-backed Setting KV — match-guarded single-use (12-b)
   exchangeCodeForToken,
   logGitHubEvent,
   requestOrigin,
