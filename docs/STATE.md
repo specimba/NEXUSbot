@@ -1,16 +1,18 @@
 # NEXUS OS — STATE
 
-_Last updated: 2026-10-23 (R15 — iframe-proof panel session + .git diet 255M→880K)_
+_Last updated: 2026-10-23 (R16 — Vyce EF-secret verdict measured + Custom AI providers + durability revived)_
 
 ## Status line
 
 - Dev server: **RUNNING** on :3000 (platform-managed via `.zscripts/dev.sh`) [MEASURED]
 - backup-cadence mini-service: **RUNNING** on :3011, first run `result=ok` [MEASURED]
 - Lint: **CLEAN** · tsc: **CLEAN** · browser golden path: **0 page errors** [MEASURED]
-- Public durability repo: **github.com/specimba/NEXUSbot `main` @ `7dcee0d`** — local `public-snapshot` branch matches the remote byte-for-byte (re-measured anonymously in R15) [MEASURED]
-- Durability: honestly **DOWN** — backup token lost at boot; auto-resumes on GitHub reconnect (no push lost)
+- Public durability repo: **github.com/specimba/NEXUSbot `main` @ `68e6f52`** — R16 proof push, ff-only, divergence pre-check OK [MEASURED]
+- Durability: **REVIVED + LIVE** — 6 h cadence + one-click run; auto-hygiene guards every snapshot (R15/R16)
 - Private `.git`: **880K** (was 255M of platform-sync junk blobs; stripped R15) [MEASURED]
 - Panel session: **iframe-proof** — cookie + `Authorization: Bearer` fallback (R15); owner reported "right pass but cannot move" root-caused and fixed
+- All 5 connectors **CONNECTED** [MEASURED] · durability **REVIVED**: public repo @ `68e6f52` (R16 proof push, ff-only)
+- Brain keys: EF-secret values for VYCE + GROQ both measured **rejected by their upstreams** — owner rotation pending (see ⑪)
 - Panel vault: **EMPTY** (reset wiped all connector credentials — owner must re-enter)
 
 ## ① What happened (R11 incident + recovery)
@@ -175,6 +177,32 @@ _Last updated: 2026-10-23 (R15 — iframe-proof panel session + .git diet 255M�
   first on every run. Workspace downloads shrink accordingly.
 - Panel vault still EMPTY — awaiting the owner's ④ re-entry list (GitHub Client
   ID/Secret first).
+
+## ⑪ Round-16 additions (all [MEASURED])
+
+- **"Why can't the Edge-Function fallback be used properly?" — ANSWERED**: the EF-secret
+  READ path works (value fetched fine, `fallback.available:true`). The **stored value
+  itself** is rejected: VYCE_API_KEY (harness project, 64 chars, no quote/whitespace
+  artifact, no project shadowing) → real `401 invalid_api_key` from vyceai.com.
+  GROQ_API_KEY measures **rejected** too. Also: VYCE_BASE_URL there holds a 64-char
+  hex string, not a URL (harmlessly ignored). **Owner action**: rotate VYCE_API_KEY +
+  GROQ_API_KEY in the harness project's Edge-Function secrets (and remove/fix
+  VYCE_BASE_URL), or paste fresh keys in the panel — the vault becomes primary
+  automatically.
+- **Resolver hardening (16-a)**: values sanitized (trim + one wrapping-quote pair
+  stripped) on EF read AND vault store; deterministic project order (harness → gspp →
+  others) with probe-to-resolve only when candidates differ; status `probeTarget` now
+  always the host actually probed; rejection messages name the exact fix.
+- **Custom AI providers (16-b)**: new always-available Connectors section — any
+  OpenAI-style or Anthropic-style endpoint (name/style/base URL/key/models), keys
+  encrypted in the vault (`provider:<slug>`), typed honest probes (GET /models both
+  styles), non-streaming egress-aware chat (`chatCompleteCustom`, UsageEvent
+  meta.source `custom:<slug>`), streaming honestly deferred. http allowed only for
+  localhost/127.0.0.1 (local runners).
+- **Durability revived [MEASURED]**: GitHub reconnect mirrored the token; one-click
+  run → auto-hygiene (git add refused every ignored dir live) → scan gate →
+  divergence pre-check → **PUSH OK `7dcee0d..68e6f52` fast-forward** → daily tag
+  immutably skipped. Cadence continues on the 6 h timer.
 
 ## Owner comms protocol (standing)
 
