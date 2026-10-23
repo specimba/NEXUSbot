@@ -251,7 +251,7 @@ export function GitHubCard() {
               </li>
               <li>
                 Callback URL:{" "}
-                <code className="rounded bg-background/60 px-1.5 py-0.5 font-mono text-xs text-foreground">
+                <code className="break-all rounded bg-background/60 px-1.5 py-0.5 font-mono text-xs text-foreground">
                   {s.callbackUrl}
                 </code>
               </li>

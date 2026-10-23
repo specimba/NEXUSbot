@@ -98,3 +98,50 @@ Stage Summary:
 - Integration: single fetch-based OpenAI-compatible client, provider registry vyce→https://vyceai.com/v1 / groq→https://api.groq.com/openai/v1, vault-backed keys, model pinning + connect-time GET /v1/models verification (runtime list = source of truth), SSE streaming + strict-JSON zod validation with repair retry, budget counters extended onto the existing /api/settings KV, per-tier fallback chains + circuit breaker (401 never fails over), L0 model_call telemetry. Groq 403 WAF from sandbox must classify as UNREACHABLE_FROM_SANDBOX, not KEY REJECTED.
 - Durability review: design sound; adopt immutable daily snapshot-YYYYMMDD tags, pre-push remote-divergence pre-check, ≥30min push throttle, chain-metadata commit messages, gitleaks second opinion, owner-side branch protection (linear history). Nit reported only: secret-scan.sh pattern key typo [uggingface].
 - Open items for owner: paste Vyce + Groq keys via panel; G6-eval deepseek-v4-flash-lr for ROUTER; decide Webshare-proxy routing for Groq from sandbox; re-measure the three identical-"380ms" models with a real key.
+
+---
+Task ID: 10-c
+Agent: panel-builder (durability tile)
+Task: Surface + control the GitHub snapshot-durability system from the panel — status/run API routes, DurabilityCard, Overview integration.
+
+Work Log:
+- Read worklog/STATE + panel patterns (panel-app/shell/overview, upstash-card, guard, auth, old skeleton-era /api/backup/status device-flow watcher, backup-tile reference).
+- Rewrote GET /api/backup/status (src/app/api/backup/status/route.ts): lean read-only contract {ok, lastResult, lastAt, head, tokenPresent(bool only), remoteConfigured, remote, recentLog≤8}; log scrubbed defensively (/gh[pousr]_|sbp_|sk-/ → "[filtered]"); requireSession + rateLimit 30/min; §11 shape on 401/429/500. Replaced the skeleton-era route (it had run backups as GET side effects).
+- New POST /api/backup/run (src/app/api/backup/run/route.ts): requireSession + rateLimit 1/60s → execFile("bash scripts/snapshot-backup.sh", cwd=project root, timeout 120s); exit mapping 0 ok(+SKIP detect)/1 scan-failed/3 no-token/4 push-failed with honest messages; returns fresh backup-state.json; token never in argv/env/response (script reads ops/vault/github.token via askpass); output tail scrubbed; §11 for 401/429/timeout/spawn-fail.
+- New src/components/panel/durability-card.tsx: states OK (last push ts + head.slice(12) + repo link + Run backup now) / NEVER RUN / FAILED (SCAN_FAILED vs PUSH_FAILED reason) / NO_TOKEN (honest device-flow CTA, no token input) / RUNNING (spinner, controls disabled); TanStack useQuery ["backup","status"] 30s + useMutation invalidateQueries exact:true; sonner toasts (Toaster mounted inside card — layout edits out of scope, noted in file); shadcn primitives, Lucide, token colors only, 44px targets, aria labels + role=status, server-scrubbed log tail in <details>.
+- Wired DurabilityCard into Overview tab (overview.tsx: 1 import + 1 JSX line between stats grid and Recent events).
+- Verification: bun run lint CLEAN (×2, incl. post-fix); curl: unauth 401 ×2, authed status full shape, run → real push bb066f→eb58cb5 (exit 0), 2nd immediate run → 429 RATE_LIMITED; agent-browser (cookie via curl login, password stdin-only, never printed): Overview renders card with real OK data, "Run backup now" clicked → sonner "Snapshot pushed" + card updated to 2026-10-23 05:51 · eb58cb5, NO_TOKEN + FAILED states verified via network-route mocks then unrouted, details opens (8 lines), zero page errors; screenshot agent-ctx/durability-card-r11.png. P7: no token/password value in any output.
+
+Stage Summary:
+- Durability is now owner-visible and owner-controllable from the panel [MEASURED]: status read is side-effect-free; runs are explicit, rate-limited 1/min, and honest (ok/SKIP/scan-failed/no-token/push-failed all surface truthfully).
+- Two real pushes completed through the new route during verification (bb066f44, eb58cb56 → specimba/NEXUSbot main).
+- Deviation: sonner <Toaster/> is mounted inside DurabilityCard (root layout only has the radix Toaster; layout is outside this task's file scope). If sonner is later mounted globally, remove the card-level one.
+- Out of scope / untouched: scripts/**, src/lib/**, connectors, prisma, db, .env, package.json. backup-tile.tsx left as reference (unmounted).
+
+---
+Task ID: 10-a
+Agent: research-agent (Supabase/Upstash)
+Task: Pre-brain deep-dive on Supabase Management API + full Upstash suite; exact endpoints, limits, free-tier impact, integration roadmap. Research only — no source changes.
+Work Log:
+- Read worklog.md (last 150 lines) + docs/STATE.md; noted cold-reset context: all vault credentials lost, owner re-enters via panel.
+- Used scripts/web-search.ts + scripts/read-page.ts (bun) for doc research; fell back to curl for API probes. ~12 doc pages + OpenAPI/pricing pages fetched.
+- [MEASURED] Supabase Mgmt API SQL-over-PAT: POST /v1/projects/{ref}/database/query, body {query, parameters?, read_only?} → 201 rows; Bearer sbp_ PAT; experimental/Beta; read-only variant +/database/query/read-only. Probed live with fake PAT: 401 {"message":"JWT could not be decoded"} on api.supabase.com (query, functions, functions/deploy, database/context, config/auth all auth-gated and live).
+- [MEASURED] Rate limits from docs: 120 req/min per user+project+endpoint; logs/usage 30/min; database/context 10/min.
+- [MEASURED] Edge Functions: POST /v1/projects/{ref}/functions/deploy (multipart file[]+metadata, 201 {slug,status:"ACTIVE",verify_jwt,...}); invoke at https://<ref>.supabase.co/functions/v1/<slug>; probe of unknown slug on harness project → 404 {"code":"NOT_FOUND"}; 402 = plan gate. Free: 500K invocations/mo.
+- [MEASURED] Realtime: POST https://<ref>.supabase.co/realtime/v1/api/broadcast (apikey header, {messages:[{topic,event,payload,private}]}); probes → 401 no-key / 401 Invalid API key; private channels RLS-checked; realtime.send() DB fn; db messages 3-day retention; anon/service_role keys deprecated end-2026 → sb_publishable_/sb_secret_.
+- [MEASURED] OAuth 2.1 Server beta: LIVE discovery doc fetched from harness project openid-configuration → authorize/token/userinfo/jwks endpoints, grants authorization_code+refresh_token, PKCE S256+plain, scopes openid/profile/email/phone/offline_access, algs RS256|HS256|ES256; /auth/v1/health without key → 401 hint. Beta, all plans, counts to MAU (50K free); OIDC ID tokens require asymmetric keys.
+- [MEASURED] Passkeys: PATCH /v1/projects/{ref}/config/auth {passkey_enabled, webauthn_rp_*}; supabase-js ≥2.105.0 experimental opt-in; RP-ID change invalidates all passkeys. Auth Hooks: custom_access_token + before-user-created free; SQL pg-functions:// or HTTP signed v1 payload.
+- [MEASURED] Logs: new GET /v1/projects/{ref}/analytics/endpoints/logs — ClickHouse SQL only, unified logs table + source_name filter + log_attributes map; logs.all removed 2026-09-23 (changelog fetched).
+- [MEASURED] QStash: qstash.upstash.io (+ regional us-east-1/eu-central-1); Bearer QSTASH_TOKEN; /v2/publish|/v2/enqueue|/v2/batch|/v2/schedules (Upstash-Cron)|/v2/dlq|/v2/signing-keys; Upstash-Forward-*/Delay/Retries/Callback/Failure/Deduplication-Id; Upstash-Signature JWT (HMAC-SHA256) verify. Probed with fake token → 401 {"error":"unable to authenticate: invalid token"} (publish, schedules, dlq). Free: 1,000 msgs/day, 1 MB msg, 50 GB bw, 10 schedules, 10 queues, 7d max delay, 3d DLQ/log retention, parallelism 10; 412 oversize; retries billed as messages.
+- [MEASURED] Workflow: @upstash/workflow serve() endpoint + workflow-py; POST /v2/trigger/{workflowUrl} (+Upstash-Workflow-RunId, Not-Before); DLQ restart/resume-from-failed-step; waitForEvent/notify; sleep/sleepUntil/call; requires publicly reachable endpoint.
+- [MEASURED] Vector: POST /upsert {id, vector|data(text auto-embed), metadata, namespace}, /query {vector|data, topK≤1000}; doc error shape {"error":"Unauthorized: Invalid auth token","status":401}. Free: 10K ops/day, 1536 dims, 100 namespaces, 48KB meta/vector, 1GB total, 10 free indexes; regions incl AWS Ireland; SDKs @upstash/vector, upstash-vector. Text-`data` upsert = replaces our missing embeddings endpoint.
+- [MEASURED] Blob: S3-compatible, @upstash/blob Bucket + UPSTASH_BLOB_TOKEN, private buckets + signed URLs, multipart >100MB, any S3 client OK. Free: 1GB, 10K simple ops/mo, 2K advanced ops/mo, 10GB egress; machine pricing /pricing/blob.md.
+- [MEASURED] Box: @upstash/box / upstash-box, UPSTASH_BOX_API_KEY=box_...; Box.create({runtime, keepAlive, initCommand, agent:{model}}); shell exec (10min wait) + SSH <box-id>@us-east-1.box.upstash.com (password=API key, ≤20 SSH keys); filesystem/git/browser(CDP+Playwright)/snapshots/schedules(box.schedule.exec cron+webhook)/network-policy/preview URLs. Machine pricing /pricing/box.md: Free = 10 concurrent boxes, 5 CPU-h/mo, $1 LLM/mo (then 400; BYOK bypass); Small 2vCPU/4GB/10GB = matches NEXUSbotBOX1; auto-pause when idle; keep-alive $8/mo.
+- [INFERRED] Upstash account-level Developer API api.upstash.com/v2 (basic auth) for quota stats; Supabase function-secrets PATCH path; Workflow local-dev tooling.
+- Report written to /tmp/r10-research/10-a-supabase-upstash.md (301 lines): per-capability API surface, limits, NEXUSbot mapping, risk, effort S/M/L, priority P0–P2 + top-10 roadmap.
+- No project source modified; no real credential anywhere (P7); no remote resource created — only unauthenticated/fake-token probes.
+Stage Summary:
+- SQL-over-PAT CONFIRMED usable as brain config-plane with only sbp_ PAT in vault (both project refs live [MEASURED]).
+- Upstash Vector text-embedding-by-server closes the missing-embeddings gap; QStash+Workflow = durable L0 lane + brain runner (needs public URL — tunnel/deploy decision pending).
+- Box free tier matches NEXUSbotBOX1 spec (2vCPU/4GB/10GB) but 5 CPU-h + $1 LLM monthly caps demand tight scheduling + snapshots.
+- Top-10 roadmap ranked: 1 mgmt-SQL client, 2 Vector memory, 3 QStash L0 lane, 4 Workflow RSI loop, 5 schedules, 6 Edge-Fn webhooks, 7 logs observability, 8 Blob artifacts, 9 Box offload, 10 identity layer (Realtime push, passkeys, hooks, OAuth server).

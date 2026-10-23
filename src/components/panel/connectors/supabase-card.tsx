@@ -301,18 +301,22 @@ function HealthSection(props: { health: ReturnType<typeof useQuery<SupabaseHealt
         <p className="text-sm text-destructive" role="alert">
           Health probe route failed — retrying automatically.
         </p>
-      ) : !health.data!.probeOk ? (
-        <p className="rounded-md border border-destructive/50 p-3 text-sm text-destructive" role="alert">
-          Mgmt probe failed — GET /v1/projects → {health.data!.httpStatus || "network error"}
-          {health.data!.note ? ` (${health.data!.note})` : ""}. Check the stored PAT.
-        </p>
-      ) : health.data!.projects.length === 0 ? (
+      ) : !health.data ? (
         <p className="py-2 text-sm text-muted-foreground">
-          Mgmt reachable (HTTP {health.data!.httpStatus}) but no projects are visible to this token.
+          Health probe idle — save a Management API Personal Access Token first.
+        </p>
+      ) : !health.data.probeOk ? (
+        <p className="rounded-md border border-destructive/50 p-3 text-sm text-destructive" role="alert">
+          Mgmt probe failed — GET /v1/projects → {health.data.httpStatus || "network error"}
+          {health.data.note ? ` (${health.data.note})` : ""}. Check the stored PAT.
+        </p>
+      ) : health.data.projects.length === 0 ? (
+        <p className="py-2 text-sm text-muted-foreground">
+          Mgmt reachable (HTTP {health.data.httpStatus}) but no projects are visible to this token.
         </p>
       ) : (
         <ul className="space-y-2">
-          {health.data!.projects.map((p) => {
+          {health.data.projects.map((p) => {
             const healthy = p.health.ok && p.status === "ACTIVE_HEALTHY";
             return (
               <li
