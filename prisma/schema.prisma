@@ -1,0 +1,56 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// L0 event stream — single append-mostly table. One row = one normalized event.
+model Event {
+  id        String   @id @default(cuid())
+  ts        DateTime @default(now())
+  source    String // kick | userscript | agent | system | connector
+  type      String // dot-namespaced, e.g. viewer.join / bot.command / eval.gate
+  level     String   @default("info") // debug | info | warn | error
+  actor     String?
+  payload   String   @default("{}") // JSON string, clamped to 8 KiB at ingest
+  createdAt DateTime @default(now())
+
+  @@index([ts])
+  @@index([source, type])
+}
+
+// Secrets vault — values encrypted by src/lib/crypto.ts (AES-256-GCM, versioned envelope).
+// Plaintext never leaves this table except transiently in-process for use/masking.
+model Credential {
+  id        String   @id @default(cuid())
+  service   String // github | supabase | upstash | hyperbrowser | webshare
+  label     String   @default("default")
+  keyId     String // sha256(keyMaterial) first 8 hex — for rotation windows
+  cipher    String // envelope: v1.<keyId>.<iv>.<tag>.<ct> (base64url parts)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([service, label])
+}
+
+// Ingest tokens for L0 write path (widget / userscript / automations).
+// Only sha256 hashes are stored; the plaintext token is shown ONCE at creation.
+model IngestToken {
+  id         String    @id @default(cuid())
+  label      String
+  tokenHash  String    @unique
+  preview    String // first 8 chars + "…" for UI identification
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+}
+
+// Generic owner-scoped settings (budgets, feature gates). Whitelisted keys only.
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
