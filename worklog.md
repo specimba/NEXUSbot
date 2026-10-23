@@ -145,3 +145,30 @@ Stage Summary:
 - Upstash Vector text-embedding-by-server closes the missing-embeddings gap; QStash+Workflow = durable L0 lane + brain runner (needs public URL — tunnel/deploy decision pending).
 - Box free tier matches NEXUSbotBOX1 spec (2vCPU/4GB/10GB) but 5 CPU-h + $1 LLM monthly caps demand tight scheduling + snapshots.
 - Top-10 roadmap ranked: 1 mgmt-SQL client, 2 Vector memory, 3 QStash L0 lane, 4 Workflow RSI loop, 5 schedules, 6 Edge-Fn webhooks, 7 logs observability, 8 Blob artifacts, 9 Box offload, 10 identity layer (Realtime push, passkeys, hooks, OAuth server).
+
+---
+Task ID: 11-restore (orchestrator)
+Agent: orchestrator (R11 recovery + durability)
+Task: Restore workspace from owner tar after cold reset; solve durability (public git push); re-apply lost Round-9 fixes; run capability deep-dive with experts; verify end-to-end.
+
+Work Log:
+- Audited upload/NEXUSbot2210v2.tar IN PLACE first (gzip, 720 entries, .git inside, .env + db/custom.db present; history audit: both in LOCAL git history → private-only discipline).
+- Found prior-session durability tooling in skeleton: snapshot-backup.sh + secret-scan.sh + ops/vault/github.token (gho_, login specimba, scopes public_repo read:user — validated live). Prior pushes were correctly BLOCKED by the fail-closed scan (NO_TOKEN, then scan hits).
+- Found + fixed REAL leak: docs/runbook.md line 9 contained a literal PANEL_PASSWORD value (7 chars) → scrubbed to placeholder. Scanner refined (literal-RHS-only pattern {6,}, index-guard, tests/ excluded from public set); snapshot script hardened (deny-list: db/ ops/vault/ agent-ctx/ tool-results/ directives/ tests/ *.db *.tar *.log *.png; temp-index defense-in-depth).
+- Untracked secrets from git index (.env, db/custom.db, dev.pid, agent-ctx/, tool-results/) + hardened .gitignore; local hygiene commits only.
+- Overlay-restored tar into workspace (skeleton extras preserved: ops/, backup tile, ensure-dev.sh, research.md); bun install + prisma generate + dev server up.
+- First hardened push SEEDED on owner's remote initial commit (fetch depth=1, read-tree BASE, ff-only) → specimba/NEXUSbot main; owner README/LICENSE restored after first push briefly replaced them (git add -A staged deletion — corrected next commit).
+- Discovered tar predates final R9: vault DB EMPTY + 2 R9 fixes missing → re-applied: (1) Supabase /health services param + 8s timeout; (2) GitHub device-flow tombstones + terminalSeenRef + exact:true invalidations.
+- Fixed NEW bugs: supabase-card HealthSection crash on empty vault (health.data! assertion); connectors.tsx was still the Round-7 placeholder → mounted all five connector cards; mobile 390px horizontal overflow (callback-URL code → break-all).
+- Built mini-services/backup-cadence (port 3011, 6h interval + boot run, min-gap guard, /health, /run) — now platform-managed via dev.sh (standalone background process was reaped by harness; restart through dev.sh fixed it).
+- Dispatched 3 parallel sub-agents: 10-a Supabase/Upstash deep-dive (301-line report), 10-b Vyce/Groq model strategy (vyceai.com OpenAI-compat verified; Groq 403 WAF from sandbox; tier routing $14-16/mo or $0), 10-c durability tile (routes + card, browser-verified, real push eb58cb5).
+- Fixed scanner typo [uggingface] → [huggingface].
+- Browser verification (fresh browser, zero page errors): login → Overview (DurabilityCard OK) → Connectors (all five cards, honest empty states, health idle message) → mobile 390px no h-scroll → footer mt-auto verified. Screenshots: agent-ctx/r11-{connectors-final,mobile-final,desktop-final,mobile-connectors}.png.
+- Final push a00989c (152 files, scan OK). Cadence first run result=ok.
+
+Stage Summary:
+- Workspace fully restored from owner tar + improved (all R9 fixes back, all connector cards mounted, durability UI live).
+- Durability question ANSWERED and SHIPPED: sanitized ff-only snapshot chain → public specimba/NEXUSbot main, fail-closed scan (already caught 1 real credential literal), 6h cadence + panel button, token via askpass only, local secret history never pushed.
+- Vault is EMPTY by design of the backup — owner must re-enter the 5 connector credentials (STATE ③/⑥).
+- Capability research delivered: SQL-over-PAT + Upstash Vector + QStash are the highest-leverage free surfaces; Vyce routing tiers proposed; Groq blocked from sandbox egress (owner decision needed).
+- Next: src/lib/ai/client.ts (brain prereq) after owner pastes Vyce/Groq keys.
