@@ -16,10 +16,19 @@ const execFileAsync = promisify(execFile);
  *
  * Executes `bash scripts/snapshot-backup.sh` (cwd = project root) and returns
  * the fresh .zscripts/backup-state.json contents plus an honest exit-code
- * mapping: 0 ok (pushed, or content-unchanged SKIP) / 1 scan-failed /
- * 3 no-token / 4 push-failed. A script-level outcome is reported with ok:true
- * + lastResult (the run DID execute); §11 {ok:false,error:{code,message}} is
- * reserved for API-level failures (auth, rate limit, timeout, spawn failure).
+ * mapping: 0 ok (pushed, content-unchanged SKIP, or throttle SKIP) /
+ * 1 scan-failed / 3 no-token / 4 push-failed / 5 diverged. A script-level
+ * outcome is reported with ok:true + lastResult (the run DID execute); §11
+ * {ok:false,error:{code,message}} is reserved for API-level failures (auth,
+ * rate limit, timeout, spawn failure).
+ *
+ * 12-d hardening: the script self-throttles (30-min min-gap after the last
+ * SUCCESSFUL push) and this route deliberately sets NO NEXUS_BACKUP_FORCE —
+ * the panel button goes through the throttle honestly (throttled runs come
+ * back as exit 0 + skipped with a throttled message; only the cadence
+ * service's 6h timer may bypass). The script now also pre-checks remote
+ * divergence and refuses to push (exit 5) when remote main is not an
+ * ancestor-or-equal of the local chain head — no force push, ever (§8).
  *
  * SECURITY (P7): the GitHub token is read by the script itself from
  * ops/vault/github.token via its git askpass helper — it is never placed in
@@ -31,7 +40,13 @@ const BACKUP_STATE = ".zscripts/backup-state.json";
 const SECRET_PATTERN = /gh[pousr]_|sbp_|sk-/;
 const TIMEOUT_MS = 120_000;
 
-type BackupStateFile = { lastResult?: string; lastAt?: string; head?: string };
+type BackupStateFile = {
+  lastResult?: string;
+  lastAt?: string;
+  head?: string;
+  tag?: string;
+  lastAttemptAt?: string;
+};
 type ExecError = Error & {
   code?: number | string | null;
   killed?: boolean;
@@ -103,6 +118,7 @@ export async function POST(req: Request) {
 
   const okRun = exitCode === 0;
   const skipped = okRun && /SKIP:/.test(output);
+  const throttled = skipped && /throttled/.test(output);
 
   // Exit-code mapping (honest messages; the state file is trusted only for a
   // clean run — on failure it may still hold the previous successful push).
@@ -110,12 +126,14 @@ export async function POST(req: Request) {
     1: "scan-failed",
     3: "no-token",
     4: "failed",
+    5: "diverged",
   };
   const EXIT_MESSAGES: Record<number, string> = {
     0: "Snapshot pushed to specimba/NEXUSbot (fast-forward on main).",
     1: "Secret scan found hits — push aborted fail-closed. Resolve the flagged content, then run again.",
     3: "No GitHub token at ops/vault/github.token — complete the one-time GitHub device flow first.",
     4: "Push failed (non-fast-forward). No force push per directive — resolve the remote manually.",
+    5: "Remote main has diverged from the local snapshot chain — push refused (fast-forward-only; no force push per directive). Resolve the remote manually, then run again.",
   };
 
   return NextResponse.json({
@@ -123,11 +141,15 @@ export async function POST(req: Request) {
     lastResult: okRun ? (state?.lastResult ?? "ok") : (EXIT_RESULTS[exitCode] ?? "failed"),
     lastAt: okRun ? state?.lastAt : undefined,
     head: okRun ? state?.head : undefined,
+    tag: okRun ? state?.tag : undefined,
+    lastAttemptAt: state?.lastAttemptAt,
     skipped,
     exitCode,
-    message: skipped
-      ? "Snapshot content unchanged since the last push — nothing new to push (skip)."
-      : (EXIT_MESSAGES[exitCode] ?? `snapshot-backup.sh exited with code ${exitCode}.`),
+    message: throttled
+      ? "Push throttle active — the last successful push was less than 30 minutes ago, so this run was skipped honestly (no bypass from the panel). The 6h cadence timer pushes automatically; try again later."
+      : skipped
+        ? "Snapshot content unchanged since the last push — nothing new to push (skip)."
+        : (EXIT_MESSAGES[exitCode] ?? `snapshot-backup.sh exited with code ${exitCode}.`),
     output: scrubbedTail(output),
   });
 }

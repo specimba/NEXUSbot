@@ -38,9 +38,11 @@ import {
 
 type BackupStatus = {
   ok: boolean;
-  lastResult: "ok" | "failed" | "scan-failed" | "no-token" | "never" | string;
+  lastResult: "ok" | "failed" | "scan-failed" | "no-token" | "diverged" | "never" | string;
   lastAt?: string;
   head?: string;
+  tag?: string;
+  lastAttemptAt?: string;
   tokenPresent: boolean;
   remoteConfigured: boolean;
   remote: string;
@@ -105,7 +107,8 @@ export function DurabilityCard() {
   const running = run.isPending;
   const tokenMissing = d?.tokenPresent === false;
   const lastResult = d?.lastResult;
-  const failed = lastResult === "failed" || lastResult === "scan-failed";
+  const failed =
+    lastResult === "failed" || lastResult === "scan-failed" || lastResult === "diverged";
   const okState = lastResult === "ok";
   const neverState = !okState && !failed && !tokenMissing; // "never" (or unknown) + token present
 
@@ -248,6 +251,8 @@ export function DurabilityCard() {
                           </code>
                         </>
                       )}
+                      {/* 12-d: immutable daily tag of the last successful push (script state). */}
+                      {d.tag && <span className="text-xs text-muted-foreground"> · {d.tag}</span>}
                     </p>
                   ) : tokenMissing ? (
                     <p className="font-mono text-sm text-accent">no token — cannot push</p>
@@ -255,7 +260,9 @@ export function DurabilityCard() {
                     <p className="font-mono text-sm text-destructive">
                       {lastResult === "scan-failed"
                         ? "secret scan failed — push aborted"
-                        : "push failed — no force push, resolve manually"}
+                        : lastResult === "diverged"
+                          ? "remote diverged — push refused, no force push"
+                          : "push failed — no force push, resolve manually"}
                     </p>
                   ) : (
                     <p className="font-mono text-sm text-muted-foreground">never run yet</p>
@@ -300,12 +307,18 @@ export function DurabilityCard() {
             {failed && (
               <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3">
                 <p className="font-mono text-xs text-destructive" role="alert">
-                  {lastResult === "scan-failed" ? "SCAN_FAILED" : "PUSH_FAILED"}
+                  {lastResult === "scan-failed"
+                    ? "SCAN_FAILED"
+                    : lastResult === "diverged"
+                      ? "DIVERGED"
+                      : "PUSH_FAILED"}
                 </p>
                 <p className="mt-1 text-sm text-destructive">
                   {lastResult === "scan-failed"
                     ? "The fail-closed secret scan found hits before any push. Resolve the flagged content, then run again."
-                    : "The push was rejected (non-fast-forward). The directive forbids force pushes — resolve the remote state manually, then run again."}
+                    : lastResult === "diverged"
+                      ? "Remote main moved on its own and is no longer an ancestor of the local snapshot chain — the push was refused (fast-forward-only). The directive forbids force pushes — resolve the remote state manually, then run again."
+                      : "The push was rejected (non-fast-forward). The directive forbids force pushes — resolve the remote state manually, then run again."}
                 </p>
               </div>
             )}

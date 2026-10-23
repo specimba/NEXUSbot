@@ -137,18 +137,20 @@ export async function createOAuthState(redirectUri: string): Promise<string> {
   return state;
 }
 
-/** Single-use: the KV row is deleted on first read, even if validation then fails. */
+/** Single-use: a MATCHING state row is deleted on first read; mismatches leave
+ * the pending flow alone (an attacker cannot invalidate a live flow by guessing). */
 export async function consumeOAuthState(state: string): Promise<OAuthStateEntry | null> {
   const row = await db.setting.findUnique({ where: { key: OAUTH_STATE_KEY } });
   if (!row) return null;
-  await db.setting.deleteMany({ where: { key: OAUTH_STATE_KEY } }); // single-use either way
   let parsed: (OAuthStateEntry & { state?: unknown }) | null = null;
   try {
     parsed = JSON.parse(row.value) as (OAuthStateEntry & { state?: unknown }) | null;
   } catch {
+    await db.setting.deleteMany({ where: { key: OAUTH_STATE_KEY } }); // corrupt row — sweep it
     return null;
   }
   if (!parsed || parsed.state !== state) return null;
+  await db.setting.deleteMany({ where: { key: OAUTH_STATE_KEY } }); // single-use from here on
   if (typeof parsed.createdAt !== "number" || typeof parsed.redirectUri !== "string") return null;
   if (Date.now() - parsed.createdAt > OAUTH_STATE_TTL_MS) return null;
   return { redirectUri: parsed.redirectUri, createdAt: parsed.createdAt };

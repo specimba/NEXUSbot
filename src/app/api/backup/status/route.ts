@@ -16,8 +16,16 @@ export const dynamic = "force-dynamic";
  * token polling, no side effects. Runs happen explicitly via POST /api/backup/run.
  *
  * Response shape (contract):
- *   { ok, lastResult: "ok"|"failed"|"scan-failed"|"no-token"|"never",
- *     lastAt?, head?, tokenPresent, remoteConfigured, remote, recentLog[] }
+ *   { ok, lastResult: "ok"|"failed"|"scan-failed"|"no-token"|"diverged"|"never",
+ *     lastAt?, head?, tag?, lastAttemptAt?, tokenPresent, remoteConfigured,
+ *     remote, recentLog[] }
+ *
+ * 12-d: the script state gained `tag` (immutable daily tag snapshot-YYYYMMDD of
+ * the last successful push), `lastAttemptAt` (anti-hammering stamp written on
+ * EVERY run attempt, even throttled/failed ones — a failed attempt never erases
+ * the last real outcome) and lastResult "diverged" (remote main moved on its
+ * own; push refused fast-forward-only, exit 5 — no force push, §8). A throttled
+ * run intentionally does NOT change lastResult: it stamps lastAttemptAt only.
  *
  * SECURITY (P7): tokenPresent is a boolean ONLY — the token itself never leaves
  * the server. recentLog is scrubbed defensively even though the log is written
@@ -34,7 +42,13 @@ const LOG_TAIL_LINES = 8;
 /** Defensive scrub: token-shaped strings must never reach the panel (P7). */
 const SECRET_PATTERN = /gh[pousr]_|sbp_|sk-/;
 
-type BackupStateFile = { lastResult?: string; lastAt?: string; head?: string };
+type BackupStateFile = {
+  lastResult?: string;
+  lastAt?: string;
+  head?: string;
+  tag?: string;
+  lastAttemptAt?: string;
+};
 
 async function readState(): Promise<BackupStateFile | null> {
   try {
@@ -92,6 +106,8 @@ export async function GET(req: Request) {
       lastResult: state?.lastResult ?? "never",
       lastAt: state?.lastAt,
       head: state?.head,
+      tag: state?.tag,
+      lastAttemptAt: state?.lastAttemptAt,
       tokenPresent: await tokenPresent(),
       remoteConfigured: await pathExists(SCRIPT),
       remote: REMOTE,
