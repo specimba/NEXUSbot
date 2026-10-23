@@ -55,10 +55,15 @@ export async function GET(req: Request) {
   const exchange = await exchangeCodeForToken({ code, redirectUri: entry.redirectUri });
   if (!exchange.ok) {
     // Honest mapping of GitHub's OAuth error codes (values are short codes only).
+    // MEASURED 2026-10-23: unknown client_id → 404 {"error":"Not Found"} on both
+    // the authorize/token endpoints.
     const reason =
       exchange.error === "bad_verification_code"
         ? "code_reused_or_invalid" // single-use code replayed/expired — start again
-        : exchange.error === "incorrect_client_credentials" || exchange.error === "unauthorized_client"
+        : exchange.error === "incorrect_client_credentials" ||
+            exchange.error === "unauthorized_client" ||
+            exchange.error === "Not Found" ||
+            exchange.error === "http_404"
           ? "app_credentials_rejected" // Client ID/Secret wrong — fix in the panel
           : exchange.error === "redirect_uri_mismatch"
             ? "redirect_uri_mismatch" // OAuth App callback URL differs from the panel's

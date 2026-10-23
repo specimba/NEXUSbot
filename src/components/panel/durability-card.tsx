@@ -93,7 +93,8 @@ export function DurabilityCard() {
     },
     onSuccess: (data) => {
       if (data.skipped) {
-        toast.info("Backup skipped — nothing new", { description: data.message });
+        // Description carries the real reason (content-unchanged OR 30-min push throttle).
+        toast.info("Backup skipped", { description: data.message });
       } else if (data.lastResult === "ok") {
         toast.success("Snapshot pushed", { description: data.message });
       } else {

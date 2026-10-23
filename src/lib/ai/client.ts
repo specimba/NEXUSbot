@@ -1,4 +1,7 @@
 import { db } from "@/lib/db";
+import { PrismaClient } from "@prisma/client";
+import { createRequire } from "node:module";
+import path from "node:path";
 import { decryptSecret } from "@/lib/crypto";
 import {
   DEFAULT_VYCE_BASE_URL,
@@ -295,6 +298,62 @@ async function resolveModel(roleOrModel: string): Promise<{ model: string; role:
 // Usage ledger tap — counters only, NEVER prompt/response content (P7)
 // ---------------------------------------------------------------------------
 
+/**
+ * Dev-server resilience for the additive UsageEvent model.
+ *
+ * The panel dev server caches its PrismaClient on globalThis; `bun run db:push`
+ * that ADDS a model leaves that cached singleton without the new delegate
+ * (`usageEvent`) until the process restarts. getUsageDb() reuses the healthy
+ * singleton when it already knows the model; otherwise it rebinds ONCE with a
+ * freshly constructed client (busting the CommonJS require cache for the
+ * generated .prisma/client modules so the on-disk regenerated client is
+ * loaded), and returns null when even that cannot see the model (honest 503
+ * upstream — never a fake success; the pending restart resolves it).
+ */
+let usageRebindAttempted = false;
+
+/** Re-require @prisma/client with the CJS cache entries dropped, so the
+ * regenerated on-disk generated client is re-evaluated in this process. */
+function loadFreshPrismaModule(): { PrismaClient: typeof PrismaClient } | null {
+  try {
+    const req = createRequire(path.join(process.cwd(), "package.json"));
+    for (const id of ["@prisma/client", ".prisma/client", ".prisma/client/default"]) {
+      try {
+        const resolved = req.resolve(id) as string;
+        delete req.cache[resolved];
+      } catch {
+        // not resolvable from this project — skip
+      }
+    }
+    const mod = req("@prisma/client") as { PrismaClient?: typeof PrismaClient };
+    return typeof mod?.PrismaClient === "function" ? { PrismaClient: mod.PrismaClient } : null;
+  } catch {
+    return null;
+  }
+}
+
+export function getUsageDb(): PrismaClient | null {
+  const g = globalThis as { prisma?: PrismaClient };
+  const cached = g.prisma;
+  if (cached && "usageEvent" in cached) return cached;
+  if (cached && !usageRebindAttempted) {
+    usageRebindAttempted = true;
+    try {
+      const Fresh = loadFreshPrismaModule()?.PrismaClient ?? PrismaClient;
+      const fresh = new Fresh({ log: ["query"] });
+      if ("usageEvent" in fresh) {
+        void cached.$disconnect().catch(() => undefined);
+        g.prisma = fresh;
+        return fresh;
+      }
+    } catch {
+      // fall through to the stale singleton
+    }
+  }
+  if (db && "usageEvent" in db) return db;
+  return null;
+}
+
 type BrainUsageTap = {
   model: string;
   ok: boolean;
@@ -307,6 +366,8 @@ type BrainUsageTap = {
 };
 
 async function recordBrainUsage(tap: BrainUsageTap): Promise<void> {
+  const pdb = getUsageDb();
+  if (!pdb) return; // schema not live in this process yet — restart pending
   try {
     const meta: Record<string, unknown> = {};
     if (tap.error) meta.error = tap.error;
@@ -323,7 +384,7 @@ async function recordBrainUsage(tap: BrainUsageTap): Promise<void> {
     } catch {
       metaJson = "{}";
     }
-    await db.usageEvent.create({
+    await pdb.usageEvent.create({
       data: {
         kind: "llm",
         model: tap.model.slice(0, 128),

@@ -6,17 +6,22 @@ import { decryptSecret } from "@/lib/crypto";
 import { listProxies } from "@/lib/connectors/webshare";
 
 /**
- * T-206 — Webshare connector status (probe-first).
+ * T-206 — Webshare connector status (probe-first; 12-a contract update).
  *
  * Response is deliberately minimal and honest:
  *   { configured:false, routing:"off" }                          — no token in vault
  *   { configured:true, apiOk:false, error:{code,message} }       — token stored but probe failed
  *   { configured:true, apiOk:true, pool:{count,validCount,sample}, checkedAt } — live probe
  *
- * NEVER returns raw proxy IPs, usernames or credentials (P7 + task contract):
- * pool sample carries only {country?, valid?} booleans/ISO-ish country codes.
- * `routing` is the hard contract: proxy routing for agent traffic is OFF until the
- * owner gates L1 enablement — this route can never report otherwise.
+ * NEVER returns raw proxy IPs, usernames, passwords or credentials (P7 + task
+ * contract): pool sample carries only {country?, valid?} booleans/ISO-ish codes.
+ *
+ * `routing` semantics since 12-a (the general egress layer exists now):
+ *   "off"            — no token in vault, egress pool unusable
+ *   "direct-default" — egress layer live; every upstream defaults to DIRECT;
+ *                      proxy routing is opt-in per upstream via the Settings KV
+ *                      `egress.routing` (e.g. {"groq":"proxy"}); verify with
+ *                      POST /api/egress/probe (see egressProbe field).
  */
 
 export async function GET(req: Request) {
@@ -57,8 +62,9 @@ export async function GET(req: Request) {
     });
   }
 
-  // Probe page 1 with a page size large enough to summarise the 30-IP pool in one call.
-  const probe = await listProxies(apiToken, 25);
+  // Probe one page large enough to cover the whole 30-IP pool in a single call
+  // ([MEASURED] page_size=100 returns all 30 rows; server default is 25).
+  const probe = await listProxies(apiToken, 100);
 
   if (!probe.ok) {
     return NextResponse.json({
@@ -76,7 +82,8 @@ export async function GET(req: Request) {
   return NextResponse.json({
     ok: true,
     configured: true,
-    routing: "off",
+    routing: "direct-default",
+    egressProbe: "/api/egress/probe",
     apiOk: true,
     checkedAt: new Date().toISOString(),
     pool: {

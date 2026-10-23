@@ -46,7 +46,12 @@ BRANCH="public-snapshot"
 MIN_PUSH_GAP_S=1800  # 30-min push throttle (10-b review); NEXUS_BACKUP_FORCE=1 bypasses
 mkdir -p "$STATE_DIR" ops/vault
 
-log() { echo "[backup $TS] $*" | tee -a "$STATE_DIR/backup-log.txt" >/dev/null; }
+# Outcome lines go to BOTH the log file and stdout: the panel run route (and
+# the cadence service) detect SKIP/throttled outcomes from stdout — keeping
+# them /dev/null-silent made a throttled run indistinguishable from a push
+# (12-d verification caught the panel reporting "Snapshot pushed" for a run
+# that had honestly skipped). No secret ever appears in these lines (P7).
+log() { echo "[backup $TS] $*" | tee -a "$STATE_DIR/backup-log.txt"; }
 
 # --- state (.zscripts/backup-state.json) ------------------------------------
 # Flat JSON, updated field-wise: a throttled/failed attempt stamps lastAttempt*
@@ -55,7 +60,11 @@ log() { echo "[backup $TS] $*" | tee -a "$STATE_DIR/backup-log.txt" >/dev/null; 
 # kept for the panel card.
 state_get() { # $1=key → value (quoted or bare JSON scalar), "" when absent
   [[ -f "$STATE_FILE" ]] || return 0
-  sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\{0,1\}\([^\"]*\)\"\{0,1\}.*/\1/p" "$STATE_FILE" | tail -1
+  # Capture class [^,"}]: stops at value end for BOTH quoted strings and bare
+  # numbers — a greedy [^"]* would swallow the trailing comma after a bare
+  # epoch (12-d verification caught exactly that: the numeric guard then failed
+  # open and the 30-min throttle never fired).
+  sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\{0,1\}\([^,\"}]*\)\"\{0,1\}.*/\1/p" "$STATE_FILE" | tail -1
 }
 S_RESULT=$(state_get lastResult)   # last real outcome (ok|failed|scan-failed|diverged|…)
 S_AT=$(state_get lastAt)           # timestamp of that outcome

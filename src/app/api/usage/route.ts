@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { db } from "@/lib/db";
 import { requireSession } from "@/lib/auth";
 import { clientKey, rateLimit } from "@/lib/guard";
+import { getUsageDb } from "@/lib/ai/client";
 
 /**
  * GET  /api/usage (session required) — usage ledger aggregates.
@@ -26,6 +27,19 @@ function clampStr(v: unknown, n: number): string {
   return typeof v === "string" ? v.trim().slice(0, n) : "";
 }
 
+function schemaNotLive() {
+  return NextResponse.json(
+    {
+      ok: false,
+      error: {
+        code: "SCHEMA_NOT_LIVE",
+        message: "UsageEvent model is not live in this server process yet (dev-server PrismaClient predates the additive db:push) — restart pending.",
+      },
+    },
+    { status: 503 },
+  );
+}
+
 export async function GET(req: Request) {
   const denied = await requireSession();
   if (denied) return denied;
@@ -36,17 +50,20 @@ export async function GET(req: Request) {
     );
   }
 
+  const pdb = getUsageDb();
+  if (!pdb) return schemaNotLive();
+
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
 
   // IMAGE — the only per-user surfaced credit surface.
-  const imageByUser = await db.usageEvent.groupBy({
+  const imageByUser = await pdb.usageEvent.groupBy({
     by: ["userHandle"],
     where: { kind: "image", userHandle: { not: null } },
     _sum: { credits: true },
     _count: { _all: true },
   });
-  const imageTotal = await db.usageEvent.aggregate({
+  const imageTotal = await pdb.usageEvent.aggregate({
     where: { kind: "image" },
     _sum: { credits: true },
     _count: { _all: true },
@@ -54,8 +71,8 @@ export async function GET(req: Request) {
 
   // LLM — internal monitoring only.
   const [llmToday, llmModels] = await Promise.all([
-    db.usageEvent.count({ where: { kind: "llm", ts: { gte: startOfToday } } }),
-    db.usageEvent.groupBy({
+    pdb.usageEvent.count({ where: { kind: "llm", ts: { gte: startOfToday } } }),
+    pdb.usageEvent.groupBy({
       by: ["model"],
       where: { kind: "llm", ts: { gte: startOfToday } },
       _count: { _all: true },
@@ -170,9 +187,10 @@ export async function POST(req: Request) {
 
   const ok = raw.ok === undefined ? true : raw.ok === true;
 
-  const created = await db.usageEvent.create({
+  const created = await getUsageDb()?.usageEvent.create({
     data: { kind, model, userHandle, credits, ok, latencyMs, meta: "{}" },
   });
+  if (!created) return schemaNotLive();
 
   return NextResponse.json(
     { ok: true, id: created.id, kind, model, userHandle, credits, latencyMs: latencyMs ?? null },
