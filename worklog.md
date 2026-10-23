@@ -82,3 +82,19 @@ Stage Summary:
 - Card is mounted-ready: import { HyperbrowserCard } from "@/components/panel/connectors/hyperbrowser-card".
 - Owner needs a real Hyperbrowser API key pasted via the panel to flip status to CONNECTED (fake-key probe honestly reports KEY REJECTED until then).
 - Endpoints /api/session create + list + detail are route-verified via 401 shape; success payloads remain [INFERRED] until a real key exists — defensive typing covers it.
+
+---
+Task ID: 10-b
+Agent: research-agent (Vyce/Groq)
+Task: Research Vyce + Groq API surfaces and produce the NEXUSbot brain model-routing proposal (research only, no source changes).
+Work Log:
+- Read worklog tail + docs/STATE.md; used scripts/web-search.ts + read-page.ts + unauthenticated curl probes; no keys sent anywhere (P7).
+- [MEASURED] Vyce = vyceai.com (apex only; api.vyceai.com NXDOMAIN). GET /v1/models and POST /v1/chat/completions unauth → 401 exact OpenAI envelope {"error":{..."code":"invalid_api_key"},"request_id":...} ⇒ OpenAI-compatible surface confirmed at https://vyceai.com/v1. Docs site is a client-rendered SPA (/docs, /llms.txt return shell) — no crawlable official docs.
+- [INFERRED] llm24.net + lmspeed.net corroborate: OpenAI + Anthropic-compatible proxy, 39 models, streaming on all, native tool calling on 8+, vision on Nemotron Vision/MiniMax M3, per-model usage dashboard, USDT billing, health 98.3%. Model IDs match the owner's MEASURED table.
+- Groq: sandbox egress is Cloudflare-blocked — api.groq.com/openai/v1/models and console.groq.com/docs/* → 403 {"error":{"message":"Forbidden"}} [MEASURED]; jina reader refused ("bad IP reputation"). Model lineup + free-tier limits taken from 2026 mirrors of official docs [INFERRED]: llama-3.1-8b-instant (128K, $0.05/$0.08, 14,400 RPD free), llama-4-scout (128K, $0.11/$0.34, 30k TPM, vision), gpt-oss-120b ($0.15/$0.60, 1k RPD), llama-3.3-70b ($0.59/$0.79), qwen3-32b, kimi-k2 ($1/$3), groq/compound (agentic), whisper v3/turbo; org-level limits; Developer tier ~10× + 25% off; Batch/caching −50% stackable; x-ratelimit-* headers for backoff.
+- Wrote /tmp/r10-research/10-b-model-strategy.md (API surfaces, routing table, cost model, integration blueprint, durability review).
+Stage Summary:
+- Routing proposal: ROUTER=deepseek-v4-flash-lr ($5.70/mo @10k calls, 380ms) · WORKER=deepseek-v4-flash ($7.04/mo, 2.7s) · FRONTIER=claude-sonnet-4-6 capped ≤10% of calls (~$13/mo blended) · FREE=glm-5.3-flash + Groq free tier ($0.00 plan) · IMAGE=grok-imagine-2 / llama-4-scout vision · BATCH=gpt-6-luna/agnes. gpt-5.6-sol + grok-4.6 excluded (maintenance). Blended recommended plan ≈ $14–16/mo.
+- Integration: single fetch-based OpenAI-compatible client, provider registry vyce→https://vyceai.com/v1 / groq→https://api.groq.com/openai/v1, vault-backed keys, model pinning + connect-time GET /v1/models verification (runtime list = source of truth), SSE streaming + strict-JSON zod validation with repair retry, budget counters extended onto the existing /api/settings KV, per-tier fallback chains + circuit breaker (401 never fails over), L0 model_call telemetry. Groq 403 WAF from sandbox must classify as UNREACHABLE_FROM_SANDBOX, not KEY REJECTED.
+- Durability review: design sound; adopt immutable daily snapshot-YYYYMMDD tags, pre-push remote-divergence pre-check, ≥30min push throttle, chain-metadata commit messages, gitleaks second opinion, owner-side branch protection (linear history). Nit reported only: secret-scan.sh pattern key typo [uggingface].
+- Open items for owner: paste Vyce + Groq keys via panel; G6-eval deepseek-v4-flash-lr for ROUTER; decide Webshare-proxy routing for Groq from sandbox; re-measure the three identical-"380ms" models with a real key.
