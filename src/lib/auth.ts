@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
@@ -62,8 +62,20 @@ export function panelPasswordConfigured(): boolean {
 /**
  * Guard for protected API routes.
  * Returns a 401 NextResponse when the caller has no valid session; null when OK.
+ *
+ * Bearer path first: browsers drop SameSite cookies inside cross-site iframe
+ * embeds (the preview panel renders this app in one), so the panel also
+ * presents the same stateless HMAC session token via `Authorization: Bearer
+ * <token>`. The cookie path below is unchanged for same-site browsing and API
+ * tooling (curl). 401 only when BOTH fail; zero-arg signature preserved —
+ * every protected route calls requireSession() as-is.
  */
 export async function requireSession(): Promise<NextResponse | null> {
+  const authHeader = (await headers()).get("authorization");
+  if (authHeader?.startsWith("Bearer ")) {
+    const token = authHeader.slice("Bearer ".length).trim();
+    if (verifySessionToken(token)) return null;
+  }
   const store = await cookies();
   if (verifySessionToken(store.get(SESSION_COOKIE)?.value)) return null;
   return NextResponse.json(

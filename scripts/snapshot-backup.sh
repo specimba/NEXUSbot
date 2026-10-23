@@ -35,6 +35,9 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
+# 2-b gut-proof: platform sync may re-track junk between runs — idempotent hygiene (untrack + .gitignore restore); failures never block the snapshot.
+bash scripts/hygiene-untrack.sh >/dev/null 2>&1 || true
+
 TZENV="Europe/Istanbul"
 TS=$(TZ=$TZENV date '+%Y-%m-%d %H:%M %Z')
 NOW_EPOCH=$(date +%s)
@@ -152,14 +155,19 @@ git add -A -- . \
   ':(exclude)agent-ctx' \
   ':(exclude)directives' \
   ':(exclude)tests' \
+  ':(exclude).next' \
+  ':(exclude).env' \
   ':(exclude).zscripts/dev.pid' \
+  ':(exclude,glob).zscripts/*.pid' \
+  ':(exclude,glob).zscripts/*.log' \
   ':(exclude).zscripts/backup-log.txt' \
   ':(exclude).zscripts/backup-state.json' \
   ':(exclude,glob)**/*.png' \
   ':(exclude,glob)**/*.db' \
   ':(exclude,glob)**/*.sqlite' \
   ':(exclude,glob)**/*.tar' \
-  ':(exclude,glob)**/*.log'
+  ':(exclude,glob)**/*.log' \
+  ':(exclude,glob)**/*.tsbuildinfo'
 TREE=$(git write-tree)
 unset GIT_INDEX_FILE
 

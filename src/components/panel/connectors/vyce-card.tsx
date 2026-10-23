@@ -61,7 +61,22 @@ function reachability(s: VyceStatusPayload): { label: string; badgeClass: string
     return { label: "VAULT ERROR", badgeClass: "border-accent/60 text-accent", detail: s.error?.message ?? "Vault unreadable." };
   }
   if (code === "UNAUTHORIZED") {
-    return { label: "KEY REJECTED", badgeClass: "border-destructive/50 text-destructive", detail: s.error?.message ?? "Vyce did not accept the key." };
+    // Task 16-a: distinguish WHERE the rejected key lives — vault vs the
+    // Supabase Edge-Function secret — so the guidance names the right place.
+    if (s.keySource === "supabase-edge-secret") {
+      return {
+        label: "KEY REJECTED",
+        badgeClass: "border-destructive/50 text-destructive",
+        detail:
+          s.error?.message ??
+          "Vyce rejected the Edge-Function secret VYCE_API_KEY — update it in the Supabase secrets or paste a fresh key in the panel.",
+      };
+    }
+    return {
+      label: "KEY REJECTED",
+      badgeClass: "border-destructive/50 text-destructive",
+      detail: s.error?.message ?? "Vyce rejected the stored vault key — paste a fresh key or disconnect.",
+    };
   }
   if (code === "NETWORK_ERROR" || code === "FORBIDDEN") {
     return { label: "UNREACHABLE", badgeClass: "border-destructive/50 text-destructive", detail: s.error?.message ?? "Probe failed before an HTTP answer." };
@@ -195,9 +210,17 @@ export function VyceCard() {
             </div>
 
             {s.keySource === "supabase-edge-secret" && (
-              <p className="rounded-md border border-accent/40 bg-accent/10 p-2 text-xs text-accent">
-                Using the Supabase Edge-Function secret fallback (VYCE_API_KEY on the harness
-                project). Paste a vault key below to make it primary.
+              <p
+                className={cn(
+                  "rounded-md border p-2 text-xs",
+                  s.connected
+                    ? "border-accent/40 bg-accent/10 text-accent"
+                    : "border-destructive/40 bg-destructive/10 text-destructive",
+                )}
+              >
+                {s.connected
+                  ? "Working via the Supabase Edge-Function secret fallback (VYCE_API_KEY) — no vault key stored. Paste a vault key below to make it primary."
+                  : "The VYCE_API_KEY in the Supabase Edge-Function secrets was rejected by Vyce — update the secret there (harness project) or paste a fresh key in the panel below."}
               </p>
             )}
 
@@ -295,7 +318,7 @@ export function VyceCard() {
             )}
 
             {s.configured || s.keySource === "supabase-edge-secret" ? (
-              <p className="flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
+              <p className="flex flex-wrap items-center gap-1.5 font-mono text-[11px] [overflow-wrap:anywhere] text-muted-foreground">
                 <PlugZap className="size-3" aria-hidden="true" />
                 probe {s.probeTarget} · GET /v1/models
                 {s.probedAt ? (

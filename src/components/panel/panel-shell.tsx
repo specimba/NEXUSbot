@@ -5,6 +5,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
+import { clearSessionToken } from "@/lib/client/session-token";
 import { cn } from "@/lib/utils";
 import {
   FlaskConical,
@@ -43,6 +44,7 @@ export function PanelShell() {
       return res.json();
     },
     onSuccess: () => {
+      clearSessionToken();
       void queryClient.invalidateQueries({ queryKey: ["session"] });
       toast({ title: "Signed out" });
     },

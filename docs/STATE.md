@@ -1,13 +1,16 @@
 # NEXUS OS — STATE
 
-_Last updated: 2026-10-23 (R11 — cold-reset recovery + durability layer)_
+_Last updated: 2026-10-23 (R15 — iframe-proof panel session + .git diet 255M→880K)_
 
 ## Status line
 
 - Dev server: **RUNNING** on :3000 (platform-managed via `.zscripts/dev.sh`) [MEASURED]
 - backup-cadence mini-service: **RUNNING** on :3011, first run `result=ok` [MEASURED]
 - Lint: **CLEAN** · tsc: **CLEAN** · browser golden path: **0 page errors** [MEASURED]
-- Public durability repo: **github.com/specimba/NEXUSbot `main` @ `a00989c`** (152 files, secret-scan OK) [MEASURED]
+- Public durability repo: **github.com/specimba/NEXUSbot `main` @ `7dcee0d`** — local `public-snapshot` branch matches the remote byte-for-byte (re-measured anonymously in R15) [MEASURED]
+- Durability: honestly **DOWN** — backup token lost at boot; auto-resumes on GitHub reconnect (no push lost)
+- Private `.git`: **880K** (was 255M of platform-sync junk blobs; stripped R15) [MEASURED]
+- Panel session: **iframe-proof** — cookie + `Authorization: Bearer` fallback (R15); owner reported "right pass but cannot move" root-caused and fixed
 - Panel vault: **EMPTY** (reset wiped all connector credentials — owner must re-enter)
 
 ## ① What happened (R11 incident + recovery)
@@ -53,7 +56,7 @@ _Last updated: 2026-10-23 (R11 — cold-reset recovery + durability layer)_
 | Upstash (T-204) | not configured | paste REST URL + token |
 | Hyperbrowser (T-205) | not configured | paste API key |
 | Webshare (T-206) | not configured | paste API token |
-| Durability (new) | **OK** — token live, push verified, cadence running | nothing; monitor via DurabilityCard |
+| Durability (new) | **DOWN (honest)** — token lost with boot; chain intact (`7dcee0d`); auto-resumes on GitHub reconnect | reconnect GitHub first (row 1) |
 
 ## ④ Round-9 fixes re-applied (were lost with the reset)
 
@@ -103,6 +106,75 @@ _Last updated: 2026-10-23 (R11 — cold-reset recovery + durability layer)_
 - QStash FIFO lane for L0 stream durability + signature verification
 - RSI eval scheduling via QStash cron; Workflow runner behind owner gate
 - Daily immutable snapshot tags (`snapshot-YYYYMMDD`) + ≥30-min push throttle (10-b review)
+
+## ⑧ Round-13 additions (all [MEASURED] unless tagged)
+
+- **Egress routing layer is owner-controllable**: Webshare card → "Egress routing"
+  (per-upstream direct|proxy for groq / vyce / generic-echo + default; live probe with
+  honest direct-vs-proxied badges). API: GET/POST /api/egress/routing (whitelisted,
+  §11, 30/min). Default map: all direct. `POST /api/egress/probe {target}` remains the
+  evidence tool (groq direct → 403 UNREACHABLE_WAF [measured]; proxied side honest
+  NOT_CONFIGURED until the Webshare token returns).
+- **Brain client is egress-aware**: non-streaming model calls honor the routing KV
+  (proxy path uses the pool, transport failures are UNREACHABLE-class, never
+  KEY_REJECTED; 401 still never fails over). Streaming stays direct-only (buffered
+  proxy transport cannot stream — honest limitation, not faked).
+- **Groq provider slot** in the brain client: vault `groq/api-key` → Supabase
+  EF-secret `GROQ_API_KEY` fallback → NO_KEY; route-aware /models with an
+  embedded-fallback list [INFERRED — docs host 403 WAF too] until a proxied fetch
+  succeeds. Same no-leak redaction chain as Vyce.
+- **Image-credits tile** live on Overview: per-@username ledger (UsageEvent kind=image),
+  totals, honest empty state; LLM usage shown as internal telemetry ONLY — never
+  per-user, never currency (owner doctrine: charged per print, not per electricity).
+- Vault remains EMPTY — everything above is code-verified, not credential-verified.
+
+## ⑨ Round-14 audit results (calm pass — all [MEASURED])
+
+- **Platform sync incident, contained**: the sandbox platform's own commit process
+  gutted `.gitignore` and re-tracked `.env` + 627 `.next/` files + `db/custom.db` +
+  upload/tool-results/agent-ctx into LOCAL git. **The public repo was never touched**
+  (fail-closed secret-scan blocked any push; remote main still `7dcee0d`).
+- **Structural immunity shipped**: scan index-guard extended (fails closed on every
+  forbidden category), snapshot deny-list extended (`.next`/`.env`/`*.tsbuildinfo`),
+  and `scripts/hygiene-untrack.sh` is the idempotent one-command recovery for the
+  platform's next sync commit. Dry-run tree-build verified: public tree stays clean
+  even from a junk-tracking local main.
+- **Efficiency**: Prisma query logging off (was 281+ log lines/session, 28 lines per
+  6 API calls — now 0; responses 7-11 ms); duplicate cadence processes cleaned;
+  dev.log readable again.
+- **Durability honestly DOWN**: the GitHub backup token was lost in a platform boot
+  cycle. It resumes AUTOMATICALLY when the owner re-enters GitHub App credentials and
+  clicks Connect (the connector mirrors the token to `ops/vault/github.token`).
+  No snapshot has been lost — chain matches remote exactly.
+
+## ⑩ Round-15 additions (owner bug reports → fixes, all [MEASURED])
+
+- **"Right password but cannot move more" — ROOT-CAUSED + FIXED**: the preview panel
+  embeds the app in a cross-site iframe; the browser drops the `SameSite=Lax` session
+  cookie in that third-party context → login returned `{ok:true}` but the session never
+  stuck (dev.log showed the owner re-logging-in in cycles). Fix: the stateless HMAC
+  session token is now ALSO accepted from an `Authorization: Bearer` header by
+  `requireSession()` (zero-arg signature unchanged — all 33 protected routes untouched)
+  and by `/api/auth/session`; login returns the token to the just-authenticated caller;
+  the client stores it (sessionStorage with in-memory fallback for Safari ITP) and an
+  idempotent fetch interceptor attaches it to same-origin `/api/` requests. Cookie flow
+  unchanged (curl/same-site regression-proven). Verified: fresh cookieless context
+  (mirrors the iframe) → session/stats/usage 200 via bearer; tampered token → 401;
+  browser E2E login → panel → tab navigation → sign-out → re-login, 0 page errors.
+- **"Why is .git 300 MB?" — ANSWERED + FIXED**: the platform sync gutted `.gitignore`
+  AGAIN after R14's remediation and committed Turbopack build-cache binaries (`.sst`,
+  largest single blob 87 MB) + upload/ + logs into private history → 1371 loose objects,
+  253 MiB. Remediation: `scripts/hygiene-untrack.sh` re-run (hardened .gitignore
+  restored, junk untracked), **gut-proof `.git/info/exclude` installed** (not a tracked
+  file — `git add -A` respects it even with a gutted .gitignore), private `main`
+  history rewritten via index-filter (public refs excluded by design after a /tmp
+  rehearsal proved `--all` would alter shallow-grafted public roots), `gc --prune=now`.
+  Result: **255M → 880K** (~300×), 20/20 main commits preserved, `public-snapshot` =
+  `7dcee0d` + tag `snapshot-20261023` byte-identical before/after, secret-scan OK (167
+  files), dev server never touched. Auto-heal: snapshot-backup.sh now runs hygiene
+  first on every run. Workspace downloads shrink accordingly.
+- Panel vault still EMPTY — awaiting the owner's ④ re-entry list (GitHub Client
+  ID/Secret first).
 
 ## Owner comms protocol (standing)
 

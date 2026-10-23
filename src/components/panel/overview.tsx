@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { PanelEvent, PanelStats } from "@/lib/types";
+import { CreditsCard } from "./credits-card";
 import { DurabilityCard } from "./durability-card";
 import { formatDistanceToNow } from "date-fns";
 import { Activity, Database, KeyRound, Timer } from "lucide-react";
@@ -92,6 +93,8 @@ export function OverviewTab() {
       </div>
 
       <DurabilityCard />
+
+      <CreditsCard />
 
       <Card>
         <CardHeader className="pb-3">

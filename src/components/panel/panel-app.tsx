@@ -3,6 +3,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { LoginGate } from "./login-gate";
 import { PanelShell } from "./panel-shell";
+import { installSessionAuthInterceptor } from "@/lib/client/session-token";
+
+// Patch fetch at MODULE SCOPE (before any react-query/effect fetch fires):
+// the preview panel renders this app inside a cross-site iframe where the
+// session cookie is dropped, so same-origin /api/ requests must be able to
+// present the session token as a bearer header.
+installSessionAuthInterceptor();
 
 type SessionInfo = {
   ok: boolean;

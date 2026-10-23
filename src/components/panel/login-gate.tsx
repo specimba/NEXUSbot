@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
+import { saveSessionToken } from "@/lib/client/session-token";
 import { TerminalSquare } from "lucide-react";
 
 type LoginGateProps = {
@@ -21,7 +22,7 @@ export function LoginGate({ passwordConfigured, sessionCheckFailed }: LoginGateP
   const queryClient = useQueryClient();
 
   const login = useMutation({
-    mutationFn: async (pwd: string) => {
+    mutationFn: async (pwd: string): Promise<{ ok: boolean; token?: string }> => {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -33,11 +34,16 @@ export function LoginGate({ passwordConfigured, sessionCheckFailed }: LoginGateP
           | null;
         throw new Error(body?.error?.message ?? `Login failed (${res.status})`);
       }
-      return res.json();
+      return (await res.json()) as { ok: boolean; token?: string };
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       setError(null);
       setPassword("");
+      // Stash the returned session token BEFORE the ["session"] refetch: the
+      // caller just proved the password, and inside cookie-blocking iframes
+      // (preview panel) this bearer token is the only way the refetch can
+      // verify the session.
+      if (data.token) saveSessionToken(data.token);
       void queryClient.invalidateQueries({ queryKey: ["session"] });
       toast({ title: "Signed in", description: "Welcome back, speci." });
     },

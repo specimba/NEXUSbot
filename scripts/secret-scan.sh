@@ -8,11 +8,13 @@ cd "$(dirname "$0")/.."
 # Build the same sanitized file set the snapshot uses.
 # R11 hardening: also deny db/vault/artifact dirs and binary/db artifacts outright.
 FILES=$(git ls-files \
-  | grep -vE '^(upload|download|db|ops/vault|tool-results|agent-ctx|directives|tests)/' \
-  | grep -vE '\.(png|db|sqlite|tar|log)$')
+  | grep -vE '^(upload|download|db|ops/vault|tool-results|agent-ctx|directives|tests|\.next)/' \
+  | grep -vE '\.(png|db|sqlite|tar|log|tsbuildinfo)$')
 # Double-guard: refuse to run if any forbidden path is still INDEXED (tracked).
-if git ls-files | grep -qE '^(\.env$|db/|ops/vault/|.*\.db$)'; then
-  echo "SECRET-HIT [index-guard] forbidden path still tracked: run git rm --cached"
+# R14: extended after the platform sync process gutted .gitignore and re-tracked
+# .env/.next/db/upload — the guard is what fail-closed the whole chain that day.
+if git ls-files | grep -qE '^(\.env|\.next/|db/|ops/vault/|upload/|tool-results/|agent-ctx/)|\.db$|\.tsbuildinfo$'; then
+  echo "SECRET-HIT [index-guard] forbidden path still tracked: run scripts/hygiene-untrack.sh"
   exit 1
 fi
 if [[ -z "$FILES" ]]; then echo "SCAN: no files"; exit 0; fi

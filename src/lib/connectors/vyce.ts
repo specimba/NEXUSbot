@@ -89,6 +89,24 @@ export function vyceProbeTarget(baseUrl: string): string {
 // Vault access (service "vyce", labels "api" + "base-url")
 // ---------------------------------------------------------------------------
 
+/**
+ * Paste hygiene shared with the brain client (task 16-a): trims, strips exactly
+ * ONE matching wrapping quote pair (' " `) if present, then trims again. Used
+ * on vault stores AND on Edge-Function secret reads so a quoted/wrapped paste
+ * never reaches the Authorization header.
+ */
+export function sanitizeSecretText(value: string): string {
+  let out = value.trim();
+  if (out.length >= 2) {
+    const first = out[0];
+    const last = out[out.length - 1];
+    if (first === last && (first === '"' || first === "'" || first === "`")) {
+      out = out.slice(1, -1).trim();
+    }
+  }
+  return out;
+}
+
 export type VyceKeyLoad =
   | { ok: true; key: string; masked: string; keyId: string; updatedAt: string }
   | { ok: false; reason: "missing" }
@@ -134,7 +152,7 @@ export async function resolveVyceBaseUrl(): Promise<string> {
 }
 
 export async function storeVyceKey(key: string): Promise<{ keyId: string }> {
-  const { keyId, cipher } = encryptSecret(key);
+  const { keyId, cipher } = encryptSecret(sanitizeSecretText(key)); // no trailing newline/space ever stored
   await db.credential.upsert({
     where: { service_label: { service: VYCE_SERVICE, label: VYCE_KEY_LABEL } },
     create: { service: VYCE_SERVICE, label: VYCE_KEY_LABEL, keyId, cipher },
@@ -277,5 +295,5 @@ export type VyceStatusPayload = {
   probedAt: string | null;
   error: { code: string; message: string } | null;
   /** Supabase Edge-Function secret fallback state (owner stored VYCE_API_KEY there). */
-  fallback: { available: boolean; reason: string | null } | null;
+  fallback: { available: boolean; reason: string | null; projectRef: string | null } | null;
 };
