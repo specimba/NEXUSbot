@@ -112,6 +112,7 @@ export async function POST(req: Request) {
     4: "failed",
   };
   const EXIT_MESSAGES: Record<number, string> = {
+    0: "Snapshot pushed to specimba/NEXUSbot (fast-forward on main).",
     1: "Secret scan found hits — push aborted fail-closed. Resolve the flagged content, then run again.",
     3: "No GitHub token at ops/vault/github.token — complete the one-time GitHub device flow first.",
     4: "Push failed (non-fast-forward). No force push per directive — resolve the remote manually.",
