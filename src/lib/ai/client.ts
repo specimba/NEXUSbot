@@ -14,6 +14,13 @@ import {
   type VyceRole,
 } from "@/lib/connectors/vyce";
 import { getRelayCredentials, relayGroqBaseUrl, relayVyceBaseUrl } from "@/lib/ai/edge-relay";
+import { loadRoleBindings, type RoleBinding } from "@/lib/ai/role-bindings";
+// Circular-import note (same safe pattern as edge-relay): custom-providers
+// imports registerSecretForRedaction/redactSecrets FROM this module while this
+// module imports chatCompleteCustom FROM it — both sides only reference
+// function declarations at call time, never at module-init, so the cycle is
+// runtime-safe [verified: lint + tsc clean, live chat call measured].
+import { chatCompleteCustom, type CustomChatResult } from "@/lib/ai/custom-providers";
 import {
   DEFAULT_GROQ_BASE_URL,
   GROQ_STATIC_MODELS,
@@ -69,6 +76,21 @@ import {
  * Proxy/transport failures map to UNREACHABLE-class BrainErrors and are NEVER
  * KEY_REJECTED — only an HTTP 401 answered by the upstream itself is a key
  * error, and a 401 never fails over.
+ * ============================================================================
+ *
+ * BRAIN TIER BINDINGS (task R18-b): a role may carry a binding
+ * (Settings KV "ai.role-bindings", src/lib/ai/role-bindings.ts) of shape
+ * { via: "vyce" | "groq" | "custom", provider?, model }. When present the
+ * binding takes PRECEDENCE over the "ai.models" override and the
+ * VYCE_ROLE_MODELS defaults, and it decides BOTH the route and the model:
+ *   via "custom" → chatCompleteCustom(binding.provider, …) delegation in
+ *                  chatComplete (non-streaming only — streamComplete throws a
+ *                  static BAD_INPUT instead of faking SSE; no double UsageEvent:
+ *                  the custom path writes its own row, meta source "custom:<slug>").
+ *   via "groq"   → the existing Groq path with the BOUND model (unbound roles
+ *                  on groq keep the honest BAD_INPUT guard).
+ *   via "vyce"   → the existing Vyce path with the bound model.
+ * No binding → behavior is byte-identical to the pre-R18-b code.
  * ============================================================================
  */
 
@@ -464,23 +486,90 @@ export async function getRoleModelMap(): Promise<Record<BrainRole, string>> {
 async function resolveModel(
   roleOrModel: string,
   provider: BrainProvider,
-): Promise<{ model: string; role: BrainRole | null }> {
+): Promise<{ model: string; role: BrainRole | null; binding: RoleBinding | null }> {
   if ((BRAIN_ROLES as readonly string[]).includes(roleOrModel)) {
+    // R18-b: a binding takes PRECEDENCE over ai.models + VYCE_ROLE_MODELS — and
+    // over the groq role guard below (a role bound via "groq" carries its own
+    // model id, so the "Vyce-registry-only" objection no longer applies).
+    const bindings = await loadRoleBindings();
+    const binding = bindings[roleOrModel as BrainRole];
+    if (binding) {
+      return { model: binding.model, role: roleOrModel as BrainRole, binding };
+    }
     if (provider === "groq") {
-      // Roles map to the VYCE registry — silently sending a Vyce model id to
-      // Groq would end in a confusing upstream 404. Honest BAD_INPUT instead.
+      // UNBOUND roles map to the VYCE registry — silently sending a Vyce model
+      // id to Groq would end in a confusing upstream 404. Honest BAD_INPUT instead.
       throw new BrainError(
         "BAD_INPUT",
         `role "${roleOrModel}" maps to the Vyce model registry — pass an explicit Groq model id for groq calls`,
       );
     }
     const map = await getRoleModelMap();
-    return { model: map[roleOrModel as BrainRole], role: roleOrModel as BrainRole };
+    return { model: map[roleOrModel as BrainRole], role: roleOrModel as BrainRole, binding: null };
   }
   if (!/^[A-Za-z0-9._:\-\/]{1,128}$/.test(roleOrModel)) {
     throw new BrainError("BAD_INPUT", "roleOrModel must be a known role or a safe model id");
   }
-  return { model: roleOrModel, role: null };
+  return { model: roleOrModel, role: null, binding: null };
+}
+
+// ---------------------------------------------------------------------------
+// R18-b — custom-provider binding delegation (chatComplete only)
+// ---------------------------------------------------------------------------
+
+/**
+ * CustomChatResult failure code → BrainError code (equivalent semantics):
+ * NO_KEY→NO_KEY, UNAUTHORIZED→KEY_REJECTED (a 401 answered by the upstream is
+ * the key-error class here too), NETWORK_ERROR/FORBIDDEN→UNREACHABLE_FROM_SANDBOX
+ * (transport/edge refusals are NEVER key errors), RATE_LIMITED→RATE_LIMITED,
+ * BAD_RESPONSE→BAD_RESPONSE, BAD_INPUT/NOT_CONFIGURED→BAD_INPUT (a binding to
+ * a since-deleted provider config is an input problem, honestly named). The
+ * custom path's message text is REUSED (it is built from static strings +
+ * status + host + model id, scrubbed against the live key inside the custom
+ * module — and BrainError's constructor redacts again, belt-and-braces).
+ */
+function mapCustomChatFailure(
+  binding: RoleBinding,
+  failure: Extract<CustomChatResult, { ok: false }>,
+): BrainError {
+  const code: BrainErrorCode =
+    failure.code === "NO_KEY"
+      ? "NO_KEY"
+      : failure.code === "UNAUTHORIZED"
+        ? "KEY_REJECTED"
+        : failure.code === "NETWORK_ERROR" || failure.code === "FORBIDDEN"
+          ? "UNREACHABLE_FROM_SANDBOX"
+          : failure.code === "RATE_LIMITED"
+            ? "RATE_LIMITED"
+            : failure.code === "BAD_RESPONSE"
+              ? "BAD_RESPONSE"
+              : "BAD_INPUT"; // BAD_INPUT + NOT_CONFIGURED
+  return new BrainError(code, failure.message, { httpStatus: failure.httpStatus, model: binding.model });
+}
+
+/**
+ * Delegates a custom-bound role's completion to chatCompleteCustom. The custom
+ * module already writes its own UsageEvent (kind "llm", meta source
+ * "custom:<slug>") for BOTH success and failure — this path deliberately does
+ * NOT recordBrainUsage again (no double-log). opts.extraBody is not supported
+ * by the custom transport and is silently unused (documented here, honestly).
+ */
+async function chatCompleteViaCustomBinding(
+  binding: RoleBinding,
+  messages: BrainMessage[],
+  opts: ChatCompleteOpts,
+): Promise<ChatCompletionResult> {
+  const result = await chatCompleteCustom(binding.provider!, messages, {
+    model: binding.model,
+    ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
+    ...(opts.maxTokens !== undefined ? { maxTokens: opts.maxTokens } : {}),
+    ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+  });
+  if (!result.ok) {
+    throw mapCustomChatFailure(binding, result);
+  }
+  // usage ({prompt, completion, total}) is already shape-compatible.
+  return { model: result.model, content: result.content, latencyMs: result.latencyMs, usage: result.usage };
 }
 
 // ---------------------------------------------------------------------------
@@ -713,8 +802,19 @@ export async function chatComplete(
   opts: ChatCompleteOpts = {},
 ): Promise<ChatCompletionResult> {
   const started = Date.now();
-  const provider: BrainProvider = opts.provider === "groq" ? "groq" : "vyce";
-  const { model, role } = await resolveModel(roleOrModel, provider);
+  const requested: BrainProvider = opts.provider === "groq" ? "groq" : "vyce";
+  const { model, role, binding } = await resolveModel(roleOrModel, requested);
+
+  // R18-b: a custom binding routes the WHOLE call through the custom provider
+  // (its own key chain + egress routing + UsageEvent) — decided before any
+  // Vyce/Groq credential resolution so a custom-bound role never touches them.
+  if (binding?.via === "custom") {
+    return chatCompleteViaCustomBinding(binding, messages, opts);
+  }
+
+  // A vyce/groq binding overrides the requested provider slot (the binding is
+  // the owner-set route; opts.provider stays relevant only for unbound calls).
+  const provider: BrainProvider = binding?.via === "groq" ? "groq" : requested;
   const creds = provider === "groq" ? await resolveGroqCredentials() : await resolveVyceCredentials();
   if (!creds) {
     await recordBrainUsage({ model, ok: false, latencyMs: null, error: "NO_KEY", role });
@@ -865,8 +965,21 @@ export async function* streamComplete(
   opts: ChatCompleteOpts = {},
 ): AsyncGenerator<string, void, unknown> {
   const started = Date.now();
-  const provider: BrainProvider = opts.provider === "groq" ? "groq" : "vyce";
-  const { model, role } = await resolveModel(roleOrModel, provider);
+  const requested: BrainProvider = opts.provider === "groq" ? "groq" : "vyce";
+  const { model, role, binding } = await resolveModel(roleOrModel, requested);
+
+  // R18-b: custom-provider bindings are NON-STREAMING (the egress-aware custom
+  // transport is buffered — no fake SSE). Honest BAD_INPUT before any key
+  // resolution or network attempt. Static message only.
+  if (binding?.via === "custom") {
+    throw new BrainError(
+      "BAD_INPUT",
+      `role "${roleOrModel}" is bound to custom provider "${binding.provider}" — custom-provider bindings are non-streaming (no fake SSE); use the non-streaming path`,
+    );
+  }
+
+  // vyce/groq bindings stream exactly like today, with the BOUND model.
+  const provider: BrainProvider = binding?.via === "groq" ? "groq" : requested;
   const creds = provider === "groq" ? await resolveGroqCredentials() : await resolveVyceCredentials();
   if (!creds) {
     await recordBrainUsage({ model, ok: false, latencyMs: null, error: "NO_KEY", role, streamed: true });

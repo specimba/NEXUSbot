@@ -8,6 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { clearSessionToken } from "@/lib/client/session-token";
 import { cn } from "@/lib/utils";
 import {
+  BrainCircuit,
   FlaskConical,
   LayoutDashboard,
   LogOut,
@@ -25,6 +26,7 @@ const TABS = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "stream", label: "Stream", icon: Radio },
   { id: "connectors", label: "Connectors", icon: PlugZap },
+  { id: "brain", label: "Brain", icon: BrainCircuit },
   { id: "settings", label: "Settings", icon: SlidersHorizontal },
   { id: "eval", label: "Eval", icon: FlaskConical, locked: true },
 ] as const;
@@ -126,6 +128,7 @@ export function PanelShell() {
         {tab === "overview" && <OverviewTab />}
         {tab === "stream" && <StreamTab />}
         {tab === "connectors" && <ConnectorsTab />}
+        {tab === "brain" && <BrainTab />}
         {tab === "settings" && <SettingsTab />}
         {tab === "eval" && <EvalTab />}
       </main>
@@ -145,5 +148,6 @@ export function PanelShell() {
 import { OverviewTab } from "./overview";
 import { StreamTab } from "./stream";
 import { ConnectorsTab } from "./connectors";
+import { BrainTab } from "./brain-tab";
 import { SettingsTab } from "./settings";
 import { EvalTab } from "./eval-locked";

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth";
 import { clientKey, rateLimit } from "@/lib/guard";
+import { routeFor, readRoutingMap } from "@/lib/egress";
 import {
   clearVyceBaseUrlOverride,
   deleteVyceConfig,
@@ -12,8 +13,12 @@ import {
   normalizeVyceBaseUrl,
   probeVyce,
   resolveVyceBaseUrl,
+  sharpenVyceProbeWithOriginHealth,
   storeVyceBaseUrl,
   storeVyceKey,
+  VYCE_PROBE_TIMEOUT_PROXY_MS,
+  VYCE_TIMEOUT_MS,
+  type VyceOriginVerdict,
 } from "@/lib/connectors/vyce";
 
 /**
@@ -25,6 +30,14 @@ import {
  *       An explicit empty-string baseUrl clears the override (back to default).
  * GET           → presence + masked preview only.
  * DELETE        → removes key + base-url override. Idempotent.
+ *
+ * R18-a: the paste-key probe tests the key through the SAME egress chats use
+ * (routeFor("vyce", readRoutingMap()) — the live map has vyce=proxy; 12s per
+ * proxied pool attempt / 8s direct) and benefits from the ORIGIN_DOWN
+ * classification: an owner pasting a key during a Vyce-side outage gets
+ * "origin down, cannot verify" (sharpened by the no-key origin-health probe)
+ * instead of a misleading transport error. Transport failures are NEVER
+ * reported as a key rejection.
  *
  * P7: the key value is accepted once, encrypted immediately, never logged,
  * never echoed back — responses carry a masked preview (••••tail) only.
@@ -70,15 +83,42 @@ export async function PUT(req: Request) {
   if (clearBaseUrl) await clearVyceBaseUrlOverride();
 
   // MEASURED probe with the just-stored credential (values never logged).
-  let probe: { ok: boolean; httpStatus: number | null; code: string | null; modelCount: number | null };
+  // R18-a: routed exactly like a chat (egress routing map), with the honest
+  // ORIGIN_DOWN classification + origin sharpening so an outage reads as an
+  // outage — never as "key rejected" and never as a bare transport error.
+  let probe: {
+    ok: boolean;
+    httpStatus: number | null;
+    code: string | null;
+    modelCount: number | null;
+    message: string | null;
+    origin: VyceOriginVerdict | null;
+  };
   try {
     const effectiveBase = await resolveVyceBaseUrl();
-    const r = await probeVyce(key, effectiveBase);
+    const mode = routeFor("vyce", await readRoutingMap());
+    let r = await probeVyce(key, effectiveBase, {
+      timeoutMs: mode === "proxy" ? VYCE_PROBE_TIMEOUT_PROXY_MS : VYCE_TIMEOUT_MS,
+      route: mode,
+    });
+    let origin: VyceOriginVerdict | null = null;
+    if (!r.ok) {
+      const sharpened = await sharpenVyceProbeWithOriginHealth(r, effectiveBase, mode);
+      r = sharpened.probe;
+      origin = sharpened.origin;
+    }
     probe = r.ok
-      ? { ok: true, httpStatus: r.httpStatus, code: null, modelCount: r.models.length }
-      : { ok: false, httpStatus: r.httpStatus, code: r.code, modelCount: null };
+      ? { ok: true, httpStatus: r.httpStatus, code: null, modelCount: r.models.length, message: null, origin: null }
+      : { ok: false, httpStatus: r.httpStatus, code: r.code, modelCount: null, message: r.message, origin };
   } catch {
-    probe = { ok: false, httpStatus: null, code: "NETWORK_ERROR", modelCount: null };
+    probe = {
+      ok: false,
+      httpStatus: null,
+      code: "NETWORK_ERROR",
+      modelCount: null,
+      message: "probe could not be completed (unexpected failure before an HTTP answer)",
+      origin: null,
+    };
   }
 
   return NextResponse.json(

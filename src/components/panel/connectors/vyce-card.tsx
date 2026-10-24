@@ -18,8 +18,9 @@ import { BrainCircuit, KeyRound, PlugZap, RefreshCw, Trash2 } from "lucide-react
 /**
  * T-207 — Vyce brain-gateway connector card. Honest states only:
  * NOT CONFIGURED (key + optional base-url) → CONNECTED / KEY REJECTED /
- * UNREACHABLE / VAULT ERROR, with per-role tier availability badges once the
- * live /models probe succeeds.
+ * UNREACHABLE / ORIGIN DOWN (R18-a: Vyce-side outage, distinct from key and
+ * egress problems) / VAULT ERROR, with per-role tier availability badges once
+ * the live /models probe succeeds.
  *
  * P7: the key is typed once into a password input, POSTed, and never rendered
  * again — the card only ever receives a masked ••••tail preview. The Supabase
@@ -69,6 +70,15 @@ function reachability(s: VyceStatusPayload): { label: string; badgeClass: string
   const code = s.error?.code ?? "";
   if (code === "VAULT_UNREADABLE") {
     return { label: "VAULT ERROR", badgeClass: "border-accent/60 text-accent", detail: s.error?.message ?? "Vault unreadable." };
+  }
+  // R18-a: a measured Vyce-side outage — accent, NOT destructive: this is on
+  // vyceai.com's side, not the owner's key and not our egress.
+  if (code === "ORIGIN_DOWN" && s.origin !== "up") {
+    return { label: "ORIGIN DOWN", badgeClass: "border-accent/60 text-accent", detail: s.error?.message ?? "vyceai.com's origin is not answering." };
+  }
+  // R18-a: the relay answers but its harness project has no VYCE_API_KEY set.
+  if (code === "UPSTREAM_KEY_MISSING") {
+    return { label: "RELAY KEY MISSING", badgeClass: "border-destructive/50 text-destructive", detail: s.error?.message ?? "The relay has no VYCE_API_KEY configured." };
   }
   if (code === "UNAUTHORIZED") {
     // Task 16-a/17-b: distinguish WHERE the rejected key lives — vault vs the
@@ -146,7 +156,9 @@ export function VyceCard() {
         {
           description:
             data.probe?.ok === false
-              ? "Encrypted in the vault — but the live probe did not accept it. See status."
+              ? data.probe.code === "ORIGIN_DOWN"
+                ? "Encrypted in the vault — but Vyce's origin is down right now, so the key could not be verified. See status."
+                : "Encrypted in the vault — but the live probe did not accept it. See status."
               : "Encrypted in the vault. Probing the gateway…",
         },
       );
@@ -169,7 +181,12 @@ export function VyceCard() {
 
   const s = status.data?.status ?? null;
   const reach = s ? reachability(s) : null;
-  const showForm = s !== null && !s.configured && !isEdgeRelaySource(s.keySource);
+  // R18-a: vault-first — the paste form also shows while the relay fallback is
+  // the active source, so the owner can switch to the direct, EF-independent
+  // path from this card (the secondary-path note below points at it).
+  const showForm = s !== null && !s.configured;
+  // R18-a: measured origin-down verdict — the distinct outage state block.
+  const originDown = s !== null && ((s.error?.code === "ORIGIN_DOWN" && s.origin !== "up") || s.origin === "down");
 
   return (
     <Card>
@@ -220,18 +237,44 @@ export function VyceCard() {
               </Badge>
             </div>
 
+            {originDown && (
+              <p className="rounded-md border border-accent/40 bg-accent/10 p-2 text-xs text-accent">
+                VYCE ORIGIN DOWN — vyceai.com&apos;s own origin server is not answering (Cloudflare 5xx). This is on
+                Vyce&apos;s side — not your key, not our egress. Key verification resumes automatically once their
+                origin returns; press Refresh to re-check.
+              </p>
+            )}
+
+            {!s.connected && s.error?.code === "UNAUTHORIZED" && (
+              <p className="rounded-md border border-border/60 p-2 text-xs text-muted-foreground">
+                Vyce rejects an invalid key BEFORE metering — your Vyce dashboard will show 0 reqs for a rejected key.
+                A successful probe WILL appear as a request on the Vyce dashboard, so you can always cross-check.
+              </p>
+            )}
+
             {isEdgeRelaySource(s.keySource) && (
               <p
                 className={cn(
                   "rounded-md border p-2 text-xs",
                   s.connected
                     ? "border-accent/40 bg-accent/10 text-accent"
-                    : "border-destructive/40 bg-destructive/10 text-destructive",
+                    : s.error?.code === "UNAUTHORIZED"
+                      ? "border-destructive/40 bg-destructive/10 text-destructive"
+                      : "border-border/60 text-muted-foreground",
                 )}
               >
                 {s.connected
                   ? "Working via the Supabase Edge-Function relay (nexus-relay on the harness project) — paste a vault key to make it primary"
-                  : "The VYCE_API_KEY in the Supabase Edge-Function secrets was rejected by Vyce — update the secret there (harness project) or paste a fresh key in the panel below."}
+                  : s.error?.code === "UNAUTHORIZED"
+                    ? "The VYCE_API_KEY in the Supabase Edge-Function secrets was rejected by Vyce — update the secret there (harness project) or paste a fresh key in the panel below."
+                    : "Probing via the Supabase Edge-Function relay (nexus-relay on the harness project) — the last probe did not reach a key verdict (Vyce maintenance / origin issues are on Vyce's side; see the outcome above). Paste a Vyce key below to switch to the direct, EF-independent path."}
+              </p>
+            )}
+
+            {isEdgeRelaySource(s.keySource) && (
+              <p className="rounded-md border border-border/60 p-2 text-xs text-muted-foreground">
+                Secondary path — this depends on Supabase Edge Functions. Paste a Vyce key in the panel below to switch
+                to the direct, EF-independent path (vault-first).
               </p>
             )}
 
@@ -305,7 +348,7 @@ export function VyceCard() {
                 <p id="vyce-key-note" className="text-xs text-muted-foreground">
                   Stored AES-256-GCM in the local vault — never displayed again, never sent to
                   the chat surface. Probe target:{" "}
-                  <span className="font-mono">{s.probeTarget} · GET /v1/models · 8s timeout</span>
+                  <span className="font-mono">{s.probeTarget} · GET /v1/models · timeout follows egress routing</span>
                 </p>
               </form>
             ) : null}

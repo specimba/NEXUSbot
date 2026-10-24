@@ -2,13 +2,19 @@ import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth";
 import { clientKey, rateLimit } from "@/lib/guard";
 import { getGroqSlotStatus, resolveVyceKeyFallback, type GroqSlotStatus } from "@/lib/ai/client";
+import { routeFor, readRoutingMap } from "@/lib/egress";
 import {
   computeTierAvailability,
   emptyTierMap,
   loadVyceKey,
   probeVyce,
   resolveVyceBaseUrl,
+  sharpenVyceProbeWithOriginHealth,
   vyceProbeTarget,
+  VYCE_PROBE_TIMEOUT_PROXY_MS,
+  VYCE_RELAY_PROBE_TIMEOUT_MS,
+  VYCE_TIMEOUT_MS,
+  type VyceOriginVerdict,
   type VyceStatusPayload,
 } from "@/lib/connectors/vyce";
 
@@ -30,6 +36,19 @@ import {
  * Task 13-b ADDITIVE field: the top-level `groq` sibling carries the Groq
  * provider slot status (getGroqSlotStatus) — the `status` object itself is
  * byte-identical to the pre-13-b contract, so existing consumers are unaffected.
+ *
+ * R18-a (Vyce truth) — timeout/egress/origin honesty:
+ * - Vault branch probes through the SAME egress chats use (routeFor("vyce",
+ *   readRoutingMap()); 12s per proxied pool attempt / 8s direct).
+ * - Relay-fallback branch probes with an 18s budget: the nexus-relay waits up
+ *   to 15s on its upstream before answering its honest 502 [MEASURED R18-0:
+ *   502 UPSTREAM_UNREACHABLE at 15.1s] — the pre-R18-a 8s probe timed out
+ *   BEFORE that answer and under-reported the outage as "did not respond".
+ * - A failed vault probe (NETWORK_ERROR/ORIGIN_DOWN/UPSTREAM_KEY_MISSING
+ *   against vyceai.com) is sharpened with the no-key origin-health probe:
+ *   origin up → transport error kept + origin-alive note (egress problem);
+ *   origin down → ORIGIN_DOWN (Vyce-side outage). Additive payload field
+ *   `origin: "up" | "down" | "unknown" | null` carries the verdict.
  *
  * P7: only a masked key preview (••••tail) and host names ever leave this
  * route — key material (vault key AND relay secret) is decrypted transiently
@@ -75,13 +94,28 @@ export async function GET(req: Request) {
       probedAt: null,
       error: { code: "VAULT_UNREADABLE", message: "Stored Vyce key could not be decrypted — re-save it." },
       fallback: null,
+      origin: null,
     };
     return NextResponse.json({ ok: true, status: payload, groq });
   }
 
-  // --- Vault key present → probe with it.
+  // --- Vault key present → probe with it through the SAME egress chats use
+  // (R18-a): route = routeFor("vyce", routing map) — the live map has
+  // vyce=proxy — with a 12s budget per proxied pool attempt / 8s direct. A
+  // failed probe is then sharpened with the no-key origin-health probe so a
+  // Vyce-side outage is reported as ORIGIN_DOWN, never a vague "unreachable".
   if (vault.ok) {
-    const probe = await probeVyce(vault.key, baseUrl);
+    const route = routeFor("vyce", await readRoutingMap());
+    let probe = await probeVyce(vault.key, baseUrl, {
+      timeoutMs: route === "proxy" ? VYCE_PROBE_TIMEOUT_PROXY_MS : VYCE_TIMEOUT_MS,
+      route,
+    });
+    let origin: VyceOriginVerdict | null = null;
+    if (!probe.ok) {
+      const sharpened = await sharpenVyceProbeWithOriginHealth(probe, baseUrl, route);
+      probe = sharpened.probe;
+      origin = sharpened.origin;
+    }
     const payload: VyceStatusPayload = {
       configured: true,
       connected: probe.ok,
@@ -95,6 +129,7 @@ export async function GET(req: Request) {
         ? null
         : { code: probe.code, message: probe.message },
       fallback: null,
+      origin,
     };
     return NextResponse.json({ ok: true, status: payload, groq });
   }
@@ -111,7 +146,10 @@ export async function GET(req: Request) {
       // via the relay that is <ref>.supabase.co (never claim vyceai.com while
       // probing the relay edge).
       const probedBase = fb.baseUrl ?? baseUrl;
-      const probe = await probeVyce(fb.key, probedBase);
+      // R18-a: 18s budget — the relay answers its honest 502 at ~15.1s
+      // [MEASURED R18-0]; an 8s probe times out BEFORE that answer arrives
+      // and under-reports a Vyce-side outage as "did not respond".
+      const probe = await probeVyce(fb.key, probedBase, { timeoutMs: VYCE_RELAY_PROBE_TIMEOUT_MS });
       // Task 16-a/17-b: name the rejected secret plainly when the EF key fails
       // (the 401 passed through the relay verbatim from Vyce — honest key
       // rejection, not a relay-auth failure).
@@ -124,6 +162,14 @@ export async function GET(req: Request) {
                 "The VYCE_API_KEY stored in the Supabase Edge-Function secrets was rejected by Vyce (HTTP 401 invalid_api_key) — reached via the nexus-relay edge function; update the secret in the Supabase dashboard (harness project) or paste a fresh key in the panel.",
             }
           : { code: probe.code, message: probe.message };
+      // R18-a: a relay-side ORIGIN_DOWN (its 502 UPSTREAM_UNREACHABLE body or a
+      // verbatim 52x pass-through) is a MEASURED vyceai.com origin verdict —
+      // the relay tried vyceai.com for 15s so the owner doesn't have to guess.
+      const origin: VyceOriginVerdict | null = probe.ok
+        ? null
+        : probe.code === "ORIGIN_DOWN"
+          ? "down"
+          : null;
       const payload: VyceStatusPayload = {
         configured: false, // no vault key — fallback is a usable but secondary source
         connected: probe.ok,
@@ -135,6 +181,7 @@ export async function GET(req: Request) {
         probedAt,
         error,
         fallback: { available: true, reason: null, projectRef: fb.projectRef ?? null },
+        origin,
       };
       return NextResponse.json({ ok: true, status: payload, groq });
     }
@@ -154,6 +201,7 @@ export async function GET(req: Request) {
     probedAt: null,
     error: null,
     fallback,
+    origin: null,
   };
   return NextResponse.json({ ok: true, status: payload, groq });
 }

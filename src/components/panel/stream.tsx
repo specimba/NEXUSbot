@@ -35,6 +35,18 @@ function levelBadgeClass(level: string): string {
   }
 }
 
+/**
+ * R18-d — copyable example for the ingest-token dialog. The contract is
+ * REAL, verified against POST /api/events (type required, source defaults
+ * "system", level defaults "info", payload any JSON ≤ 8 KiB) and POST
+ * /api/usage (same bearer authorizes counter writes: {kind, model, …}).
+ */
+const INGEST_EXAMPLE = `POST /api/events
+Authorization: Bearer <your-ingest-token>
+Content-Type: application/json
+
+{"type":"viewer.join","source":"kick","payload":{"user":"@name"}}`;
+
 export function StreamTab() {
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const { toast } = useToast();
@@ -129,6 +141,51 @@ export function StreamTab() {
               </DialogHeader>
 
               <div className="space-y-4">
+                {/* R18d help block — what ingest tokens are for + how to use them,
+                    with the REAL request contract (copyable). */}
+                <div className="space-y-2 rounded-md border border-border/60 bg-muted/30 p-3">
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                    What this is for
+                  </p>
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    Ingest tokens let external things — the Kick widget, userscripts,
+                    automations — write events into the L0 stream (and usage counters)
+                    without ever knowing the panel password. Only a sha256 hash is
+                    stored; the plaintext token is shown exactly once at creation.
+                  </p>
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                    How to use
+                  </p>
+                  <ol className="list-decimal space-y-1 pl-4 text-xs leading-relaxed text-muted-foreground">
+                    <li>
+                      Type a label like <span className="font-mono">kick-widget</span> → Create.
+                    </li>
+                    <li>Copy the shown token immediately — it is never displayed again.</li>
+                    <li>From your external script, send requests with it:</li>
+                  </ol>
+                  <div className="flex items-start gap-2">
+                    <pre className="min-w-0 flex-1 whitespace-pre-wrap break-words rounded bg-background/60 p-2 font-mono text-[11px] leading-relaxed text-muted-foreground">
+                      {INGEST_EXAMPLE}
+                    </pre>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="size-11 shrink-0"
+                      aria-label="Copy example request to clipboard"
+                      onClick={async () => {
+                        await navigator.clipboard.writeText(INGEST_EXAMPLE);
+                        toast({ title: "Example request copied" });
+                      }}
+                    >
+                      <Copy className="size-4" aria-hidden="true" />
+                    </Button>
+                  </div>
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    The same token also authorizes usage-counter writes at{" "}
+                    <span className="font-mono">POST /api/usage</span>.
+                  </p>
+                </div>
+
                 <form
                   className="flex items-end gap-2"
                   onSubmit={(e) => {
