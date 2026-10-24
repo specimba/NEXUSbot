@@ -18,6 +18,16 @@ import { loadEgressPool, pickProxies, proxiedFetch } from "./egress";
  *   upstream bytes; a board that parses without scores keeps rows with
  *   score:null (rank is still real data). A parse that fails the model-family
  *   sanity check is PARSE_FAILED — garbage is never stored as success.
+ * - Metric honesty (R19-b): every source declares the METRIC it measures
+ *   (metricLabel, e.g. "Arena Elo (chat)" vs "Net Improvement % (agent)") —
+ *   boards are NEVER rendered as bare unlabeled numbers again, because a
+ *   20.77 next to a 1517 is two different metrics on two different scales.
+ * - Sanity-range guard (R19-b): every parsed score is checked against its
+ *   kind's plausible range (BENCH_SCORE_RANGES). An out-of-range number is a
+ *   parse anomaly — the entry is KEPT as a rank-only row (score:null) and a
+ *   warning note is attached to the snapshot, so a future source-board
+ *   redesign (score column swapped for votes/CI/…) can never silently store
+ *   nonsense as if it were the metric.
  * - Failures are STORED as honest snapshots ({ok:false, error}) so the card and
  *   cadence service can report and retry them; error messages are static-ish
  *   strings — no secrets, no key material, no upstream body dumps.
@@ -69,28 +79,75 @@ export type BenchSource = {
   readonly kind: BenchKind;
   readonly label: string;
   readonly url: string;
+  /** The metric this board actually scores on — rendered wherever scores are. */
+  readonly metricLabel: string;
+  /** "percent" scores render with a % suffix; "plain" are bare numbers. */
+  readonly metricUnit: BenchMetricUnit;
 };
 
+export type BenchMetricUnit = "percent" | "plain";
+
 export const BENCH_SOURCES: readonly BenchSource[] = [
-  { kind: "aa-index", label: "Artificial Analysis", url: "https://artificialanalysis.ai/" },
-  { kind: "arena-chat", label: "Arena · Chat · Text", url: "https://arena.ai/leaderboard/chat/text" },
+  {
+    kind: "aa-index",
+    label: "Artificial Analysis",
+    url: "https://artificialanalysis.ai/",
+    metricLabel: "Intelligence Index",
+    metricUnit: "plain",
+  },
+  {
+    kind: "arena-chat",
+    label: "Arena · Chat · Text",
+    url: "https://arena.ai/leaderboard/chat/text",
+    metricLabel: "Arena Elo (chat)",
+    metricUnit: "plain",
+  },
   {
     kind: "arena-chat-non-english",
     label: "Arena · Chat · Non-English",
     url: "https://arena.ai/leaderboard/chat/text/non-english",
+    metricLabel: "Arena Elo (chat)",
+    metricUnit: "plain",
   },
   {
     kind: "arena-chat-multi-turn",
     label: "Arena · Chat · Multi-Turn",
     url: "https://arena.ai/leaderboard/chat/text/multi-turn",
+    metricLabel: "Arena Elo (chat)",
+    metricUnit: "plain",
   },
-  { kind: "arena-agent", label: "Arena · Agent", url: "https://arena.ai/leaderboard/agent" },
+  {
+    kind: "arena-agent",
+    label: "Arena · Agent",
+    url: "https://arena.ai/leaderboard/agent",
+    metricLabel: "Net Improvement % (agent)",
+    metricUnit: "percent",
+  },
   {
     kind: "arena-agent-alignment",
     label: "Arena · Agent · Alignment",
     url: "https://arena.ai/leaderboard/agent/alignment",
+    metricLabel: "Alignment Index",
+    metricUnit: "plain",
   },
 ];
+
+/**
+ * Plausible score ranges per kind [MEASURED against the live boards R18-c]:
+ * chat boards are Elo-like (~1500s), the agent board is a Net Improvement
+ * percentage (−100…100), the alignment + intelligence indices are 0…100.
+ * These are a parse-time GUARD against future source redesigns — not a claim
+ * that today's data is wrong. A number outside its range is an anomaly: the
+ * entry keeps its rank but its score is nulled (never silently stored).
+ */
+export const BENCH_SCORE_RANGES: Readonly<Record<BenchKind, { min: number; max: number }>> = {
+  "aa-index": { min: 0, max: 100 },
+  "arena-chat": { min: 800, max: 1600 },
+  "arena-chat-non-english": { min: 800, max: 1600 },
+  "arena-chat-multi-turn": { min: 800, max: 1600 },
+  "arena-agent": { min: -100, max: 100 },
+  "arena-agent-alignment": { min: 0, max: 100 },
+};
 
 export function benchSource(kind: BenchKind): BenchSource {
   const src = BENCH_SOURCES.find((s) => s.kind === kind);
@@ -120,10 +177,16 @@ export type BenchSnapshot = {
   kind: BenchKind;
   label: string;
   url: string;
+  /** Metric this board scores on (R19-b) — snapshots since R19-b carry it;
+   *  older stored snapshots are re-derived from BENCH_SOURCES on read. */
+  metricLabel: string;
+  metricUnit: BenchMetricUnit;
   fetchedAt: string; // ISO
   via: BenchVia;
   modelCount: number | null;
   error: BenchError | null;
+  /** Parse-anomaly warnings (R19-b) — e.g. out-of-range scores. null = clean. */
+  notes: string | null;
   entries: BenchEntry[];
 };
 
@@ -225,8 +288,9 @@ function extractFlightText(html: string): string {
  * JSON objects carrying {name, intelligenceIndex}. Brace-matches from every
  * {"id":" start; JSON.parse candidates; keeps tolerant survivors.
  * [MEASURED] against the live flight payload: 54 raw objects → deduped set.
+ * Returns RAW rows (finalize + range guard happen in parseForKind).
  */
-function parseAaObjects(text: string): BenchEntry[] | null {
+function parseAaObjects(text: string): RawEntry[] | null {
   if (!text) return null;
   const starts: number[] = [];
   const re = /\{"id":"/g;
@@ -271,7 +335,7 @@ function parseAaObjects(text: string): BenchEntry[] | null {
     if (typeof scoreRaw !== "number" || !Number.isFinite(scoreRaw)) continue;
     raw.push({ model: o.name, score: round2(scoreRaw) });
   }
-  return finalizeEntries(raw);
+  return raw.length > 0 ? raw : null;
 }
 
 /**
@@ -281,9 +345,9 @@ function parseAaObjects(text: string): BenchEntry[] | null {
  * concatenated digits line (e.g. "5855535353525246464545" = 2-char scores in
  * board order). Pairs digits to the consecutive link run only when lengths
  * line up (even digit count ≤ 2×links); unpaired rows keep score:null — rank
- * is still real data.
+ * is still real data. Returns RAW rows (finalize + range guard in parseForKind).
  */
-function parseAaMarkdown(markdown: string): BenchEntry[] | null {
+function parseAaMarkdown(markdown: string): RawEntry[] | null {
   if (!markdown) return null;
   const idx = markdown.indexOf("Intelligence Index");
   if (idx === -1) return null;
@@ -313,7 +377,7 @@ function parseAaMarkdown(markdown: string): BenchEntry[] | null {
       if (Number.isFinite(v)) raw[i] = { model: names[i], score: v };
     }
   }
-  return finalizeEntries(raw);
+  return raw.length > 0 ? raw : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -347,8 +411,13 @@ function isMetaLine(line: string): boolean {
  *   alignment: rank, spread, "GPT-6.1 Sol" (PLAIN), "OpenAI", "87.9±1.5"
  * Anchor on the per-board score line, then walk back over non-empty lines to
  * the model name (a markdown link's anchor text, or the plain name line).
+ * [RE-VERIFIED LIVE R19-b]: the agent board's standalone "20.77%±2.38%" cell
+ * sits directly under the "Net Improvement" column header, immediately after
+ * the model+lab lines — the concatenated trailing cells (sub-scores, votes,
+ * cost) are correctly NOT matched by the anchored regex.
+ * Returns RAW rows (finalize + range guard happen in parseForKind).
  */
-function parseArenaMarkdown(markdown: string, kind: BenchKind): BenchEntry[] | null {
+function parseArenaMarkdown(markdown: string, kind: BenchKind): RawEntry[] | null {
   if (!markdown) return null;
   const scoreRes: RegExp[] =
     kind === "arena-agent"
@@ -392,7 +461,7 @@ function parseArenaMarkdown(markdown: string, kind: BenchKind): BenchEntry[] | n
     }
     if (name) raw.push({ model: name, score });
   }
-  return finalizeEntries(raw);
+  return raw.length > 0 ? raw : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -530,7 +599,31 @@ async function poolGet(url: string): Promise<DirectFetchOutcome> {
 // Per-kind fetch + parse pipeline
 // ---------------------------------------------------------------------------
 
-function parseForKind(kind: BenchKind, source: "html" | "markdown", text: string): BenchEntry[] | null {
+/** Parsed outcome: finalized entries (null = unrecognizable) + range-anomaly count. */
+type ParseOutcome = { entries: BenchEntry[] | null; rangeWarnings: number };
+
+/**
+ * Sanity-range guard (R19-b): nulls any parsed score outside its kind's
+ * plausible range (BENCH_SCORE_RANGES) BEFORE dedupe/sort/rank, so the row
+ * degrades to the honest rank-only pattern and can never masquerade as the
+ * metric. Returns the guarded rows + how many scores were anomalous.
+ */
+function applyScoreRangeGuard(kind: BenchKind, raw: RawEntry[]): { raw: RawEntry[]; warnings: number } {
+  const range = BENCH_SCORE_RANGES[kind];
+  let warnings = 0;
+  const guarded = raw.map((r) => {
+    if (r.score === null) return r;
+    if (r.score < range.min || r.score > range.max) {
+      warnings++;
+      return { model: r.model, score: null };
+    }
+    return r;
+  });
+  return { raw: guarded, warnings };
+}
+
+/** Raw-row extraction per kind (no finalize, no range guard yet). */
+function collectRawEntries(kind: BenchKind, source: "html" | "markdown", text: string): RawEntry[] | null {
   if (kind === "aa-index") {
     if (source === "html") {
       // primary: RSC flight chunks → model objects with intelligenceIndex
@@ -538,21 +631,28 @@ function parseForKind(kind: BenchKind, source: "html" | "markdown", text: string
       const fromFlight = parseAaObjects(flight);
       if (fromFlight) return fromFlight;
       // tolerate a plain __NEXT_DATA__ page or any embedded JSON objects
-      const fromAny = parseAaObjects(text);
-      return fromAny;
+      return parseAaObjects(text);
     }
     return parseAaMarkdown(text);
   }
   return parseArenaMarkdown(text, kind);
 }
 
+function parseForKind(kind: BenchKind, source: "html" | "markdown", text: string): ParseOutcome {
+  const raw = collectRawEntries(kind, source, text);
+  if (!raw || raw.length === 0) return { entries: null, rangeWarnings: 0 };
+  const guarded = applyScoreRangeGuard(kind, raw);
+  return { entries: finalizeEntries(guarded.raw), rangeWarnings: guarded.warnings };
+}
+
 /**
  * Parse-only entry point (used by the refresh pipeline and safe for
- * diagnostics): turns fetched HTML/markdown into finalized entries, or null
- * when the family sanity check fails. Never fabricates.
+ * diagnostics): turns fetched HTML/markdown into finalized entries (range
+ * guard applied — out-of-range scores come back as null), or null when the
+ * family sanity check fails. Never fabricates.
  */
 export function parseBenchPayload(kind: BenchKind, medium: "html" | "markdown", text: string): BenchEntry[] | null {
-  return parseForKind(kind, medium, text);
+  return parseForKind(kind, medium, text).entries;
 }
 
 function staticMessage(code: BenchError["code"], source: BenchSource): string {
@@ -567,12 +667,14 @@ function staticMessage(code: BenchError["code"], source: BenchSource): string {
 }
 
 export type FetchBenchmarksOutcome =
-  | { ok: true; via: BenchVia; entries: BenchEntry[]; modelCount: number }
+  | { ok: true; via: BenchVia; entries: BenchEntry[]; modelCount: number; rangeWarnings: number }
   | { ok: false; error: BenchError };
 
 /**
  * Layered, honest fetch+parse for one source. NEVER fabricates entries.
  * Order: direct → Hyperbrowser (JS rendering) → pool retry (transport only).
+ * The ok branch carries rangeWarnings: how many parsed scores fell outside
+ * the kind's plausible metric range and were degraded to score:null (R19-b).
  */
 export async function fetchBenchmarks(kind: BenchKind): Promise<FetchBenchmarksOutcome> {
   const source = benchSource(kind);
@@ -582,8 +684,10 @@ export async function fetchBenchmarks(kind: BenchKind): Promise<FetchBenchmarksO
   // Layer 1 — direct
   const direct = await directGet(source.url);
   if (direct.kind === "ok") {
-    const entries = parseForKind(kind, "html", direct.text);
-    if (entries) return { ok: true, via: "direct", entries, modelCount: entries.length };
+    const parsed = parseForKind(kind, "html", direct.text);
+    if (parsed.entries) {
+      return { ok: true, via: "direct", entries: parsed.entries, modelCount: parsed.entries.length, rangeWarnings: parsed.rangeWarnings };
+    }
     // 200 bytes with no usable data (SPA) → try the renderer next
   } else if (direct.kind === "transport-failed") {
     directTransportFailed = true; // pool retry is allowed later for this case only
@@ -594,8 +698,10 @@ export async function fetchBenchmarks(kind: BenchKind): Promise<FetchBenchmarksO
   // Layer 2 — Hyperbrowser scrape (the JS-rendering fallback)
   const hb = await hbScrape(source.url);
   if (hb.kind === "ok") {
-    const entries = parseForKind(kind, "markdown", hb.markdown);
-    if (entries) return { ok: true, via: "hyperbrowser", entries, modelCount: entries.length };
+    const parsed = parseForKind(kind, "markdown", hb.markdown);
+    if (parsed.entries) {
+      return { ok: true, via: "hyperbrowser", entries: parsed.entries, modelCount: parsed.entries.length, rangeWarnings: parsed.rangeWarnings };
+    }
     // markdown present but unparseable → honest PARSE_FAILED at the tail
   } else if (hb.kind === "no-key" && !directTransportFailed && direct.kind !== "ok") {
     // JS/Cloudflare-guarded source + no vault key to render it → the one
@@ -608,8 +714,10 @@ export async function fetchBenchmarks(kind: BenchKind): Promise<FetchBenchmarksO
   if (directTransportFailed) {
     const pooled = await poolGet(source.url);
     if (pooled.kind === "ok") {
-      const entries = parseForKind(kind, "html", pooled.text);
-      if (entries) return { ok: true, via: "pool", entries, modelCount: entries.length };
+      const parsed = parseForKind(kind, "html", pooled.text);
+      if (parsed.entries) {
+        return { ok: true, via: "pool", entries: parsed.entries, modelCount: parsed.entries.length, rangeWarnings: parsed.rangeWarnings };
+      }
       pooledGotContent = true;
     }
   }
@@ -661,10 +769,16 @@ function sanitizeSnapshot(raw: unknown): BenchSnapshot | null {
     kind: src.kind,
     label: src.label,
     url: src.url,
+    // metricLabel/metricUnit: snapshots written since R19-b carry them; older
+    // stored payloads are re-derived from the static BENCH_SOURCES map so they
+    // render labeled too (never trust the stored copy over the static truth).
+    metricLabel: src.metricLabel,
+    metricUnit: src.metricUnit,
     fetchedAt: o.fetchedAt,
     via: o.via as BenchVia,
     modelCount: typeof o.modelCount === "number" ? o.modelCount : entries.length,
     error,
+    notes: typeof o.notes === "string" && o.notes.trim().length > 0 ? o.notes.trim().slice(0, 512) : null,
     entries,
   };
 }
@@ -717,6 +831,11 @@ async function logRefreshEvent(result: BenchRefreshResult): Promise<void> {
 
 const inflight = new Map<BenchKind, Promise<BenchRefreshResult>>();
 
+/** Static warning when parsed scores fall outside the kind's plausible range. */
+function rangeWarningNote(warnings: number): string {
+  return `${warnings} ${warnings === 1 ? "entry scored" : "entries scored"} outside the plausible range for this metric — score column may have changed on the source board`;
+}
+
 async function runRefresh(kind: BenchKind, trigger: string | undefined): Promise<BenchRefreshResult> {
   const source = benchSource(kind);
   const fetchedAt = new Date().toISOString();
@@ -727,10 +846,13 @@ async function runRefresh(kind: BenchKind, trigger: string | undefined): Promise
         kind,
         label: source.label,
         url: source.url,
+        metricLabel: source.metricLabel,
+        metricUnit: source.metricUnit,
         fetchedAt,
         via: outcome.via,
         modelCount: outcome.modelCount,
         error: null,
+        notes: outcome.rangeWarnings > 0 ? rangeWarningNote(outcome.rangeWarnings) : null,
         entries: outcome.entries,
       }
     : {
@@ -738,10 +860,13 @@ async function runRefresh(kind: BenchKind, trigger: string | undefined): Promise
         kind,
         label: source.label,
         url: source.url,
+        metricLabel: source.metricLabel,
+        metricUnit: source.metricUnit,
         fetchedAt,
         via: "failed",
         modelCount: null,
         error: outcome.error,
+        notes: null,
         entries: [],
       };
   try {
@@ -790,10 +915,13 @@ export async function listBenchmarkStates(): Promise<BenchSnapshot[]> {
       kind: src.kind,
       label: src.label,
       url: src.url,
+      metricLabel: src.metricLabel,
+      metricUnit: src.metricUnit,
       fetchedAt: "",
       via: "failed",
       modelCount: null,
       error: null,
+      notes: null,
       entries: [],
     });
   }

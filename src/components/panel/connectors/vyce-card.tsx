@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -121,11 +121,17 @@ export function VyceCard() {
   const queryClient = useQueryClient();
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [baseUrlInput, setBaseUrlInput] = useState("");
+  // R19-a: manual Refresh = deliberate live re-check (?force=1 bypasses the
+  // probe-cadence cache); the automatic 30s polls never set it. A ref (not
+  // state) so the queryFn reads it synchronously at fetch time.
+  const forceProbeRef = useRef(false);
 
   const status = useQuery<StatusResponse>({
     queryKey: ["connector-vyce-status"],
     queryFn: async () => {
-      const res = await fetch("/api/vyce/status", { cache: "no-store" });
+      const force = forceProbeRef.current;
+      forceProbeRef.current = false;
+      const res = await fetch(`/api/vyce/status${force ? "?force=1" : ""}`, { cache: "no-store" });
       if (!res.ok) throw new Error("status unavailable");
       return res.json() as Promise<StatusResponse>;
     },
@@ -206,9 +212,12 @@ export function VyceCard() {
           variant="outline"
           size="icon"
           className="size-11 shrink-0"
-          aria-label="Refresh Vyce status"
+          aria-label="Refresh Vyce status (live re-check)"
           disabled={status.isFetching}
-          onClick={() => void status.refetch()}
+          onClick={() => {
+            forceProbeRef.current = true;
+            void status.refetch();
+          }}
         >
           <RefreshCw className={cn("size-4", status.isFetching && "animate-spin")} aria-hidden="true" />
         </Button>

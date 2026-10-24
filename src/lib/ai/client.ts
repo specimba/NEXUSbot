@@ -21,6 +21,15 @@ import { loadRoleBindings, type RoleBinding } from "@/lib/ai/role-bindings";
 // function declarations at call time, never at module-init, so the cycle is
 // runtime-safe [verified: lint + tsc clean, live chat call measured].
 import { chatCompleteCustom, type CustomChatResult } from "@/lib/ai/custom-providers";
+// R19-a: in-memory per-provider circuit breaker (no deps, no cycles).
+import { checkCircuit, recordCircuitFailure, recordCircuitSuccess, type CircuitKey } from "@/lib/ai/circuit";
+// R19-a: probe-cadence schedule shared with the Vyce status route.
+import {
+  probeBackoffMs,
+  probeCacheNote,
+  PROBE_FAILURE_BACKOFF_MS,
+  type ProbeCacheMeta,
+} from "@/lib/connectors/vyce";
 import {
   DEFAULT_GROQ_BASE_URL,
   GROQ_STATIC_MODELS,
@@ -644,6 +653,9 @@ type BrainUsageTap = {
   streamed?: boolean;
   /** Static egress mode actually used for the transport attempt. */
   egress?: "direct" | "proxy";
+  /** R19-a: set when the attempt was rejected by the circuit breaker before
+   *  any network call — meta.circuit "open" keeps the telemetry truthful. */
+  circuit?: "open";
 };
 
 async function recordBrainUsage(tap: BrainUsageTap): Promise<void> {
@@ -656,6 +668,7 @@ async function recordBrainUsage(tap: BrainUsageTap): Promise<void> {
     if (tap.role) meta.role = tap.role;
     if (tap.streamed) meta.streamed = true;
     if (tap.egress) meta.egress = tap.egress;
+    if (tap.circuit) meta.circuit = tap.circuit;
     if (tap.tokens) {
       if (tap.tokens.prompt !== null) meta.promptTokens = tap.tokens.prompt;
       if (tap.tokens.completion !== null) meta.completionTokens = tap.tokens.completion;
@@ -714,6 +727,70 @@ export type ChatCompletionResult = {
 
 const DEFAULT_CHAT_TIMEOUT_MS = 45_000;
 
+// ---------------------------------------------------------------------------
+// R19-a — circuit-breaker guard (vyce/groq paths)
+//
+// The breaker state lives in src/lib/ai/circuit.ts (in-memory, per provider
+// key "vyce" | "groq"). The guard runs AFTER role-binding resolution and
+// BEFORE any credential resolution or network call: when the provider's
+// circuit is open (consecutive typed failures), the call fails fast with the
+// RECORDED error class and still writes exactly ONE UsageEvent row — meta.error
+// carries the recorded class and meta.circuit "open", so telemetry stays
+// truthful about attempts that were skipped without touching the network.
+// Successes close the circuit; typed upstream failures re-open it (half-open:
+// after the cooldown the next call is a trial). Input errors (BAD_INPUT) are
+// NOT provider-health evidence and never touch the breaker.
+// ---------------------------------------------------------------------------
+
+const BRAIN_CIRCUIT_CLASSES: readonly string[] = [
+  "NO_KEY",
+  "KEY_REJECTED",
+  "UNREACHABLE_FROM_SANDBOX",
+  "RATE_LIMITED",
+  "BAD_RESPONSE",
+];
+
+/** Circuit-open BrainError: recorded class + static message (P7: no bodies). */
+function circuitOpenError(
+  provider: BrainProvider,
+  check: ReturnType<typeof checkCircuit>,
+  model: string | null,
+): BrainError {
+  const cls = check.lastErrorClass ?? "UNKNOWN";
+  const code = BRAIN_CIRCUIT_CLASSES.includes(cls) ? (cls as BrainErrorCode) : "BAD_RESPONSE";
+  const secs = Math.max(1, Math.ceil(check.retryInMs / 1000));
+  return new BrainError(
+    code,
+    `circuit open — ${labelFor(provider)} skipped for ${secs}s after ${cls} at ${check.lastErrorAt ?? "unknown time"}; no network call made`,
+    { model },
+  );
+}
+
+/** Circuit guard for the vyce/groq chat paths. Throws (after writing the ONE
+ *  honest UsageEvent row) when the provider's circuit is open. */
+async function assertCircuitClosed(
+  provider: BrainProvider,
+  ctx: { model: string; role: BrainRole | null; started: number; streamed?: boolean },
+): Promise<void> {
+  const key: CircuitKey = provider;
+  const check = checkCircuit(key);
+  if (!check.open) return;
+  const err = circuitOpenError(provider, check, ctx.model);
+  await recordBrainUsage({
+    model: ctx.model,
+    ok: false,
+    latencyMs: Date.now() - ctx.started,
+    error: check.lastErrorClass ?? "UNKNOWN",
+    // No credential resolution happened — for vyce no source is claimed at
+    // all; groq rows use the provider marker (same as live groq rows).
+    ...(provider === "groq" ? { source: "groq" as const } : {}),
+    role: ctx.role,
+    ...(ctx.streamed ? { streamed: true } : {}),
+    circuit: "open",
+  });
+  throw err;
+}
+
 /**
  * Shared non-streaming completion tail: upstream HTTP status → typed BrainError
  * (static messages only — response bodies are NEVER included), payload parse,
@@ -739,7 +816,9 @@ async function finishChatCompletion(
       egress: ctx.egress,
     });
     // Body is intentionally NOT read into the error message (static strings only).
-    throw mapUpstreamFailure(provider, status, ctx.model, via);
+    const err = mapUpstreamFailure(provider, status, ctx.model, via);
+    recordCircuitFailure(provider, err.code); // R19-a: typed upstream failure
+    throw err;
   }
 
   const data: unknown = await readBody();
@@ -754,6 +833,7 @@ async function finishChatCompletion(
       role: ctx.role,
       egress: ctx.egress,
     });
+    recordCircuitFailure(provider, "BAD_RESPONSE"); // R19-a
     throw new BrainError("BAD_RESPONSE", `${labelFor(provider)} returned an unrecognized completion shape for model "${ctx.model}"`, {
       httpStatus: status,
       model: ctx.model,
@@ -770,6 +850,7 @@ async function finishChatCompletion(
     role: ctx.role,
     egress: ctx.egress,
   });
+  recordCircuitSuccess(provider); // R19-a: closes the circuit fully
 
   return { model: ctx.model, content: parsed.content, latencyMs, usage: parsed.usage };
 }
@@ -815,8 +896,15 @@ export async function chatComplete(
   // A vyce/groq binding overrides the requested provider slot (the binding is
   // the owner-set route; opts.provider stays relevant only for unbound calls).
   const provider: BrainProvider = binding?.via === "groq" ? "groq" : requested;
+
+  // R19-a: circuit breaker — after binding resolution, BEFORE any credential
+  // resolution or network call. Fail fast with the recorded class + ONE
+  // honest UsageEvent row (meta.circuit "open") when the breaker is open.
+  await assertCircuitClosed(provider, { model, role, started });
+
   const creds = provider === "groq" ? await resolveGroqCredentials() : await resolveVyceCredentials();
   if (!creds) {
+    recordCircuitFailure(provider, "NO_KEY"); // R19-a: typed failure (config gap)
     await recordBrainUsage({ model, ok: false, latencyMs: null, error: "NO_KEY", role });
     throw new BrainError(
       "NO_KEY",
@@ -826,6 +914,7 @@ export async function chatComplete(
     );
   }
   if (!Array.isArray(messages) || messages.length === 0) {
+    // BAD_INPUT is an input problem, not provider health — no circuit recording.
     throw new BrainError("BAD_INPUT", "messages must be a non-empty array");
   }
 
@@ -868,6 +957,7 @@ export async function chatComplete(
         err instanceof BrainError
           ? err
           : new BrainError("BAD_RESPONSE", `${labelFor(provider)} proxy call failed with an unexpected transport error for model "${model}"`, { model });
+      recordCircuitFailure(provider, e.code); // R19-a: typed transport failure
       await recordBrainUsage({
         model,
         ok: false,
@@ -917,6 +1007,7 @@ export async function chatComplete(
   } catch (err) {
     const name = err instanceof Error ? err.name : "";
     const timedOut = name === "TimeoutError" || name === "AbortError";
+    recordCircuitFailure(provider, "UNREACHABLE_FROM_SANDBOX"); // R19-a
     await recordBrainUsage({
       model,
       ok: false,
@@ -980,8 +1071,15 @@ export async function* streamComplete(
 
   // vyce/groq bindings stream exactly like today, with the BOUND model.
   const provider: BrainProvider = binding?.via === "groq" ? "groq" : requested;
+
+  // R19-a: circuit breaker — after binding resolution, BEFORE any credential
+  // resolution or network call (same guard as chatComplete; streamed rows carry
+  // streamed:true + meta.circuit "open").
+  await assertCircuitClosed(provider, { model, role, started, streamed: true });
+
   const creds = provider === "groq" ? await resolveGroqCredentials() : await resolveVyceCredentials();
   if (!creds) {
+    recordCircuitFailure(provider, "NO_KEY"); // R19-a: typed failure (config gap)
     await recordBrainUsage({ model, ok: false, latencyMs: null, error: "NO_KEY", role, streamed: true });
     throw new BrainError(
       "NO_KEY",
@@ -991,6 +1089,7 @@ export async function* streamComplete(
     );
   }
   if (!Array.isArray(messages) || messages.length === 0) {
+    // BAD_INPUT is an input problem, not provider health — no circuit recording.
     throw new BrainError("BAD_INPUT", "messages must be a non-empty array");
   }
 
@@ -1019,6 +1118,7 @@ export async function* streamComplete(
   } catch (err) {
     const name = err instanceof Error ? err.name : "";
     const timedOut = name === "TimeoutError" || name === "AbortError";
+    recordCircuitFailure(provider, "UNREACHABLE_FROM_SANDBOX"); // R19-a
     await recordBrainUsage({
       model,
       ok: false,
@@ -1049,7 +1149,9 @@ export async function* streamComplete(
       streamed: true,
       egress: "direct",
     });
-    throw mapUpstreamFailure(provider, res.status, model, "direct");
+    const streamHttpError = mapUpstreamFailure(provider, res.status, model, "direct");
+    recordCircuitFailure(provider, streamHttpError.code); // R19-a
+    throw streamHttpError;
   }
 
   const reader = res.body.getReader();
@@ -1088,9 +1190,11 @@ export async function* streamComplete(
     }
   } catch {
     streamError = "STREAM_INTERRUPTED";
+    recordCircuitFailure(provider, "BAD_RESPONSE"); // R19-a
     throw new BrainError("BAD_RESPONSE", `stream from ${labelFor(provider)} was interrupted for model "${model}"`, { model });
   } finally {
     void reader.cancel().catch(() => undefined);
+    if (streamError === null) recordCircuitSuccess(provider); // R19-a: clean stream
     await recordBrainUsage({
       model,
       ok: streamError === null,
@@ -1121,74 +1225,120 @@ export type GroqModelCatalog = {
 };
 
 const GROQ_CATALOG_TTL = 60_000;
-let groqCatalogCache: { at: number; result: GroqModelCatalog } | null = null;
+let groqCatalogCache: { at: number; result: GroqModelCatalog; backoffStep: number } | null = null;
+
+/** R19-a: a catalog result is a FAILURE for cadence purposes only when a live
+ *  network probe actually failed. NO_KEY made no network call (nothing to
+ *  back off from — a key could appear any second) and keeps the flat 60s TTL. */
+function groqCatalogFailed(result: GroqModelCatalog): boolean {
+  return result.error !== null && result.error.code !== "NO_KEY";
+}
 
 /**
  * Live Groq /models probe (route-aware: direct → expects the [measured] 403 WAF
  * block; proxy → real answer through the pool). On ANY failure it returns the
  * embedded fallback list WITH the honest error attached — this function never
  * throws, so status surfaces can always render the slot truthfully.
+ *
+ * R19-a probe cadence: a SUCCESSFUL catalog probe is cached 60s (unchanged); a
+ * FAILED probe backs off 2min → 5min → 10min (cap) instead of re-probing on
+ * every status poll — half-open: after the backoff the next call is a live
+ * trial again (success resets the step, failure advances it).
  */
-export async function getGroqModelCatalog(): Promise<GroqModelCatalog> {
-  const now = Date.now();
-  if (groqCatalogCache && now - groqCatalogCache.at < GROQ_CATALOG_TTL) return groqCatalogCache.result;
+async function probeGroqModelCatalog(): Promise<GroqModelCatalog> {
+  const creds = await resolveGroqCredentials();
+  if (!creds) {
+    // NO_KEY → nothing was measured. Static list, clearly labeled, no probe.
+    return {
+      models: [...GROQ_STATIC_MODELS],
+      docsSource: "embedded-fallback",
+      via: null,
+      checkedAt: null,
+      error: {
+        code: "NO_KEY",
+        message: "no Groq key available — vault empty and Supabase edge-relay fallback unavailable",
+      },
+    };
+  }
+  try {
+    const answer = await brainEgressJsonCall(
+      "groq",
+      `${creds.baseUrl}/models`,
+      { method: "GET", headers: { Authorization: `Bearer ${creds.key}`, Accept: "application/json" } },
+      GROQ_TIMEOUT_MS,
+      { model: null, maxProxyAttempts: BRAIN_MAX_PROXY_ATTEMPTS_PROBE },
+    );
+    if (answer.status < 200 || answer.status >= 300) {
+      throw mapUpstreamFailure("groq", answer.status, null, answer.via);
+    }
+    const models = parseGroqModelsPayload(answer.bodyText);
+    if (models === null) {
+      throw new BrainError("BAD_RESPONSE", "Groq returned an unrecognized /models payload shape", {
+        httpStatus: answer.status,
+      });
+    }
+    return {
+      models,
+      docsSource: answer.via === "direct" ? "measured" : "measured-via-proxy",
+      via: answer.via,
+      checkedAt: new Date().toISOString(),
+      error: null,
+    };
+  } catch (err) {
+    const e =
+      err instanceof BrainError
+        ? err
+        : new BrainError("BAD_RESPONSE", "Groq model-catalog probe failed with an unexpected error");
+    return {
+      models: [...GROQ_STATIC_MODELS],
+      docsSource: "embedded-fallback",
+      via: null,
+      checkedAt: new Date().toISOString(),
+      error: { code: e.code, message: e.message },
+    };
+  }
+}
 
-  const result = await (async (): Promise<GroqModelCatalog> => {
-    const creds = await resolveGroqCredentials();
-    if (!creds) {
-      // NO_KEY → nothing was measured. Static list, clearly labeled, no probe.
+/** Catalog + probe-cadence metadata (null when the verdict is freshly measured). */
+async function getGroqModelCatalogWithCadence(): Promise<{
+  catalog: GroqModelCatalog;
+  cacheMeta: ProbeCacheMeta | null;
+}> {
+  const now = Date.now();
+  const cached = groqCatalogCache;
+  if (cached) {
+    const ttl = groqCatalogFailed(cached.result) ? probeBackoffMs(cached.backoffStep) : GROQ_CATALOG_TTL;
+    const age = now - cached.at;
+    if (age < ttl) {
+      const probedAtIso =
+        cached.result.checkedAt ?? new Date(cached.at).toISOString();
       return {
-        models: [...GROQ_STATIC_MODELS],
-        docsSource: "embedded-fallback",
-        via: null,
-        checkedAt: null,
-        error: {
-          code: "NO_KEY",
-          message: "no Groq key available — vault empty and Supabase edge-relay fallback unavailable",
+        catalog: cached.result,
+        cacheMeta: {
+          cached: true,
+          retryInMs: ttl - age,
+          note: probeCacheNote(cached.result.error === null, cached.result.error?.code ?? null, probedAtIso),
         },
       };
     }
-    try {
-      const answer = await brainEgressJsonCall(
-        "groq",
-        `${creds.baseUrl}/models`,
-        { method: "GET", headers: { Authorization: `Bearer ${creds.key}`, Accept: "application/json" } },
-        GROQ_TIMEOUT_MS,
-        { model: null, maxProxyAttempts: BRAIN_MAX_PROXY_ATTEMPTS_PROBE },
-      );
-      if (answer.status < 200 || answer.status >= 300) {
-        throw mapUpstreamFailure("groq", answer.status, null, answer.via);
-      }
-      const models = parseGroqModelsPayload(answer.bodyText);
-      if (models === null) {
-        throw new BrainError("BAD_RESPONSE", "Groq returned an unrecognized /models payload shape", {
-          httpStatus: answer.status,
-        });
-      }
-      return {
-        models,
-        docsSource: answer.via === "direct" ? "measured" : "measured-via-proxy",
-        via: answer.via,
-        checkedAt: new Date().toISOString(),
-        error: null,
-      };
-    } catch (err) {
-      const e =
-        err instanceof BrainError
-          ? err
-          : new BrainError("BAD_RESPONSE", "Groq model-catalog probe failed with an unexpected error");
-      return {
-        models: [...GROQ_STATIC_MODELS],
-        docsSource: "embedded-fallback",
-        via: null,
-        checkedAt: new Date().toISOString(),
-        error: { code: e.code, message: e.message },
-      };
-    }
-  })();
+  }
 
-  groqCatalogCache = { at: now, result };
-  return result;
+  const result = await probeGroqModelCatalog();
+  // Step progression: success resets; consecutive live-probe failures advance
+  // (capped by the schedule); a branch change (key appeared/vanished) starts fresh.
+  const failed = groqCatalogFailed(result);
+  const prevStep = failed && cached && groqCatalogFailed(cached.result) ? cached.backoffStep : 0;
+  groqCatalogCache = {
+    at: now,
+    result,
+    backoffStep: failed ? Math.min(prevStep + 1, PROBE_FAILURE_BACKOFF_MS.length) : 0,
+  };
+  return { catalog: result, cacheMeta: null };
+}
+
+/** Public catalog accessor (unchanged signature — cadence applies transparently). */
+export async function getGroqModelCatalog(): Promise<GroqModelCatalog> {
+  return (await getGroqModelCatalogWithCadence()).catalog;
 }
 
 // ---------------------------------------------------------------------------
@@ -1208,6 +1358,10 @@ export type GroqSlotStatus = {
   docsSource: "measured" | "measured-via-proxy" | "embedded-fallback";
   probedAt: string | null;
   error: { code: string; message: string } | null;
+  /** R19-a additive: present when the /models verdict is served from the
+   *  probe-cadence cache (60s success TTL / 2-5-10min failure backoff) —
+   *  honest "this is a cached verdict" marker for the UI. */
+  probeCache?: ProbeCacheMeta;
 };
 
 export async function getGroqSlotStatus(): Promise<GroqSlotStatus> {
@@ -1246,7 +1400,7 @@ export async function getGroqSlotStatus(): Promise<GroqSlotStatus> {
     };
   }
 
-  const catalog = await getGroqModelCatalog();
+  const { catalog, cacheMeta } = await getGroqModelCatalogWithCadence();
   return {
     configured: true,
     keySource: creds.source,
@@ -1256,5 +1410,6 @@ export async function getGroqSlotStatus(): Promise<GroqSlotStatus> {
     docsSource: catalog.docsSource,
     probedAt: catalog.checkedAt,
     error: catalog.error,
+    ...(cacheMeta ? { probeCache: cacheMeta } : {}),
   };
 }

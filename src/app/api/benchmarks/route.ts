@@ -19,6 +19,11 @@ export const dynamic = "force-dynamic";
  *
  * GET  → { ok, sources:[{kind,label,url,ok,fetchedAt,ageHours,modelCount,via,
  *        error,entries}] } — entries always included (6×300 rows is fine).
+ *        R19-b ADDITIVE: each source also carries metricLabel (the metric the
+ *        board scores on, e.g. "Arena Elo (chat)" vs "Net Improvement %
+ *        (agent)"), metricUnit ("percent"|"plain" — percent scores render
+ *        with a % suffix) and notes (parse-anomaly warnings, else null).
+ *        Existing consumers ignore unknown fields — contract not broken.
  * POST → body {}     : refresh ALL stale-or-missing sources (sequential)
  *        body {kind} : refresh exactly that source regardless of staleness
  *      → { ok, results:[{kind,ok,via,modelCount,error}] } — honest per-source
@@ -34,22 +39,37 @@ type SourceState = {
   kind: BenchKind;
   label: string;
   url: string;
+  /** R19-b additive — the metric this board scores on (never bare numbers). */
+  metricLabel: string;
+  /** R19-b additive — "percent" scores render with a % suffix, "plain" don't. */
+  metricUnit: string;
   ok: boolean;
   fetchedAt: string | null;
   ageHours: number | null;
   modelCount: number | null;
   via: string | null;
   error: { code: string; message: string } | null;
+  /** R19-b additive — parse-anomaly warning (e.g. out-of-range scores), else null. */
+  notes: string | null;
   entries: { model: string; norm: string; score: number | null; rank: number | null }[];
 };
 
-function sourceState(kind: BenchKind, label: string, url: string, snap: BenchSnapshot | null): SourceState {
+function sourceState(
+  kind: BenchKind,
+  label: string,
+  url: string,
+  metricLabel: string,
+  metricUnit: string,
+  snap: BenchSnapshot | null,
+): SourceState {
   const neverFetched = !snap || !snap.fetchedAt;
   if (neverFetched) {
     return {
       kind,
       label,
       url,
+      metricLabel,
+      metricUnit,
       ok: false,
       fetchedAt: null,
       ageHours: null,
@@ -59,6 +79,7 @@ function sourceState(kind: BenchKind, label: string, url: string, snap: BenchSna
         code: "NEVER_FETCHED",
         message: "no snapshot yet — the bench-cadence service fetches this source shortly after boot",
       },
+      notes: null,
       entries: [],
     };
   }
@@ -68,12 +89,15 @@ function sourceState(kind: BenchKind, label: string, url: string, snap: BenchSna
     kind,
     label,
     url,
+    metricLabel,
+    metricUnit,
     ok: snap.ok,
     fetchedAt: snap.fetchedAt,
     ageHours,
     modelCount: snap.ok ? snap.modelCount : null,
     via: snap.via,
     error: snap.error,
+    notes: snap.ok ? snap.notes : null,
     entries: snap.entries,
   };
 }
@@ -92,7 +116,7 @@ export async function GET(req: Request) {
   const sources: SourceState[] = [];
   for (const src of BENCH_SOURCES) {
     const snap = await getBenchmarkSnapshot(src.kind);
-    sources.push(sourceState(src.kind, src.label, src.url, snap));
+    sources.push(sourceState(src.kind, src.label, src.url, src.metricLabel, src.metricUnit, snap));
   }
   return NextResponse.json({ ok: true, sources });
 }

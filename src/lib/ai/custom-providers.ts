@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { decryptSecret, encryptSecret, maskSecret } from "@/lib/crypto";
 import { registerSecretForRedaction, redactSecrets } from "@/lib/ai/client";
+import { checkCircuit, recordCircuitFailure, recordCircuitSuccess, type CircuitKey } from "@/lib/ai/circuit";
 import {
   EGRESS_CUSTOM_PROVIDERS_KEY,
   loadEgressPool,
@@ -50,6 +51,19 @@ import {
  * STREAMING IS HONESTLY DEFERRED: proxiedFetch returns a complete buffered
  * envelope and cannot stream (same honesty constraint as the brain's
  * streamComplete). Custom providers are non-streaming only — no fake SSE.
+ *
+ * R19-a CIRCUIT BREAKER (src/lib/ai/circuit.ts, key "custom:<slug>"): chat
+ * calls and probes share one breaker per provider — a chat 429 opens the
+ * circuit for chats AND automated probes alike, so a fragile-limit upstream
+ * (the aihubmix evidence: 5 RATE_LIMITED hits in ~90s, two 200ms apart) is
+ * never hammered. A circuit-open chat fails FAST with exactly ONE honest
+ * UsageEvent row (meta.error = recorded class, meta.circuit "open", no network
+ * call); a circuit-open probe returns the typed failure with circuit "open"
+ * unless the caller passes {force:true} (manual button = deliberate live
+ * measurement). NO_KEY-class circuits never block PROBES — a keyless probe is
+ * a legitimate measurement (the upstream 401 "demands a key" IS the honest
+ * answer for a keyless provider). NOT_CONFIGURED / BAD_INPUT are input
+ * problems, not provider health — never recorded to the breaker.
  */
 
 export const CUSTOM_PROVIDERS_KV_KEY = "ai.custom-providers";
@@ -325,7 +339,74 @@ export type CustomProbeFailureCode =
 
 export type CustomProviderProbe =
   | { ok: true; httpStatus: number; models: string[] }
-  | { ok: false; code: CustomProbeFailureCode; httpStatus: number | null; message: string };
+  // R19-a additive `circuit` field: present when the breaker answered instead
+  // of the upstream (no network call was made).
+  | { ok: false; code: CustomProbeFailureCode; httpStatus: number | null; message: string; circuit?: "open" };
+
+// ---------------------------------------------------------------------------
+// R19-a — circuit class mapping (custom taxonomy ⇄ breaker classes)
+// ---------------------------------------------------------------------------
+
+/** Custom failure code → breaker error class (same semantics as today's
+ *  chat-failure mapping in client.ts: UNAUTHORIZED is the key-rejection
+ *  class; NETWORK_ERROR/FORBIDDEN are transport, never key errors). */
+function circuitClassForCustomCode(code: string): string {
+  switch (code) {
+    case "UNAUTHORIZED":
+      return "KEY_REJECTED";
+    case "RATE_LIMITED":
+      return "RATE_LIMITED";
+    case "NETWORK_ERROR":
+    case "FORBIDDEN":
+      return "UNREACHABLE_FROM_SANDBOX";
+    case "BAD_RESPONSE":
+      return "BAD_RESPONSE";
+    case "NO_KEY":
+      return "NO_KEY";
+    default:
+      // NOT_CONFIGURED / BAD_INPUT never reach the breaker (input problems).
+      return "BAD_INPUT";
+  }
+}
+
+/** Breaker class → custom CHAT failure code (for circuit-open chat results). */
+function chatCodeForCircuitClass(cls: string): CustomChatFailureCode {
+  switch (cls) {
+    case "KEY_REJECTED":
+      return "UNAUTHORIZED";
+    case "RATE_LIMITED":
+      return "RATE_LIMITED";
+    case "UNREACHABLE_FROM_SANDBOX":
+      return "NETWORK_ERROR";
+    case "NO_KEY":
+      return "NO_KEY";
+    default:
+      return "BAD_RESPONSE";
+  }
+}
+
+/** Breaker class → custom PROBE failure code. null = the class never blocks a
+ *  probe (NO_KEY: a keyless probe is a legitimate measurement; unknown classes
+ *  are treated as keyless config gaps rather than blocking diagnostics). */
+function probeCodeForCircuitClass(cls: string | null): CustomProbeFailureCode | null {
+  switch (cls) {
+    case "KEY_REJECTED":
+      return "UNAUTHORIZED";
+    case "RATE_LIMITED":
+      return "RATE_LIMITED";
+    case "UNREACHABLE_FROM_SANDBOX":
+      return "NETWORK_ERROR";
+    case "BAD_RESPONSE":
+      return "BAD_RESPONSE";
+    default:
+      return null;
+  }
+}
+
+/** Circuit-key helper for a custom provider slug. */
+function customCircuitKey(slug: string): CircuitKey {
+  return `custom:${slug}`;
+}
 
 /** Models list request per style. Both answer {data:[{id}]} when healthy. */
 function probeTargetUrl(style: CustomProviderStyle, baseUrl: string): string {
@@ -386,8 +467,46 @@ function parseModelListPayload(text: string): string[] | null {
  * passes) is therefore still measurable. Transport/pool failures return
  * NETWORK_ERROR — NEVER UNAUTHORIZED (transport is not auth). The probe RESULT
  * shape is unchanged.
+ *
+ * R19-a circuit: when the provider's breaker is open (chat/probe failures)
+ * this returns the TYPED failure with circuit:"open" WITHOUT a network call —
+ * automated retries must not hammer a fragile-limit upstream. A caller who
+ * deliberately wants a live measurement (manual probe button) passes
+ * {force:true}. Probe outcomes feed the same breaker: success closes it (a
+ * successful forced probe acts as the half-open trial), failure re-opens it.
  */
-export async function probeCustomProvider(slug: string): Promise<CustomProviderProbe> {
+export async function probeCustomProvider(
+  slug: string,
+  opts: { force?: boolean } = {},
+): Promise<CustomProviderProbe> {
+  const circuitKey = customCircuitKey(slug);
+
+  if (opts.force !== true) {
+    const circuit = checkCircuit(circuitKey);
+    const probeCode = probeCodeForCircuitClass(circuit.lastErrorClass);
+    if (circuit.open && probeCode !== null) {
+      const secs = Math.max(1, Math.ceil(circuit.retryInMs / 1000));
+      return {
+        ok: false,
+        code: probeCode,
+        httpStatus: null,
+        message: `circuit open — provider "${slug}" skipped for ${secs}s after ${circuit.lastErrorClass} at ${circuit.lastErrorAt ?? "unknown time"}; no network call made (pass {force:true} for a deliberate live probe)`,
+        circuit: "open",
+      };
+    }
+  }
+
+  const result = await probeCustomProviderLive(slug);
+  if (result.ok) {
+    recordCircuitSuccess(circuitKey);
+  } else if (result.code !== "NOT_CONFIGURED") {
+    recordCircuitFailure(circuitKey, circuitClassForCustomCode(result.code));
+  }
+  return result;
+}
+
+/** The live probe (pre-R19-a probeCustomProvider body, unchanged behavior). */
+async function probeCustomProviderLive(slug: string): Promise<CustomProviderProbe> {
   const { config, key } = await resolveCustomProvider(slug);
   if (!config) {
     return { ok: false, code: "NOT_CONFIGURED", httpStatus: null, message: "provider config not found" };
@@ -540,9 +659,14 @@ type CustomUsageTap = {
   model: string;
   ok: boolean;
   latencyMs: number | null;
-  egress: "direct" | "proxy";
+  /** Static egress mode actually used; absent when no transport ran (R19-a
+   *  circuit-open rows honestly carry no egress — nothing was sent). */
+  egress?: "direct" | "proxy";
   /** Static failure code only — never content, never key material. */
   error?: string;
+  /** R19-a: set when the attempt was rejected by the circuit breaker before
+   *  any network call — meta.circuit "open" keeps the telemetry truthful. */
+  circuit?: "open";
 };
 
 /** UsageEvent kind:"llm" with static meta only (source "custom:<slug>"). */
@@ -550,9 +674,10 @@ async function recordCustomUsage(tap: CustomUsageTap): Promise<void> {
   try {
     const meta: Record<string, unknown> = {
       source: `custom:${tap.slug}`,
-      egress: tap.egress,
     };
+    if (tap.egress) meta.egress = tap.egress;
     if (tap.error) meta.error = tap.error;
+    if (tap.circuit) meta.circuit = tap.circuit;
     let metaJson = "{}";
     try {
       metaJson = redactSecrets(JSON.stringify(meta)).slice(0, 2048) || "{}";
@@ -644,6 +769,11 @@ function parseAnthropicChatPayload(text: string): { content: string | null; usag
  * Non-streaming completion against a custom provider. Egress-aware
  * (routeFor("custom-providers") → "default" fallback). 60s timeout. Transport/pool failures are
  * NETWORK_ERROR — NEVER UNAUTHORIZED (only an upstream-answered 401 is).
+ *
+ * R19-a circuit: the breaker (key "custom:<slug>") is checked FIRST — before
+ * any credential resolution or network call. A circuit-open call fails fast
+ * and still writes exactly ONE honest UsageEvent row (meta.error = the
+ * RECORDED breaker class, meta.circuit "open", no egress — nothing was sent).
  */
 export async function chatCompleteCustom(
   slug: string,
@@ -651,14 +781,45 @@ export async function chatCompleteCustom(
   opts: { model?: string; temperature?: number; maxTokens?: number; timeoutMs?: number } = {},
 ): Promise<CustomChatResult> {
   const started = Date.now();
+  const circuitKey = customCircuitKey(slug);
+
+  // R19-a: circuit-open → fail fast (no key decrypt, no network). A config-only
+  // read (local DB) resolves the model id so the usage row stays honest.
+  const circuit = checkCircuit(circuitKey);
+  if (circuit.open) {
+    const cls = circuit.lastErrorClass ?? "UNKNOWN";
+    const cfg = (await loadProviders()).find((p) => p.slug === slug) ?? null;
+    const model = ((opts.model ?? cfg?.models[0] ?? "unknown").trim() || "unknown").slice(0, 128);
+    const secs = Math.max(1, Math.ceil(circuit.retryInMs / 1000));
+    await recordCustomUsage({
+      slug,
+      model,
+      ok: false,
+      latencyMs: Date.now() - started,
+      error: cls,
+      circuit: "open",
+    });
+    return {
+      ok: false,
+      code: chatCodeForCircuitClass(cls),
+      httpStatus: null,
+      message: `circuit open — "${cfg?.name ?? slug}" skipped for ${secs}s after ${cls} at ${circuit.lastErrorAt ?? "unknown time"}; no network call made`,
+    };
+  }
+
   const { config, key } = await resolveCustomProvider(slug);
   if (!config) {
+    // Input problem, not provider health — never recorded to the breaker.
     return { ok: false, code: "NOT_CONFIGURED", httpStatus: null, message: "provider config not found" };
   }
   if (!key) {
+    // Config gap (no key stored) — recorded per the R19-a class mapping so a
+    // keyless chat storm cannot spam the resolution path either.
+    recordCircuitFailure(circuitKey, "NO_KEY");
     return { ok: false, code: "NO_KEY", httpStatus: null, message: `no API key stored for "${config.name}" — add one in Connectors` };
   }
   if (!validMessages(messages)) {
+    // Input problem, not provider health — never recorded to the breaker.
     return { ok: false, code: "BAD_INPUT", httpStatus: null, message: "messages must be a non-empty array of {role, content} with system/user/assistant roles" };
   }
 
@@ -715,6 +876,7 @@ export async function chatCompleteCustom(
     httpStatus: number | null,
     message: string,
   ): Promise<CustomChatResult> => {
+    recordCircuitFailure(circuitKey, circuitClassForCustomCode(code)); // R19-a
     await recordCustomUsage({
       slug,
       model,
@@ -822,6 +984,7 @@ export async function chatCompleteCustom(
   }
 
   const latencyMs = Date.now() - started;
+  recordCircuitSuccess(circuitKey); // R19-a: closes the breaker fully
   await recordCustomUsage({ slug, model, ok: true, latencyMs, egress: mode });
 
   return { ok: true, content: parsed.content, model, httpStatus: status, usage: parsed.usage, latencyMs, egress: mode };

@@ -8,12 +8,16 @@ import {
   emptyTierMap,
   loadVyceKey,
   probeVyce,
+  probeBackoffMs,
+  probeCacheNote,
   resolveVyceBaseUrl,
   sharpenVyceProbeWithOriginHealth,
   vyceProbeTarget,
   VYCE_PROBE_TIMEOUT_PROXY_MS,
   VYCE_RELAY_PROBE_TIMEOUT_MS,
   VYCE_TIMEOUT_MS,
+  PROBE_SUCCESS_TTL_MS,
+  type ProbeCacheMeta,
   type VyceOriginVerdict,
   type VyceStatusPayload,
 } from "@/lib/connectors/vyce";
@@ -50,10 +54,90 @@ import {
  *   origin down → ORIGIN_DOWN (Vyce-side outage). Additive payload field
  *   `origin: "up" | "down" | "unknown" | null` carries the verdict.
  *
+ * R19-a (probe cadence) — the panel polls this route every ~30s and every poll
+ * used to burn a 15s Vyce-origin attempt while Vyce sat in maintenance
+ * (exhaustion-style probing). Now a SUCCESSFUL probe is cached 60s; a FAILED
+ * probe backs off 2min → 5min → 10min (cap). While cached/backing off, the
+ * route serves the CACHED verdict with its ORIGINAL probedAt plus an additive
+ * top-level `probeCache` field {cached:true, retryInMs, note} — the UI stays
+ * honest that this is a cached verdict, not a fresh probe. The cache is keyed
+ * by branch+base (a key paste/removal or base change is an immediate cache
+ * miss → fresh measurement). `?force=1` bypasses the cache for a deliberate
+ * live re-check (the Vyce card's manual Refresh button uses it); a forced
+ * probe still WRITES its outcome to the cache (success resets the backoff
+ * step, failure advances it — every live measurement is evidence).
+ * The CHAT paths are protected separately by the circuit breaker
+ * (src/lib/ai/circuit.ts); the two mechanisms are deliberately not coupled.
+ *
  * P7: only a masked key preview (••••tail) and host names ever leave this
  * route — key material (vault key AND relay secret) is decrypted transiently
  * server-side and dropped.
  */
+
+/** R19-a module-level probe-result cache (in-process; resets on restart —
+ * a fresh process honestly starts with a fresh live probe). */
+type VyceStatusCacheEntry = {
+  /** Which branch produced the verdict — an input change invalidates. */
+  branch: "vault" | "relay";
+  /** Base URL actually probed (vault base or relay base). */
+  baseKey: string;
+  payload: VyceStatusPayload;
+  ok: boolean; // payload.connected
+  probedAtMs: number;
+  /** Consecutive live-probe failures (backoff step, 1-based). */
+  backoffStep: number;
+};
+let vyceStatusCache: VyceStatusCacheEntry | null = null;
+
+/** Backoff steps: 2min → 5min → 10min cap (see PROBE_FAILURE_BACKOFF_MS in
+ *  src/lib/connectors/vyce.ts). */
+const PROBE_FAILURE_BACKOFF_STEPS = 3;
+
+/** Backoff step after a fresh live probe (success resets; failure advances).
+ *  Only consecutive failures on the SAME branch+base advance the step. */
+function nextVyceBackoffStep(ok: boolean, prev: VyceStatusCacheEntry | null): number {
+  if (ok) return 0;
+  if (prev && !prev.ok) return Math.min(prev.backoffStep + 1, PROBE_FAILURE_BACKOFF_STEPS);
+  return 1;
+}
+
+/** Serves a cached verdict with additive probeCache metadata (top-level —
+ *  the `status` object stays byte-compatible with the pre-R19-a contract). */
+function cachedVyceResponse(
+  entry: VyceStatusCacheEntry,
+  retryInMs: number,
+  groq: GroqSlotStatus | { error: { code: string; message: string } },
+): NextResponse {
+  const meta: ProbeCacheMeta = {
+    cached: true,
+    retryInMs: Math.max(0, Math.round(retryInMs)),
+    note: probeCacheNote(
+      entry.ok,
+      entry.payload.error?.code ?? null,
+      entry.payload.probedAt ?? new Date(entry.probedAtMs).toISOString(),
+    ),
+  };
+  return NextResponse.json({ ok: true, status: entry.payload, groq, probeCache: meta });
+}
+
+/** Cache write after ANY live probe (forced or scheduled). */
+function rememberVyceProbe(
+  branch: "vault" | "relay",
+  baseKey: string,
+  payload: VyceStatusPayload,
+): void {
+  const prev = vyceStatusCache;
+  const sameInputs = prev !== null && prev.branch === branch && prev.baseKey === baseKey;
+  vyceStatusCache = {
+    branch,
+    baseKey,
+    payload,
+    ok: payload.connected,
+    probedAtMs: Date.now(),
+    backoffStep: nextVyceBackoffStep(payload.connected, sameInputs ? prev : null),
+  };
+}
+
 export async function GET(req: Request) {
   const denied = await requireSession();
   if (denied) return denied;
@@ -63,6 +147,10 @@ export async function GET(req: Request) {
       { status: 429 },
     );
   }
+
+  // R19-a: ?force=1 → deliberate live re-check (manual Refresh button); the
+  // automatic 30s polls never set it.
+  const force = new URL(req.url).searchParams.get("force") === "1";
 
   // Additive Groq slot field — computed once, guarded so a Groq-side failure can
   // never disturb the Vyce payload contract (honest error inside the field).
@@ -82,6 +170,7 @@ export async function GET(req: Request) {
   const vault = await loadVyceKey();
 
   // --- Vault unreadable → honest VAULT_UNREADABLE, never fake-success.
+  // (No probe ran — nothing to cache.)
   if (!vault.ok && vault.reason === "unreadable") {
     const payload: VyceStatusPayload = {
       configured: true,
@@ -105,6 +194,16 @@ export async function GET(req: Request) {
   // failed probe is then sharpened with the no-key origin-health probe so a
   // Vyce-side outage is reported as ORIGIN_DOWN, never a vague "unreachable".
   if (vault.ok) {
+    // R19-a cadence: same branch+base + within TTL (success 60s) or backoff
+    // (failure 2-5-10min) → serve the cached verdict with its ORIGINAL
+    // probedAt plus probeCache metadata; no network call made.
+    const cached = vyceStatusCache;
+    if (!force && cached && cached.branch === "vault" && cached.baseKey === baseUrl) {
+      const ttl = cached.ok ? PROBE_SUCCESS_TTL_MS : probeBackoffMs(cached.backoffStep);
+      const age = Date.now() - cached.probedAtMs;
+      if (age < ttl) return cachedVyceResponse(cached, ttl - age, groq);
+    }
+
     const route = routeFor("vyce", await readRoutingMap());
     let probe = await probeVyce(vault.key, baseUrl, {
       timeoutMs: route === "proxy" ? VYCE_PROBE_TIMEOUT_PROXY_MS : VYCE_TIMEOUT_MS,
@@ -131,6 +230,7 @@ export async function GET(req: Request) {
       fallback: null,
       origin,
     };
+    rememberVyceProbe("vault", baseUrl, payload); // R19-a
     return NextResponse.json({ ok: true, status: payload, groq });
   }
 
@@ -146,6 +246,15 @@ export async function GET(req: Request) {
       // via the relay that is <ref>.supabase.co (never claim vyceai.com while
       // probing the relay edge).
       const probedBase = fb.baseUrl ?? baseUrl;
+
+      // R19-a cadence (relay branch): identical rules to the vault branch.
+      const cached = vyceStatusCache;
+      if (!force && cached && cached.branch === "relay" && cached.baseKey === probedBase) {
+        const ttl = cached.ok ? PROBE_SUCCESS_TTL_MS : probeBackoffMs(cached.backoffStep);
+        const age = Date.now() - cached.probedAtMs;
+        if (age < ttl) return cachedVyceResponse(cached, ttl - age, groq);
+      }
+
       // R18-a: 18s budget — the relay answers its honest 502 at ~15.1s
       // [MEASURED R18-0]; an 8s probe times out BEFORE that answer arrives
       // and under-reports a Vyce-side outage as "did not respond".
@@ -183,6 +292,7 @@ export async function GET(req: Request) {
         fallback: { available: true, reason: null, projectRef: fb.projectRef ?? null },
         origin,
       };
+      rememberVyceProbe("relay", probedBase, payload); // R19-a
       return NextResponse.json({ ok: true, status: payload, groq });
     }
     fallback = { available: false, reason: fb.reason, projectRef: null };

@@ -5,6 +5,7 @@ import {
   EGRESS_CUSTOM_PROVIDERS_KEY,
   EGRESS_PROBE_TARGETS,
   EGRESS_ROUTING_KEY,
+  getEgressRouteStats,
   readRoutingMap,
   type EgressMode,
 } from "@/lib/egress";
@@ -24,7 +25,9 @@ export const dynamic = "force-dynamic";
  * are settable — everything else is refused.
  *
  * Contracts:
- *   GET  → { ok:true, routing: Record<string,"direct"|"proxy">, targets: string[] }
+ *   GET  → { ok:true, routing: Record<string,"direct"|"proxy">, targets: string[],
+ *           stats?: { entries, tunnelPool } }  (stats = R19-c additive, always
+ *           plain numbers/timestamps/counts — never secrets, P7)
  *   POST { upstream, mode } → { ok:true, routing: <updated full map> }
  *   Errors → §11 { ok:false, error:{ code, message } } with honest HTTP status:
  *   401 UNAUTHORIZED, 429 RATE_LIMITED, 400 INVALID_UPSTREAM / INVALID_MODE,
@@ -64,10 +67,21 @@ export async function GET(req: Request) {
   }
 
   const routing = await readRoutingMap();
+  // R19-c additive: measured per (routing key × mode) latency (EWMA/last/count
+  // + handshake/request or headers split) and live keep-alive tunnel-pool
+  // counts. Numbers only — zero secrets (P7). Omitted (never faked) if the
+  // stats lookup itself fails.
+  let stats: Awaited<ReturnType<typeof getEgressRouteStats>> | undefined;
+  try {
+    stats = await getEgressRouteStats();
+  } catch {
+    stats = undefined;
+  }
   return NextResponse.json({
     ok: true,
     routing,
     targets: [...Object.keys(EGRESS_PROBE_TARGETS), EGRESS_CUSTOM_PROVIDERS_KEY],
+    ...(stats ? { stats } : {}),
   });
 }
 

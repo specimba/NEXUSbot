@@ -18,6 +18,13 @@ export const dynamic = "force-dynamic";
  * (config missing), 500 PROBE_FAILED (defensive — probeCustomProvider itself
  * never throws in normal operation).
  *
+ * R19-a circuit: the probe honors the per-provider circuit breaker
+ * ("custom:<slug>") — while it is open, the route returns the typed failure
+ * with circuit:"open" in `probe` WITHOUT a network call (default,
+ * cached-by-circuit). The request body accepts an OPTIONAL boolean `force`:
+ * {"force":true} bypasses the breaker for a deliberate live measurement
+ * (manual button press); {"force":false} or no body keeps the default.
+ *
  * P7: probe messages are static strings + HTTP status + host; upstream bodies
  * are truncated and scrubbed against the live key inside the lib.
  */
@@ -46,6 +53,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     );
   }
 
+  // R19-a: OPTIONAL boolean force (absent body / absent field → false, the
+  // cached-by-circuit default; non-boolean value → honest §11 INVALID_BODY).
+  let force = false;
+  const body = (await req.json().catch(() => null)) as { force?: unknown } | null;
+  if (body !== null && body.force !== undefined) {
+    if (typeof body.force !== "boolean") {
+      return badRequest("INVALID_BODY", "force must be a boolean when provided.");
+    }
+    force = body.force;
+  }
+
   try {
     const config = (await loadProviders()).find((p) => p.slug === slug);
     if (!config) {
@@ -56,7 +74,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     }
 
     // Upstream failures are DATA — 200 with the typed result inside.
-    const probe = await probeCustomProvider(slug);
+    const probe = await probeCustomProvider(slug, { force });
     return NextResponse.json({ ok: true, probe });
   } catch {
     // Defensive: the lib is typed non-throwing; keep the route §11-clean anyway.

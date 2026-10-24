@@ -41,12 +41,18 @@ type BenchSourceRow = {
   kind: string;
   label: string;
   url: string;
+  /** R19-b — the metric this board scores on (rendered in the header line). */
+  metricLabel?: string | null;
+  /** R19-b — "percent" scores render with a % suffix, "plain" stay bare. */
+  metricUnit?: string | null;
   ok: boolean;
   fetchedAt: string | null;
   ageHours: number | null;
   modelCount: number | null;
   via: string | null;
   error: { code: string; message: string } | null;
+  /** R19-b — parse-anomaly warning (e.g. out-of-range scores), else null. */
+  notes?: string | null;
   entries: BenchEntryRow[];
 };
 
@@ -70,9 +76,15 @@ async function errorMessage(res: Response, fallback: string): Promise<string> {
 
 const TOP_PREVIEW = 8;
 
-function formatScore(score: number | null): string {
+/**
+ * Score formatting with metric awareness (R19-b): percent metrics carry a %
+ * suffix so "20.77" reads as what it is; Elo-like / index scores stay plain
+ * numbers. Tolerates a missing metricUnit (older API shape) → plain.
+ */
+function formatScore(score: number | null, metricUnit?: string | null): string {
   if (score === null) return "—";
-  return score % 1 === 0 ? String(score) : score.toFixed(2);
+  const body = score % 1 === 0 ? String(score) : score.toFixed(2);
+  return metricUnit === "percent" ? `${body}%` : body;
 }
 
 function viaLabel(via: string | null): string {
@@ -141,10 +153,13 @@ function SourceBlock({
 
       <p className="text-xs text-muted-foreground">
         {neverFetched ? (
-          "never fetched"
+          <>
+            {row.metricLabel ? `${row.metricLabel} · ` : ""}never fetched
+          </>
         ) : (
           <>
             {row.ok && row.modelCount !== null ? `${row.modelCount} models · ` : ""}
+            {row.metricLabel ? `${row.metricLabel} · ` : ""}
             {viaLabel(row.via)}
             {row.via ? " · " : ""}
             fetched {formatDistanceToNow(new Date(row.fetchedAt as string), { addSuffix: true })}
@@ -158,6 +173,12 @@ function SourceBlock({
         </p>
       )}
 
+      {row.ok && row.notes && (
+        <p className="text-[11px] leading-snug text-muted-foreground/80" role="note">
+          <span className="font-mono text-accent">parse warning</span> — {row.notes}
+        </p>
+      )}
+
       {row.ok && row.entries.length > 0 && (
         <>
           <ul className="max-h-64 space-y-0.5 overflow-y-auto rounded-md border border-border/60 p-2 font-mono text-[11px] [scrollbar-width:thin] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar]:w-1.5">
@@ -167,7 +188,13 @@ function SourceBlock({
                   <span className="text-muted-foreground/70">{e.rank !== null ? `#${e.rank} ` : ""}</span>
                   {e.model}
                 </span>
-                <span className="shrink-0 text-primary/90">{formatScore(e.score)}</span>
+                <span
+                  className="shrink-0 text-primary/90"
+                  title={row.metricLabel ?? undefined}
+                  aria-label={row.metricLabel ? `${formatScore(e.score, row.metricUnit)} ${row.metricLabel}` : undefined}
+                >
+                  {formatScore(e.score, row.metricUnit)}
+                </span>
               </li>
             ))}
           </ul>

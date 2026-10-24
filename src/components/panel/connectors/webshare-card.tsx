@@ -21,7 +21,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { formatDistanceToNow } from "date-fns";
-import { Eye, EyeOff, Globe, KeyRound, Loader2, Network, PlugZap, Radar, RefreshCw, Route, Trash2 } from "lucide-react";
+import { Eye, EyeOff, Gauge, Globe, KeyRound, Loader2, Network, PlugZap, Radar, RefreshCw, Route, Trash2 } from "lucide-react";
 
 type WebshareStatus = {
   ok: true;
@@ -45,10 +45,37 @@ type ConnState = "loading" | "not-configured" | "checking" | "connected" | "erro
 
 type EgressMode = "direct" | "proxy";
 
+// --- R19-c: measured route latency types (mirror of the additive GET
+// /api/egress/routing `stats` contract — numbers/timestamps only, P7-safe) ---
+
+type EgressRouteStatsEntry = {
+  ewmaMs: number;
+  lastLatencyMs: number;
+  sampleCount: number;
+  lastAt: number;
+  handshakeEwmaMs?: number;
+  requestEwmaMs?: number;
+  headersEwmaMs?: number;
+};
+
+type EgressRoutingStats = {
+  entries: Record<string, Partial<Record<EgressMode, EgressRouteStatsEntry>>>;
+  tunnelPool: {
+    enabled: boolean;
+    liveSockets: number;
+    idleSockets: number;
+    keys: number;
+    maxPerKey: number;
+    maxTotal: number;
+    idleTtlMs: number;
+  };
+};
+
 type EgressRoutingResponse = {
   ok: true;
   routing: Record<string, EgressMode>;
   targets: string[];
+  stats?: EgressRoutingStats;
 };
 
 type EgressProbeSide = {
@@ -79,6 +106,9 @@ const EGRESS_LABELS: Record<string, string> = {
 };
 
 const EGRESS_FALLBACK_ROWS: readonly string[] = ["groq", "vyce", "generic-echo", "custom-providers"];
+
+/** Routing keys the R19-c latency stats track (order = display order). */
+const EGRESS_STATS_ROWS: readonly string[] = ["groq", "vyce", "custom-providers", "default"];
 
 /** Honest badge colors — token classes only, never a fabricated success. */
 function egressBadgeCls(side: EgressProbeSide): string {
@@ -358,6 +388,108 @@ export function WebshareCard() {
   );
 }
 
+/**
+ * R19-c — "Measured route latency" panel: per routing key × mode the EWMA /
+ * last / sample count (plus handshake/request split for proxied and headers
+ * for direct), and the live keep-alive tunnel-pool counts. Honest "no samples
+ * yet" for empty entries; numbers only (P7 — nothing here can leak secrets).
+ */
+function EgressRouteStatsSection({ stats }: { stats?: EgressRoutingStats }) {
+  const pool = stats?.tunnelPool;
+  return (
+    <section className="space-y-2 rounded-md border border-border/60 p-3" aria-label="Measured route latency">
+      <div className="flex flex-wrap items-center gap-2">
+        <Gauge className="size-4 text-primary" aria-hidden="true" />
+        <h3 className="font-mono text-sm">Measured route latency</h3>
+        <Badge
+          variant="outline"
+          className="ml-auto border-border/60 font-mono text-[10px] text-muted-foreground"
+        >
+          {!pool
+            ? "UNAVAILABLE"
+            : pool.enabled
+              ? `tunnel pool ${pool.liveSockets}/${pool.maxTotal} live`
+              : "tunnel pool off"}
+        </Badge>
+      </div>
+
+      <p className="text-xs text-muted-foreground">
+        EWMA(α=0.3) of answered exchanges per routing key × mode. proxied shows
+        the CONNECT+TLS handshake / request split — a warm keep-alive tunnel
+        reuses the handshake. Answered HTTP errors (401/403…) count as samples.
+      </p>
+
+      {!stats && (
+        <p className="font-mono text-xs text-muted-foreground">no samples yet</p>
+      )}
+
+      {stats && (
+        <div className="max-h-64 space-y-1.5 overflow-y-auto pr-1" aria-live="polite">
+          {EGRESS_STATS_ROWS.map((key) => {
+            const label = EGRESS_LABELS[key] ?? key;
+            const entry = stats.entries[key];
+            return (
+              <div key={key} className="space-y-1 rounded-md border border-border/60 p-2">
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-xs">{label}</span>
+                  {!entry?.direct && !entry?.proxy && (
+                    <span className="ml-auto font-mono text-[11px] text-muted-foreground">
+                      no samples yet
+                    </span>
+                  )}
+                </div>
+                {(["direct", "proxy"] as const).map((mode) => {
+                  const e = entry?.[mode];
+                  if (!e) {
+                    return (
+                      <p key={mode} className="font-mono text-[11px] text-muted-foreground">
+                        {mode} — no samples yet
+                      </p>
+                    );
+                  }
+                  const split =
+                    mode === "proxy"
+                      ? e.handshakeEwmaMs !== undefined || e.requestEwmaMs !== undefined
+                        ? ` · hs ${e.handshakeEwmaMs ?? "—"} / req ${e.requestEwmaMs ?? "—"}ms`
+                        : ""
+                      : e.headersEwmaMs !== undefined
+                        ? ` · headers ${e.headersEwmaMs}ms`
+                        : "";
+                  return (
+                    <p key={mode} className="font-mono text-[11px]">
+                      <span className="text-muted-foreground">{mode}</span>{" "}
+                      <span className={mode === "proxy" ? "text-accent" : "text-primary"}>
+                        ewma {e.ewmaMs}ms
+                      </span>{" "}
+                      <span className="text-muted-foreground">
+                        · last {e.lastLatencyMs}ms · n {e.sampleCount}
+                        {split}
+                        {" · "}
+                        <span suppressHydrationWarning>
+                          {formatDistanceToNow(new Date(e.lastAt), { addSuffix: true })}
+                        </span>
+                      </span>
+                    </p>
+                  );
+                })}
+              </div>
+            );
+          })}
+
+          {pool && (
+            <p className="font-mono text-[11px] text-muted-foreground">
+              keep-alive tunnel pool: {pool.enabled ? "on" : "off (EGRESS_TUNNEL_POOL)"}
+              {pool.enabled
+                ? ` · ${pool.liveSockets} live (${pool.idleSockets} idle) · cap ${pool.maxPerKey}/key · ${pool.maxTotal} total · idle TTL ${Math.round(pool.idleTtlMs / 1000)}s`
+                : ""}
+            </p>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function DisconnectButton({ onConfirm, pending }: { onConfirm: () => void; pending: boolean }) {
   return (
     <AlertDialog>
@@ -613,6 +745,8 @@ function EgressRoutingSection() {
               </div>
             );
           })}
+
+          <EgressRouteStatsSection stats={routing.data.stats} />
         </div>
       )}
     </section>

@@ -615,6 +615,56 @@ export async function sharpenVyceProbeWithOriginHealth(
 }
 
 // ---------------------------------------------------------------------------
+// Probe cadence (R19-a) — shared schedule for status-surface probing
+//
+// Owner complaint: GET /api/vyce/status live-probed the relay (18s budget) on
+// EVERY panel poll (~30s), each burning a 15s Vyce-origin attempt while Vyce
+// sat in maintenance — exhaustion-style probing. Cadence rules:
+//   SUCCESSFUL probe → cached 60s (a healthy verdict needs no re-measuring).
+//   FAILED probe     → backoff 2min → 5min → 10min (cap). While in backoff the
+//                      status surface serves the CACHED verdict with its
+//                      ORIGINAL probedAt plus additive probeCache metadata, so
+//                      the UI stays honest that this is a cached verdict, not a
+//                      fresh probe. Half-open: once the backoff expires the
+//                      next probe is live again (its outcome resets or advances
+//                      the step).
+// Used by src/app/api/vyce/status/route.ts (Vyce card) and getGroqSlotStatus in
+// src/lib/ai/client.ts (Groq slot) — the CHAT paths use the circuit breaker in
+// src/lib/ai/circuit.ts instead; the two mechanisms are deliberately separate
+// (probe cadence protects status polls, the breaker protects chat calls).
+// ---------------------------------------------------------------------------
+
+/** A successful probe is served from cache for 60s. */
+export const PROBE_SUCCESS_TTL_MS = 60_000;
+
+/** Failed-probe backoff: 2min → 5min → 10min (cap). */
+export const PROBE_FAILURE_BACKOFF_MS: readonly number[] = [120_000, 300_000, 600_000];
+
+/** Backoff for a failure `step` (1-based; steps beyond the schedule cap out). */
+export function probeBackoffMs(step: number): number {
+  const s = Number.isFinite(step) ? Math.max(1, Math.floor(step)) : 1;
+  return PROBE_FAILURE_BACKOFF_MS[Math.min(s - 1, PROBE_FAILURE_BACKOFF_MS.length - 1)];
+}
+
+/** Additive cache metadata carried by status payloads serving a cached verdict. */
+export type ProbeCacheMeta = { cached: true; retryInMs: number; note: string };
+
+/**
+ * Honest note for a cached probe verdict — never claims freshness, never
+ * over-claims the failure mode (ORIGIN_DOWN gets the down-origin wording;
+ * other failures name their code).
+ */
+export function probeCacheNote(ok: boolean, errorCode: string | null, probedAtIso: string): string {
+  if (ok) {
+    return `measured up at ${probedAtIso} — serving the cached verdict (${PROBE_SUCCESS_TTL_MS / 1000}s TTL)`;
+  }
+  if (errorCode === "ORIGIN_DOWN") {
+    return `origin measured down at ${probedAtIso} — live probing paused to avoid exhaustion`;
+  }
+  return `last probe failed (${errorCode ?? "unknown"}) at ${probedAtIso} — live probing paused to avoid exhaustion`;
+}
+
+// ---------------------------------------------------------------------------
 // Status payload shared with the panel card
 // ---------------------------------------------------------------------------
 

@@ -85,6 +85,9 @@ type BenchEntry = { model: string; norm?: string; score?: number; rank?: number 
 type BenchSource = {
   kind: string;
   label?: string;
+  /** R19-b — metric this board scores on (percent metrics render "20.8%"). */
+  metricLabel?: string;
+  metricUnit?: string;
   ok?: boolean;
   fetchedAt?: string;
   modelCount?: number;
@@ -208,8 +211,15 @@ function orderModels(models: string[], entries: BenchEntry[] | null, orderBy: st
   }));
 }
 
-function formatScore(score: number): string {
-  return Number.isFinite(score) ? String(Math.round(score * 100) / 100) : "0";
+/**
+ * Metric-aware score badge (R19-b): percent metrics render "20.8%" (one
+ * decimal + suffix — a badge is compact context), Elo-like / index scores
+ * stay plain numbers ("1497"). Missing unit (older API shape) → plain.
+ */
+function formatScore(score: number, metricUnit?: string | null): string {
+  if (!Number.isFinite(score)) return "0";
+  if (metricUnit === "percent") return `${Math.round(score * 10) / 10}%`;
+  return String(Math.round(score * 100) / 100);
 }
 
 // ---------------------------------------------------------------------------
@@ -242,6 +252,7 @@ function ModelPicker({
   onChange,
   orderBy,
   benchHint,
+  benchMetricUnit,
   ariaLabel,
 }: {
   models: string[];
@@ -250,6 +261,7 @@ function ModelPicker({
   onChange: (model: string) => void;
   orderBy: string;
   benchHint: boolean;
+  benchMetricUnit: string | null;
   ariaLabel: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -310,7 +322,7 @@ function ModelPicker({
                     <span className="min-w-0 flex-1 truncate [overflow-wrap:anywhere]">{model}</span>
                     {matched && score !== null && (
                       <Badge variant="outline" className="ml-2 shrink-0 font-mono text-[10px]">
-                        {formatScore(score)}
+                        {formatScore(score, benchMetricUnit)}
                       </Badge>
                     )}
                   </CommandItem>
@@ -373,6 +385,7 @@ function RoleCard({
   orderBy,
   benchEntries,
   benchHint,
+  benchMetricUnit,
   probeCache,
   onMutate,
   mutating,
@@ -385,6 +398,7 @@ function RoleCard({
   orderBy: string;
   benchEntries: BenchEntry[] | null;
   benchHint: boolean;
+  benchMetricUnit: string | null;
   probeCache: Record<string, MeasuredListState>;
   onMutate: (payload: BindPayload) => void;
   mutating: boolean;
@@ -525,6 +539,7 @@ function RoleCard({
                 onChange={setModel}
                 orderBy={orderBy}
                 benchHint={benchHint}
+                benchMetricUnit={benchMetricUnit}
                 ariaLabel={`Model for role ${row.role}`}
               />
             </div>
@@ -647,6 +662,9 @@ export function BrainTab() {
       ? benchSource.entries
       : null;
   const benchHint = benchEntries === null || orderBy === "none";
+  // R19-b: the selected board's metric unit drives score-badge formatting
+  // ("20.8%" for percent metrics, plain "1497" for Elo-like boards).
+  const benchMetricUnit = benchEntries ? (benchSource?.metricUnit ?? null) : null;
 
   const bind = useMutation({
     mutationFn: async (payload: BindPayload) => {
@@ -790,6 +808,7 @@ export function BrainTab() {
                 orderBy={orderBy}
                 benchEntries={benchEntries}
                 benchHint={benchHint}
+                benchMetricUnit={benchMetricUnit}
                 probeCache={probeCache}
                 onMutate={(payload) => bind.mutate(payload)}
                 mutating={bind.isPending}
