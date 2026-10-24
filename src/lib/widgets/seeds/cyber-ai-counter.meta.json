@@ -4,7 +4,7 @@
   "height": 260,
   "description": "NEXUS-OS cyberpunk HUD widget (560x260): live Kick viewer telemetry pill, Vyce LLM core state with equalizer, holographic AI dialogue terminal and Grok Imagine 2.0 showcase card.",
   "source": "upload/kicbotLASTsavedstate2410.txt (KickBot widget builder saved-state dump, 2410 lines; css=sed 291-482, js=sed 485-2399, html=sed 217-282 + reconstruction)",
-  "notes": "background_color #05080c and text_color #f1f5f9 derived from CSS --bg-dark / #hologram-text color (no stored value in dump); accent colors from CSS --neon-green/--neon-purple/--neon-red (dump showed no stored values); the six masked dump values (vyce/groq/hyperbrowser api keys, supabase anon key, redis token, nexus shared secret) intentionally exported as empty strings.",
+  "notes": "background_color #05080c and text_color #f1f5f9 derived from CSS --bg-dark / #hologram-text color (no stored value in dump); accent colors from CSS --neon-green/--neon-purple/--neon-red (dump showed no stored values); the five masked dump values (vyce/groq/hyperbrowser api keys, supabase anon key, redis token) intentionally exported as empty strings; dump variable nexus_shared_secret deliberately DROPPED: the widget JS never reads it (v29.7 security review — a shared secret must never live in browser/OBS code) and keeping it only triggered a false 'empty secrets' export warning.",
   "variables": [
     { "name": "icon", "label": "Icon", "type": "text", "value": "Eye" },
     { "name": "background_color", "label": "Background color", "type": "color", "value": "#05080c", "notes": "derived default from CSS --bg-dark rgba(5, 8, 12); dump had no stored value" },
@@ -22,7 +22,6 @@
     { "name": "redis_rest_token", "label": "Upstash Redis Token", "type": "password", "value": "", "secret": true },
     { "name": "ai_trigger", "label": "Trigger Command", "type": "text", "value": "!ai" },
     { "name": "streamer_name", "label": "Streamer Name", "type": "text", "value": "specimba" },
-    { "name": "nexus_shared_secret", "label": "nexus shared secret", "type": "password", "value": "", "secret": true },
     { "name": "enable_tts", "label": "Enable TTS", "type": "boolean", "value": "false" },
     { "name": "tts_volume", "label": "TTS Volume (0-100)", "type": "number", "value": "65" },
     { "name": "screen_hold", "label": "Screen Read Hold (s)", "type": "number", "value": "6.5" },

@@ -572,3 +572,42 @@ Stage Summary:
 - Custom provider registry complete: UI + API + AES-GCM key storage + honest probes + brain integration (chatCompleteCustom in ai/client.ts consumed by resolveBrainRoute).
 - Widget system live: Kickbot saved state imported byte-exact, preview + test events + OBS export working; old Variables tab replaced.
 - Standing for owner: re-store RAW VYCE_API_KEY/GROQ_API_KEY on Supabase (or paste raw Vyce key in the card) to light up the brain gateway; KICK bot live test still pending owner green light.
+
+---
+Task ID: 5 (nexus_shared_secret false alarm)
+Agent: Z.ai Code (main)
+Task: Owner asked how to obtain nexus_shared_secret (the last "empty secret" in the OBS export warning).
+
+Work Log:
+- Traced nexus_shared_secret through the codebase: present only in seed meta.json variables + one JS comment (line 885, v29.7 security review: NEVER place shared secrets in browser/OBS code). Zero getVar('nexus_shared_secret') calls — the widget config reads only ai_trigger/streamer_name/vyce_api_key/groq_api_key/supabase/redis vars.
+- Conclusion: dead Kickbot-dump variable; warning was a false positive.
+- Edited cyber-ai-counter.meta.json: removed the variable (24 -> 23), updated provenance notes documenting the deliberate drop.
+- Edited seed.ts: added DEPRECATED_SEED_VARS + stripDeprecatedSeedVariables() self-heal (idempotent, preserves owner edits) so old DB snapshots are cleaned on next Widgets tab load.
+- One-off prisma script stripped it from the live widget row; verified remaining empty secrets are only the five real service keys (vyce/groq/hyperbrowser/supabase anon/redis).
+- bun run lint clean; dev.log shows GET /api/widgets 200.
+
+Stage Summary:
+- Owner answer: nexus_shared_secret is not obtainable from any provider — it is a self-invented shared password for server-side trusted-write to nexus-cortex, forbidden in browser code; widget never used it; variable removed everywhere.
+- Export warning now lists only genuinely-required service keys.
+
+---
+Task ID: 6 (save bug + OBS URL + key durability)
+Agent: Z.ai Code (main)
+Task: Owner reported "body stream already read" + "Save failed" on widget save, asked for the OBS Browser Source URL, and demanded never re-entering keys again.
+
+Work Log:
+- Root-caused the save failure: widgets.tsx save mutation read res.json() twice (body stream consumed once, second read throws). Server PUTs were 200 all along — the owner's five keys WERE persisted; only the toast lied. Fixed to a single-read apply (return parsed body).
+- Audited every `return res.json()` across the panel: all other hits are the safe conditional pattern (read inside a throwing if (!res.ok) block); no other instance of the bug.
+- Verified owner's DB state masked: vyce(51)/groq(56)/hyperbrowser(31)/supabase_anon(44)/redis(62) all SET, nexus_shared_secret gone (23 vars).
+- Built /api/widgets/[id]/stream route: serves buildWidgetDocument as text/html for the OBS Browser Source URL; auth = ?token=<ingest token> (sha256, revocable, lastUsedAt stamped) or panel session; honest 401/404/429/disabled HTML pages; rate limit 240/min.
+- Widgets tab: new "OBS Browser Source URL" card (KeyRound/LINK2 icons) — create token (label obs-<widget>), full URL (origin-adaptive via window.location.origin) auto-copied + readonly input + copy button, OBS size/refresh-cache guidance, credential warning.
+- Added supabase_anon_key shape hint (orange) in variables editor: verify_jwt=true needs the full eyJ JWT (200+ chars); sb_publishable_-style/truncated values surface HERE instead of a mysterious on-stream 401. Owner's current 44-char value triggers the hint.
+- Agent-browser E2E: login → Widgets → editor → dirty+Save → "Widget saved" toast twice (no Save failed); Create OBS token → toast + URL; opened stream URL with token in a second tab → widget DOM renders (hologram-body/terminal/queue-pill, 560x260 screenshot 13.6KB); session path renders; invalid/no token → 401 HTML guidance; unknown widget → 401.
+- Refreshed /home/sync/repo.tar (792MB, same scope: exclude node_modules+upload only, .zscratch re-included for fidelity) at 23:17 and again at 23:21 after the OBS token row landed — keys + token survive even a crash-before-pre-stop.
+- lint clean, scoped tsc clean, dev.log: no errors; stream route 200/401 lines as expected.
+
+Stage Summary:
+- Save bug fixed at root; owner's keys were never lost — all five verified SET in DB.
+- OBS Browser Source URL shipped and browser-verified end-to-end (token auth + session auth + guard rails).
+- Durability: repo.tar refreshed with live DB; platform pre-stop continues to capture on clean stops.
+- Open item for owner: supabase_anon_key looks non-JWT (44 chars) — panel now warns inline; recommend re-copying the full anon JWT from Supabase → Project Settings → API.

@@ -35,9 +35,13 @@ import { formatDistanceToNow } from "date-fns";
 import {
   AppWindow,
   ArrowLeft,
+  Check,
+  Copy,
   Download,
   FlaskConical,
   Info,
+  KeyRound,
+  Link2,
   MonitorPlay,
   Plus,
   RefreshCw,
@@ -296,9 +300,13 @@ function WidgetEditor({
           variables: serializeWidgetVariables(draft.variables),
         }),
       });
-      const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
+      // Read the body ONCE — a second res.json() throws "body stream already
+      // read" (the exact bug that made successful saves look like failures).
+      const body = (await res.json().catch(() => null)) as
+        | { ok?: boolean; widget?: WidgetRow; error?: { message?: string } }
+        | null;
       if (!res.ok) throw new Error(body?.error?.message ?? `Save failed (HTTP ${res.status})`);
-      return res.json();
+      return body;
     },
     onSuccess: () => {
       setSaved({ ...draft });
@@ -321,6 +329,52 @@ function WidgetEditor({
       onBack();
     },
     onError: (e: Error) => toast.error("Delete failed", { description: e.message }),
+  });
+
+  // OBS Browser Source URL — OBS cannot carry the panel session, so the URL
+  // embeds a one-time ingest token created here. Plaintext lives only in the
+  // displayed URL (server stores the SHA-256); a lost token → create a new one.
+  const [obsUrl, setObsUrl] = useState<string | null>(null);
+  const [obsCopied, setObsCopied] = useState(false);
+
+  const copyObsUrl = useCallback(() => {
+    if (!obsUrl) return;
+    navigator.clipboard
+      ?.writeText(obsUrl)
+      .then(() => {
+        setObsCopied(true);
+        setTimeout(() => setObsCopied(false), 2000);
+      })
+      .catch(() => {
+        /* clipboard unavailable — the readonly input below is the manual fallback */
+      });
+  }, [obsUrl]);
+
+  const createObsToken = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/ingest-tokens", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label: `obs-${widget.name}`.slice(0, 48) }),
+      });
+      // Read the body ONCE (double res.json() throws "body stream already read").
+      const body = (await res.json().catch(() => null)) as
+        | { token?: string; error?: { message?: string } }
+        | null;
+      if (!res.ok || !body?.token) {
+        throw new Error(body?.error?.message ?? `Token creation failed (HTTP ${res.status})`);
+      }
+      return body.token;
+    },
+    onSuccess: (token) => {
+      const url = `${window.location.origin}/api/widgets/${widget.id}/stream?token=${encodeURIComponent(token)}`;
+      setObsUrl(url);
+      copyObsUrl();
+      toast.success("OBS Browser Source URL ready", {
+        description: "Copied to clipboard — OBS: Sources → Browser → paste as URL.",
+      });
+    },
+    onError: (e: Error) => toast.error("OBS token failed", { description: e.message }),
   });
 
   // Live preview document — an explicit apply-model: the (up to 100 KB)
@@ -366,6 +420,18 @@ function WidgetEditor({
 
   const previewHeight = Math.round(draft.height * previewScale);
   const secretEmpty = draft.variables.filter((v) => v.secret && v.value.trim() === "");
+
+  // nexus-cortex runs verify_jwt=true: Supabase's edge gateway demands the full
+  // anon JWT (eyJ…, ~200+ chars) as the Bearer key. sb_publishable_-style or
+  // truncated values get rejected with a 401 exactly when the owner is testing
+  // the widget on stream — surface the mismatch HERE instead.
+  const supabaseAnon = draft.variables.find((v) => v.name === "supabase_anon_key")?.value.trim() ?? "";
+  const supabaseKeyHint =
+    !supabaseAnon || supabaseAnon.startsWith("eyJ")
+      ? supabaseAnon.length > 0 && supabaseAnon.length < 150
+        ? "this looks like a TRUNCATED JWT — the full anon key is usually 200+ chars, and verify_jwt=true rejects short ones at the gateway. Re-copy the entire key from Supabase → Project Settings → API → anon public."
+        : null
+      : "nexus-cortex has verify_jwt=true — the full anon JWT (eyJ…, 200+ chars) is required. sb_publishable_-style keys are rejected at the edge gateway. Get it from Supabase → Project Settings → API → anon public.";
 
   return (
     <div className="space-y-4">
@@ -517,6 +583,11 @@ function WidgetEditor({
                   Empty secrets: {secretEmpty.map((v) => v.name).join(", ")}. The widget renders, but any
                   feature needing those keys (Vyce/Groq/Supabase calls) will fail until you fill them —
                   values are baked into the OBS export.
+                </p>
+              )}
+              {supabaseKeyHint && (
+                <p className="mt-2 rounded-md border border-orange-500/40 bg-orange-500/10 p-2 text-xs text-orange-400">
+                  Heads-up on <span className="font-mono">supabase_anon_key</span>: {supabaseKeyHint}
                 </p>
               )}
             </CardContent>
@@ -685,6 +756,68 @@ function WidgetEditor({
                 <Download className="size-4" aria-hidden="true" />
                 {dirty ? "Save first, then export" : "Download OBS bundle"}
               </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 font-mono text-base">
+                <Link2 className="size-4 text-primary" aria-hidden="true" />
+                OBS Browser Source URL
+              </CardTitle>
+              <CardDescription>
+                OBS → Sources → + → Browser → paste this as the URL (no “Local file” needed, and no
+                re-export — the URL always serves the saved state).
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {obsUrl ? (
+                <>
+                  <div className="flex gap-2">
+                    <Input
+                      readOnly
+                      aria-label="OBS Browser Source URL"
+                      className="min-h-9 flex-1 font-mono text-xs"
+                      value={obsUrl}
+                      onFocus={(e) => e.currentTarget.select()}
+                    />
+                    <Button
+                      variant="outline"
+                      className="min-h-9 shrink-0 font-mono"
+                      onClick={copyObsUrl}
+                      aria-label={obsCopied ? "Copied" : "Copy OBS URL"}
+                    >
+                      {obsCopied ? (
+                        <Check className="size-4 text-primary" aria-hidden="true" />
+                      ) : (
+                        <Copy className="size-4" aria-hidden="true" />
+                      )}
+                      {obsCopied ? "Copied" : "Copy"}
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    OBS setup: set Width {draft.width} / Height {draft.height}. After edits: Save here, then
+                    hit “Refresh cache” on the OBS source. The token in this URL is a credential (it renders
+                    the widget with its baked variables) — if it leaks, create a fresh one anytime.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-xs text-muted-foreground">
+                    OBS cannot use the panel login, so the URL carries a private ingest token. Create it
+                    once per OBS setup — it is shown only here, immediately copied.
+                  </p>
+                  <Button
+                    variant="outline"
+                    className="min-h-11 w-full font-mono"
+                    disabled={createObsToken.isPending}
+                    onClick={() => createObsToken.mutate()}
+                  >
+                    <KeyRound className="size-4" aria-hidden="true" />
+                    {createObsToken.isPending ? "Creating token…" : "Create OBS token + URL"}
+                  </Button>
+                </>
+              )}
             </CardContent>
           </Card>
         </div>
