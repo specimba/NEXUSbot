@@ -24,7 +24,13 @@ export async function POST(req: Request) {
     );
   }
 
-  const res = NextResponse.json({ ok: true });
-  res.cookies.set(SESSION_COOKIE, issueSessionToken(), sessionCookieOptions());
+  const token = issueSessionToken();
+
+  const res = NextResponse.json({ ok: true, token });
+  // HTTPS (behind the preview gateway) → SameSite=None;Secure so embedded iframes
+  // keep the cookie; otherwise Lax. Either way the token is also returned in the
+  // body as a Bearer fallback for contexts where cookies are blocked entirely.
+  const proto = (req.headers.get("x-forwarded-proto") ?? "http").split(",")[0].trim();
+  res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions(proto === "https"));
   return res;
 }

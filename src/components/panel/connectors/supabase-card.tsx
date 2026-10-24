@@ -27,7 +27,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Database, HeartPulse, KeyRound, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Database, HeartPulse, KeyRound, Link2, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
 
 type SupabaseStatus = {
   ok: boolean;
@@ -251,6 +251,9 @@ export function SupabaseCard() {
               </p>
             </div>
 
+            {/* ---- DB connection string (L0 mirror unlock) ---- */}
+            <DbUrlSection />
+
             {/* ---- Health row (MEASURED) ---- */}
             <HealthSection health={health} />
 
@@ -260,6 +263,182 @@ export function SupabaseCard() {
         )}
       </CardContent>
     </Card>
+  );
+}
+
+const DB_URL_LABEL = "supabase-db-url";
+
+type CredsResp = {
+  ok: boolean;
+  credentials?: Array<{ id: string; label: string; masked: string; updatedAt: string }>;
+};
+
+/**
+ * L0 mirror unlock — stores the Supabase Postgres transaction-pooler URI in the
+ * encrypted vault (service supabase, label supabase-db-url). The embedded
+ * guidance matches the CURRENT Supabase dashboard (header Connect button →
+ * Direct tab → Transaction pooler) instead of the outdated Project Settings path.
+ */
+function DbUrlSection() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const creds = useQuery<CredsResp>({
+    queryKey: ["connectors", "supabase-creds"],
+    queryFn: async () => {
+      const res = await fetch("/api/credentials?service=supabase", { cache: "no-store" });
+      if (!res.ok) throw new Error("vault unavailable");
+      return res.json();
+    },
+  });
+
+  const dbUrl = creds.data?.credentials?.find((c) => c.label === DB_URL_LABEL) ?? null;
+
+  const [urlValue, setUrlValue] = useState("");
+  const looksLikeUri = /^postgres(ql)?:\/\//.test(urlValue.trim());
+
+  const save = useMutation({
+    mutationFn: async (uri: string) => {
+      const res = await fetch("/api/credentials", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ service: "supabase", label: DB_URL_LABEL, secret: uri }),
+      });
+      if (!res.ok) {
+        const j = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
+        throw new Error(j?.error?.message ?? "save failed");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      setUrlValue("");
+      void queryClient.invalidateQueries({ queryKey: ["connectors", "supabase-creds"] });
+      toast({
+        title: "DB connection string stored",
+        description: "Pooler URI saved encrypted (service supabase, label supabase-db-url).",
+      });
+    },
+    onError: (e: Error) =>
+      toast({ title: "Not stored", description: e.message, variant: "destructive" }),
+  });
+
+  const remove = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/credentials/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("delete failed");
+      return res.json();
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["connectors", "supabase-creds"] });
+      toast({ title: "DB connection string removed", description: "Vault credential deleted." });
+    },
+    onError: (e: Error) =>
+      toast({ title: "Removal failed", description: e.message, variant: "destructive" }),
+  });
+
+  return (
+    <section className="space-y-2" aria-label="DB connection string for the L0 mirror">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="flex items-center gap-1.5 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+          <Link2 className="size-3.5" aria-hidden="true" />
+          DB connection string · L0 mirror
+        </h3>
+        {creds.isLoading ? (
+          <Skeleton className="h-6 w-20" />
+        ) : dbUrl ? (
+          <Badge className="bg-primary/15 font-mono text-primary text-glow">
+            STORED {dbUrl.masked}
+          </Badge>
+        ) : (
+          <Badge variant="outline" className="font-mono text-accent">
+            MISSING
+          </Badge>
+        )}
+      </div>
+
+      <p className="rounded-md border border-border/60 bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground">
+        <span className="font-semibold text-foreground">Current dashboard route:</span> Supabase
+        dashboard → your project → <span className="font-semibold text-foreground">Connect</span>{" "}
+        button (top bar) → <span className="font-semibold text-foreground">Direct</span> tab → set
+        the selector to <span className="font-semibold text-foreground">Transaction pooler</span>{" "}
+        (port <span className="font-mono">6543</span>, host{" "}
+        <span className="font-mono">aws-0-&lt;region&gt;.pooler.supabase.com</span>) → copy the{" "}
+        <span className="font-mono">postgresql://…</span> URI → paste it here. The Framework /
+        Server / ORM / MCP tabs are code-recipe views, not plain connection strings. Transaction
+        pooler is the serverless-safe endpoint; Session pooler (5432) and the direct{" "}
+        <span className="font-mono">db.&lt;ref&gt;.supabase.co</span> host are not.
+      </p>
+
+      {dbUrl && (
+        <div className="flex items-center justify-between gap-2 rounded-md border border-border/60 p-2 font-mono text-xs">
+          <span className="truncate">
+            stored {dbUrl.masked} · updated{" "}
+            {new Date(dbUrl.updatedAt).toISOString().slice(0, 16).replace("T", " ")}Z
+          </span>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                className="size-9 shrink-0 text-destructive hover:text-destructive"
+                aria-label="Remove stored DB connection string"
+              >
+                <Trash2 className="size-4" aria-hidden="true" />
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Remove DB connection string?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Deletes the encrypted pooler URI. The L0 mirror unlock checklist returns to
+                  MISSING until it is stored again.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel className="min-h-11">Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  className="min-h-11 bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  onClick={() => remove.mutate(dbUrl.id)}
+                >
+                  Remove
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
+      )}
+
+      <div className="flex gap-2">
+        <Input
+          type="password"
+          autoComplete="off"
+          className="min-h-11 font-mono"
+          placeholder="postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres"
+          aria-label="Supabase transaction pooler connection string"
+          value={urlValue}
+          onChange={(e) => setUrlValue(e.target.value)}
+        />
+        <Button
+          className="min-h-11 shrink-0 font-mono"
+          disabled={!looksLikeUri || save.isPending}
+          onClick={() => save.mutate(urlValue.trim())}
+          aria-label="Save DB connection string to vault"
+        >
+          {save.isPending ? (
+            <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+          ) : (
+            <KeyRound className="size-4" aria-hidden="true" />
+          )}
+          Save
+        </Button>
+      </div>
+      {urlValue.trim().length > 0 && !looksLikeUri && (
+        <p className="text-xs text-destructive" role="alert">
+          Must start with postgresql:// or postgres:// — copy the URI from Connect → Direct →
+          Transaction pooler.
+        </p>
+      )}
+    </section>
   );
 }
 

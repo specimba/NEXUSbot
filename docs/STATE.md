@@ -1,6 +1,6 @@
 # NEXUS OS — STATE
 
-_Last updated: 2026-10-23 (R11 — cold-reset recovery + durability layer)_
+_Last updated: 2026-10-23 (R14 — platform-sync hardening + efficiency pass)_
 
 ## Status line
 
@@ -103,6 +103,46 @@ _Last updated: 2026-10-23 (R11 — cold-reset recovery + durability layer)_
 - QStash FIFO lane for L0 stream durability + signature verification
 - RSI eval scheduling via QStash cron; Workflow runner behind owner gate
 - Daily immutable snapshot tags (`snapshot-YYYYMMDD`) + ≥30-min push throttle (10-b review)
+
+## ⑧ Round-13 additions (all [MEASURED] unless tagged)
+
+- **Egress routing layer is owner-controllable**: Webshare card → "Egress routing"
+  (per-upstream direct|proxy for groq / vyce / generic-echo + default; live probe with
+  honest direct-vs-proxied badges). API: GET/POST /api/egress/routing (whitelisted,
+  §11, 30/min). Default map: all direct. `POST /api/egress/probe {target}` remains the
+  evidence tool (groq direct → 403 UNREACHABLE_WAF [measured]; proxied side honest
+  NOT_CONFIGURED until the Webshare token returns).
+- **Brain client is egress-aware**: non-streaming model calls honor the routing KV
+  (proxy path uses the pool, transport failures are UNREACHABLE-class, never
+  KEY_REJECTED; 401 still never fails over). Streaming stays direct-only (buffered
+  proxy transport cannot stream — honest limitation, not faked).
+- **Groq provider slot** in the brain client: vault `groq/api-key` → Supabase
+  EF-secret `GROQ_API_KEY` fallback → NO_KEY; route-aware /models with an
+  embedded-fallback list [INFERRED — docs host 403 WAF too] until a proxied fetch
+  succeeds. Same no-leak redaction chain as Vyce.
+- **Image-credits tile** live on Overview: per-@username ledger (UsageEvent kind=image),
+  totals, honest empty state; LLM usage shown as internal telemetry ONLY — never
+  per-user, never currency (owner doctrine: charged per print, not per electricity).
+- Vault remains EMPTY — everything above is code-verified, not credential-verified.
+
+## ⑨ Round-14 audit results (calm pass — all [MEASURED])
+
+- **Platform sync incident, contained**: the sandbox platform's own commit process
+  gutted `.gitignore` and re-tracked `.env` + 627 `.next/` files + `db/custom.db` +
+  upload/tool-results/agent-ctx into LOCAL git. **The public repo was never touched**
+  (fail-closed secret-scan blocked any push; remote main still `7dcee0d`).
+- **Structural immunity shipped**: scan index-guard extended (fails closed on every
+  forbidden category), snapshot deny-list extended (`.next`/`.env`/`*.tsbuildinfo`),
+  and `scripts/hygiene-untrack.sh` is the idempotent one-command recovery for the
+  platform's next sync commit. Dry-run tree-build verified: public tree stays clean
+  even from a junk-tracking local main.
+- **Efficiency**: Prisma query logging off (was 281+ log lines/session, 28 lines per
+  6 API calls — now 0; responses 7-11 ms); duplicate cadence processes cleaned;
+  dev.log readable again.
+- **Durability honestly DOWN**: the GitHub backup token was lost in a platform boot
+  cycle. It resumes AUTOMATICALLY when the owner re-enters GitHub App credentials and
+  clicks Connect (the connector mirrors the token to `ops/vault/github.token`).
+  No snapshot has been lost — chain matches remote exactly.
 
 ## Owner comms protocol (standing)
 

@@ -295,7 +295,7 @@ export function VyceCard() {
             )}
 
             {s.configured || s.keySource === "supabase-edge-secret" ? (
-              <p className="flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
+              <p className="flex flex-wrap items-center gap-1.5 font-mono text-[11px] [overflow-wrap:anywhere] text-muted-foreground">
                 <PlugZap className="size-3" aria-hidden="true" />
                 probe {s.probeTarget} · GET /v1/models
                 {s.probedAt ? (

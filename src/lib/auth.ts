@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
@@ -61,11 +61,14 @@ export function panelPasswordConfigured(): boolean {
 
 /**
  * Guard for protected API routes.
+ * Accepts BOTH auth channels:
+ *  1. nexus_session cookie (top-level browsing),
+ *  2. Authorization: Bearer <token> (embedded preview / third-party-cookie-blocked
+ *     contexts where browsers silently drop SameSite=Lax cookies).
  * Returns a 401 NextResponse when the caller has no valid session; null when OK.
  */
 export async function requireSession(): Promise<NextResponse | null> {
-  const store = await cookies();
-  if (verifySessionToken(store.get(SESSION_COOKIE)?.value)) return null;
+  if (await isAuthenticated()) return null;
   return NextResponse.json(
     {
       ok: false,
@@ -75,12 +78,36 @@ export async function requireSession(): Promise<NextResponse | null> {
   );
 }
 
-export function sessionCookieOptions() {
-  return {
-    httpOnly: true,
-    sameSite: "lax" as const,
-    path: "/",
-    maxAge: 7 * 24 * 60 * 60,
-    secure: process.env.NODE_ENV === "production",
-  };
+/** True when the current request carries a valid session via cookie OR Bearer. */
+export async function isAuthenticated(): Promise<boolean> {
+  const h = await headers();
+  const auth = h.get("authorization");
+  if (auth && auth.toLowerCase().startsWith("bearer ")) {
+    if (verifySessionToken(auth.slice(7).trim())) return true;
+  }
+  const store = await cookies();
+  return verifySessionToken(store.get(SESSION_COOKIE)?.value);
+}
+
+/**
+ * Cookie options tuned per transport. Over HTTPS (the public preview gateway sets
+ * x-forwarded-proto) we upgrade to SameSite=None;Secure so the cookie also works
+ * inside cross-site preview iframes. Plain HTTP keeps SameSite=Lax.
+ */
+export function sessionCookieOptions(https = false) {
+  return https
+    ? ({
+        httpOnly: true,
+        sameSite: "none" as const,
+        path: "/",
+        maxAge: 7 * 24 * 60 * 60,
+        secure: true,
+      } as const)
+    : ({
+        httpOnly: true,
+        sameSite: "lax" as const,
+        path: "/",
+        maxAge: 7 * 24 * 60 * 60,
+        secure: false,
+      } as const);
 }

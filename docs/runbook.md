@@ -59,3 +59,22 @@ PANEL_PASSWORD=<stored-in-.env-never-commit>
 - The panel password is the one deliberate exception stored in `.env` — because the
   owner must be able to read it without the panel (bootstrap-of-bootstrap problem),
   and `.env` is gitignored + mounted-out of restores.
+
+## Supabase unlock (L0 mirror) — CURRENT dashboard route (updated 2026-07)
+
+> The old "Project Settings → Database → Connection string" path is gone from the
+> Supabase dashboard. Use the Connect modal instead:
+
+1. Supabase dashboard → your project → **Connect** button (top bar) → modal
+   "Connect to your project" opens with tabs: Framework / Server / **Direct** / ORM / MCP.
+2. Pick the **Direct** tab (Framework/Server/ORM/MCP are code-recipe views, not plain strings).
+3. Set the selector to **Transaction pooler** — port **6543**, host
+   `aws-0-<region>.pooler.supabase.com`, user `postgres.<project-ref>`.
+   Transaction mode is the serverless-safe endpoint (no idle connections to babysit).
+   Avoid Session pooler (5432) and the direct `db.<ref>.supabase.co` host.
+4. Copy the `postgresql://…` URI → paste into the NEXUS OS panel → Connectors →
+   Supabase card → **DB connection string · L0 mirror** → Save.
+   Stored encrypted in the vault (service `supabase`, label `supabase-db-url`).
+   The section is visible even before the Mgmt PAT is stored — it is independent.
+5. Sanity checks: URI must start with `postgresql://` (the input validates and
+   disables Save otherwise); badge flips MISSING → STORED `••••`.

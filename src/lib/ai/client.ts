@@ -14,10 +14,29 @@ import {
   type VyceRole,
 } from "@/lib/connectors/vyce";
 import { SUPABASE_MGMT_BASE, getMgmtPat, mgmtListProjects } from "@/lib/connectors/supabase";
+import {
+  DEFAULT_GROQ_BASE_URL,
+  GROQ_STATIC_MODELS,
+  GROQ_TIMEOUT_MS,
+  loadGroqKey,
+  parseGroqModelsPayload,
+} from "@/lib/ai/groq";
+import {
+  directFetch,
+  loadEgressPool,
+  pickProxies,
+  proxiedFetch,
+  readRoutingMap,
+  routeFor,
+  type EgressMode,
+  type EgressTransportName,
+} from "@/lib/egress";
 
 /**
- * NEXUS OS — brain client (T-207). OpenAI-compatible client for the Vyce LLM
- * gateway (https://vyceai.com/v1 [MEASURED envelope], plus any owner-set base).
+ * NEXUS OS — brain client (T-207 + task 13-b). OpenAI-compatible client for the
+ * brain's LLM providers: the Vyce gateway (https://vyceai.com/v1 [MEASURED
+ * envelope], plus any owner-set base) and the Groq slot (src/lib/ai/groq.ts —
+ * this module is that file's ONLY consumer).
  *
  * ============================================================================
  * KEY HYGIENE — "the key must never leak at conversation chat" (implemented,
@@ -37,6 +56,19 @@ import { SUPABASE_MGMT_BASE, getMgmtPat, mgmtListProjects } from "@/lib/connecto
  * 5. UsageEvent rows carry model/latency/tokens-if-reported/ok + static meta
  *    (error code, source, role) — NEVER prompt or response content.
  * 6. No console logging of key material exists in this module. None.
+ * ============================================================================
+ *
+ * EGRESS ROUTING (task 13-b) — before a non-streaming model call the route is
+ * resolved once: routeFor(provider, readRoutingMap()) over the Settings KV
+ * "egress.routing" map (keys "vyce"/"groq", fallback map.default → "direct").
+ *   direct → the pre-existing native fetch path, byte-for-byte unchanged.
+ *   proxy  → the BUFFERED egress transport (Webshare pool, src/lib/egress.ts)
+ *            for NON-STREAMING calls only. Streaming stays DIRECT-ONLY — the
+ *            proxy transport returns a complete buffered envelope and cannot
+ *            stream; see the comment in streamComplete.
+ * Proxy/transport failures map to UNREACHABLE-class BrainErrors and are NEVER
+ * KEY_REJECTED — only an HTTP 401 answered by the upstream itself is a key
+ * error, and a 401 never fails over.
  * ============================================================================
  */
 
@@ -249,6 +281,227 @@ export async function resolveVyceCredentials(): Promise<VyceCredentials | null> 
 }
 
 // ---------------------------------------------------------------------------
+// Groq provider slot (task 13-b) — key chain mirrors the Vyce one exactly:
+// vault ("groq"/"api-key") → Supabase Edge-Function secret GROQ_API_KEY → null.
+// Own TTL cache — no cross-contamination with the Vyce fallback cache.
+// ---------------------------------------------------------------------------
+
+export type BrainProvider = "vyce" | "groq";
+
+export type GroqCredentials = {
+  key: string;
+  baseUrl: string; // fixed DEFAULT_GROQ_BASE_URL — no override surface by design
+  source: "vault" | "supabase-edge-secret";
+};
+
+export type GroqFallback = { ok: true; key: string } | { ok: false; reason: string };
+
+const GROQ_FALLBACK_NOT_FOUND = "GROQ_API_KEY not found among Edge Function secrets";
+let groqFallbackCache: { at: number; result: GroqFallback } | null = null;
+const GROQ_FALLBACK_TTL = 60_000;
+
+/**
+ * Groq Supabase Edge-Function secret fallback: the owner stored GROQ_API_KEY
+ * as an Edge Function secret. SAME Mgmt-API mechanism as the Vyce fallback
+ * (shared readEdgeSecretValues helper), but a SEPARATE cache so the two
+ * providers' cached credentials never cross-contaminate. Values NEVER leave
+ * this function except through the return value, handled per the hygiene rules.
+ */
+export async function resolveGroqKeyFallback(): Promise<GroqFallback> {
+  const now = Date.now();
+  if (groqFallbackCache && now - groqFallbackCache.at < GROQ_FALLBACK_TTL) return groqFallbackCache.result;
+
+  const result = await (async (): Promise<GroqFallback> => {
+    const pat = await getMgmtPat();
+    if (!pat) {
+      return { ok: false, reason: "supabase PAT not stored — connect the Supabase connector first" };
+    }
+    registerSecretForRedaction(pat);
+
+    const projects = await mgmtListProjects(pat);
+    if (!projects.ok) {
+      return {
+        ok: false,
+        reason:
+          projects.status === 401 || projects.status === 403
+            ? "supabase PAT rejected by the Mgmt API"
+            : "supabase Mgmt API unreachable from sandbox",
+      };
+    }
+    if (projects.projects.length === 0) return { ok: false, reason: "no accessible supabase projects" };
+
+    // Search the first few projects for the GROQ_API_KEY edge secret.
+    for (const project of projects.projects.slice(0, 5)) {
+      const found = await readEdgeSecretValues(pat, project.ref, ["GROQ_API_KEY"]);
+      if (found === null) continue; // project unreachable — try the next
+      const key = found.get("GROQ_API_KEY");
+      if (key && key.trim().length >= 8) return { ok: true, key: key.trim() };
+    }
+    return { ok: false, reason: GROQ_FALLBACK_NOT_FOUND };
+  })();
+
+  if (result.ok) registerSecretForRedaction(result.key);
+  groqFallbackCache = { at: now, result };
+  return result;
+}
+
+/** Resolution order: vault ("groq"/"api-key") → Supabase edge-secret → null. */
+export async function resolveGroqCredentials(): Promise<GroqCredentials | null> {
+  void refreshRedactionList(); // fire-and-forget, TTL-throttled
+
+  const vault = await loadGroqKey();
+  if (vault.ok) {
+    registerSecretForRedaction(vault.key);
+    return { key: vault.key, baseUrl: DEFAULT_GROQ_BASE_URL, source: "vault" };
+  }
+
+  const fb = await resolveGroqKeyFallback();
+  if (fb.ok) return { key: fb.key, baseUrl: DEFAULT_GROQ_BASE_URL, source: "supabase-edge-secret" };
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Egress plumbing (task 13-b) — routing, buffered proxied transport, and the
+// upstream-HTTP → BrainError mapper. Streaming never comes through here.
+// ---------------------------------------------------------------------------
+
+const BRAIN_MAX_PROXY_ATTEMPTS_CHAT = 2;
+const BRAIN_MAX_PROXY_ATTEMPTS_PROBE = 3;
+
+function labelFor(provider: BrainProvider): string {
+  return provider === "groq" ? "Groq" : "Vyce";
+}
+
+/**
+ * Resolve the egress mode for a brain provider: Settings KV "egress.routing"
+ * key "vyce"/"groq" → map.default → "direct". A routing read failure must
+ * never break calls — the fallback is DIRECT (the historical behavior).
+ */
+async function resolveBrainRoute(provider: BrainProvider): Promise<EgressMode> {
+  try {
+    return routeFor(provider, await readRoutingMap());
+  } catch {
+    return "direct";
+  }
+}
+
+/**
+ * Upstream HTTP status → typed BrainError. RULES (honesty contract, task 13-b):
+ * - 401 → KEY_REJECTED: the upstream itself answered and rejected auth. This
+ *   NEVER fails over (a wrong key stays a wrong key on every provider).
+ * - 403 → UNREACHABLE_FROM_SANDBOX: an edge refusal is NEVER a key error.
+ *   Groq-direct wording names the [measured] sandbox WAF block + the proxy
+ *   path; via-proxy wording stays honest about not knowing which layer refused.
+ * - Everything else maps per status. Messages are static strings + status +
+ *   model id ONLY — upstream response BODIES are never included (P7); the
+ *   BrainError constructor redacts as belt-and-braces.
+ */
+function mapUpstreamFailure(
+  provider: BrainProvider,
+  status: number,
+  model: string | null,
+  via: "direct" | EgressTransportName,
+): BrainError {
+  const label = labelFor(provider);
+  const modelPart = model ? ` for model "${model}"` : "";
+  const opts = { httpStatus: status as number, model: model ?? null };
+  if (status === 401) {
+    // 401 NEVER fails over — the key is wrong and must be surfaced as-is.
+    return new BrainError(
+      "KEY_REJECTED",
+      `${label} rejected the key (HTTP 401)${model ? ` — model "${model}" was not called` : ""}`,
+      { httpStatus: 401, model: model ?? null },
+    );
+  }
+  if (status === 403) {
+    if (provider === "groq" && via === "direct") {
+      return new BrainError(
+        "UNREACHABLE_FROM_SANDBOX",
+        `Groq answered HTTP 403 at the sandbox egress edge (WAF block [measured])${modelPart} — reachable via the Webshare egress proxy once egress.routing routes "groq" through the pool`,
+        opts,
+      );
+    }
+    if (via === "direct") {
+      return new BrainError(
+        "UNREACHABLE_FROM_SANDBOX",
+        `Vyce answered HTTP 403 (WAF/egress block likely)${modelPart}`,
+        opts,
+      );
+    }
+    return new BrainError(
+      "UNREACHABLE_FROM_SANDBOX",
+      `${label} answered HTTP 403 (refused at the upstream; egress proxy in use)${modelPart}`,
+      opts,
+    );
+  }
+  if (status === 429) {
+    return new BrainError("RATE_LIMITED", `${label} rate-limited the request (HTTP 429)${modelPart}`, opts);
+  }
+  return new BrainError("BAD_RESPONSE", `${label} answered HTTP ${status}${modelPart}`, opts);
+}
+
+/**
+ * Egress-routed, BUFFERED JSON call for the brain's NON-STREAMING paths.
+ *   route "direct" → egress directFetch (same sandbox egress, typed envelope).
+ *   route "proxy"  → Webshare pool via proxiedFetch, up to maxProxyAttempts
+ *                    different pool proxies; transport failures try the next
+ *                    proxy, then map to UNREACHABLE_FROM_SANDBOX — never
+ *                    KEY_REJECTED. Upstream HTTP answers pass through untouched
+ *                    (honesty — an HTTP 401 through a working proxy IS a key
+ *                    error and is never retried on another proxy).
+ * NEVER used for SSE streaming: proxiedFetch returns a complete buffered
+ * envelope and cannot stream — see streamComplete.
+ */
+async function brainEgressJsonCall(
+  provider: BrainProvider,
+  url: string,
+  init: { method: "GET" | "POST"; headers: Record<string, string>; body?: string },
+  timeoutMs: number,
+  opts: { model: string | null; maxProxyAttempts?: number },
+): Promise<{ status: number; bodyText: string; via: "direct" | EgressTransportName }> {
+  const label = labelFor(provider);
+  const modelPart = opts.model ? ` for model "${opts.model}"` : "";
+  const route = await resolveBrainRoute(provider);
+
+  if (route === "direct") {
+    const r = await directFetch(url, init, timeoutMs);
+    if ("code" in r) {
+      throw new BrainError(
+        "UNREACHABLE_FROM_SANDBOX",
+        `${label} did not answer from the sandbox egress (${r.code})${modelPart} — this is never a key problem`,
+        { model: opts.model },
+      );
+    }
+    return { status: r.status, bodyText: r.bodyText, via: "direct" };
+  }
+
+  // route === "proxy"
+  const pool = await loadEgressPool();
+  if (!pool.ok) {
+    throw new BrainError(
+      "UNREACHABLE_FROM_SANDBOX",
+      `egress proxy pool unavailable for the ${label} call (${pool.code})${modelPart} — configure the Webshare connector or set egress.routing "${provider}" back to direct`,
+      { model: opts.model },
+    );
+  }
+  const candidates = pickProxies(pool.pool, opts.maxProxyAttempts ?? BRAIN_MAX_PROXY_ATTEMPTS_CHAT);
+  let lastCode: string | null = null;
+  for (const proxy of candidates) {
+    const r = await proxiedFetch(url, init, { proxy, timeoutMs });
+    if ("code" in r) {
+      lastCode = r.code; // proxy/transport failure — try the next pool proxy
+      continue;
+    }
+    return { status: r.status, bodyText: r.bodyText, via: r.via };
+  }
+  throw new BrainError(
+    "UNREACHABLE_FROM_SANDBOX",
+    `${label} call could not be completed through the egress proxy pool (${lastCode ?? "PROXY_FAILED"})${modelPart} — proxy/transport failure, never a key error`,
+    { model: opts.model },
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Model registry — role → model over the six R11 tiers, overridable via the
 // Settings KV key "ai.models" (JSON object role→model; invalid → defaults).
 // ---------------------------------------------------------------------------
@@ -283,8 +536,19 @@ export async function getRoleModelMap(): Promise<Record<BrainRole, string>> {
   return map;
 }
 
-async function resolveModel(roleOrModel: string): Promise<{ model: string; role: BrainRole | null }> {
+async function resolveModel(
+  roleOrModel: string,
+  provider: BrainProvider,
+): Promise<{ model: string; role: BrainRole | null }> {
   if ((BRAIN_ROLES as readonly string[]).includes(roleOrModel)) {
+    if (provider === "groq") {
+      // Roles map to the VYCE registry — silently sending a Vyce model id to
+      // Groq would end in a confusing upstream 404. Honest BAD_INPUT instead.
+      throw new BrainError(
+        "BAD_INPUT",
+        `role "${roleOrModel}" maps to the Vyce model registry — pass an explicit Groq model id for groq calls`,
+      );
+    }
     const map = await getRoleModelMap();
     return { model: map[roleOrModel as BrainRole], role: roleOrModel as BrainRole };
   }
@@ -360,9 +624,12 @@ type BrainUsageTap = {
   latencyMs: number | null;
   tokens?: { prompt: number | null; completion: number | null } | null;
   error?: string; // static code only
-  source?: VyceCredentials["source"];
+  /** vyce rows carry the credential source; groq rows carry "groq" (provider). */
+  source?: "vault" | "supabase-edge-secret" | "groq";
   role?: BrainRole | null;
   streamed?: boolean;
+  /** Static egress mode actually used for the transport attempt. */
+  egress?: "direct" | "proxy";
 };
 
 async function recordBrainUsage(tap: BrainUsageTap): Promise<void> {
@@ -374,6 +641,7 @@ async function recordBrainUsage(tap: BrainUsageTap): Promise<void> {
     if (tap.source) meta.source = tap.source;
     if (tap.role) meta.role = tap.role;
     if (tap.streamed) meta.streamed = true;
+    if (tap.egress) meta.egress = tap.egress;
     if (tap.tokens) {
       if (tap.tokens.prompt !== null) meta.promptTokens = tap.tokens.prompt;
       if (tap.tokens.completion !== null) meta.completionTokens = tap.tokens.completion;
@@ -411,6 +679,14 @@ export type ChatCompleteOpts = {
   timeoutMs?: number;
   /** Extra OpenAI-compatible body fields (tools, response_format, …). */
   extraBody?: Record<string, unknown>;
+  /**
+   * Provider slot for this call — default "vyce" preserves the pre-existing
+   * behavior exactly. provider:"groq" resolves the Groq key chain (vault
+   * "groq"/"api-key" → Supabase GROQ_API_KEY edge-secret → NO_KEY), routes via
+   * the egress.routing key "groq", and tags UsageEvent meta source "groq".
+   * Roles are Vyce-registry-only — pass explicit model ids for Groq.
+   */
+  provider?: BrainProvider;
   /** Optional static scalar fields for the UsageEvent meta (never content). */
   trace?: Record<string, string | number | boolean>;
 };
@@ -424,27 +700,64 @@ export type ChatCompletionResult = {
 
 const DEFAULT_CHAT_TIMEOUT_MS = 45_000;
 
-function mapHttpFailure(status: number, model: string): BrainError {
-  if (status === 401) {
-    // 401 NEVER fails over — the key is wrong and must be surfaced as-is.
-    return new BrainError("KEY_REJECTED", `Vyce rejected the key (HTTP 401) — model "${model}" was not called`, {
-      httpStatus: 401,
-      model,
+/**
+ * Shared non-streaming completion tail: upstream HTTP status → typed BrainError
+ * (static messages only — response bodies are NEVER included), payload parse,
+ * UsageEvent counters. Used by BOTH the direct and the proxied paths so the
+ * handling is provably identical; P7's redaction choke point applies in
+ * BrainError regardless of path.
+ */
+async function finishChatCompletion(
+  provider: BrainProvider,
+  status: number,
+  via: "direct" | EgressTransportName,
+  readBody: () => Promise<unknown>,
+  ctx: { model: string; role: BrainRole | null; source: BrainUsageTap["source"]; egress: "direct" | "proxy"; started: number },
+): Promise<ChatCompletionResult> {
+  if (status < 200 || status >= 300) {
+    await recordBrainUsage({
+      model: ctx.model,
+      ok: false,
+      latencyMs: Date.now() - ctx.started,
+      error: `HTTP_${status}`,
+      source: ctx.source,
+      role: ctx.role,
+      egress: ctx.egress,
+    });
+    // Body is intentionally NOT read into the error message (static strings only).
+    throw mapUpstreamFailure(provider, status, ctx.model, via);
+  }
+
+  const data: unknown = await readBody();
+  const parsed = parseCompletionPayload(data);
+  if (parsed.content === null) {
+    await recordBrainUsage({
+      model: ctx.model,
+      ok: false,
+      latencyMs: Date.now() - ctx.started,
+      error: "BAD_RESPONSE_SHAPE",
+      source: ctx.source,
+      role: ctx.role,
+      egress: ctx.egress,
+    });
+    throw new BrainError("BAD_RESPONSE", `${labelFor(provider)} returned an unrecognized completion shape for model "${ctx.model}"`, {
+      httpStatus: status,
+      model: ctx.model,
     });
   }
-  if (status === 403) {
-    return new BrainError("UNREACHABLE_FROM_SANDBOX", `Vyce answered HTTP 403 (WAF/egress block likely) for model "${model}"`, {
-      httpStatus: 403,
-      model,
-    });
-  }
-  if (status === 429) {
-    return new BrainError("RATE_LIMITED", `Vyce rate-limited the request (HTTP 429) for model "${model}"`, {
-      httpStatus: 429,
-      model,
-    });
-  }
-  return new BrainError("BAD_RESPONSE", `Vyce answered HTTP ${status} for model "${model}"`, { httpStatus: status, model });
+
+  const latencyMs = Date.now() - ctx.started;
+  await recordBrainUsage({
+    model: ctx.model,
+    ok: true,
+    latencyMs,
+    tokens: parsed.usage ? { prompt: parsed.usage.prompt, completion: parsed.usage.completion } : null,
+    source: ctx.source,
+    role: ctx.role,
+    egress: ctx.egress,
+  });
+
+  return { model: ctx.model, content: parsed.content, latencyMs, usage: parsed.usage };
 }
 
 type ParsedChunk = { content: string | null; usage: ChatCompletionResult["usage"] };
@@ -475,17 +788,88 @@ export async function chatComplete(
   opts: ChatCompleteOpts = {},
 ): Promise<ChatCompletionResult> {
   const started = Date.now();
-  const { model, role } = await resolveModel(roleOrModel);
-  const creds = await resolveVyceCredentials();
+  const provider: BrainProvider = opts.provider === "groq" ? "groq" : "vyce";
+  const { model, role } = await resolveModel(roleOrModel, provider);
+  const creds = provider === "groq" ? await resolveGroqCredentials() : await resolveVyceCredentials();
   if (!creds) {
     await recordBrainUsage({ model, ok: false, latencyMs: null, error: "NO_KEY", role });
-    throw new BrainError("NO_KEY", "no Vyce key available — vault empty and Supabase edge-secret fallback unavailable");
+    throw new BrainError(
+      "NO_KEY",
+      provider === "groq"
+        ? "no Groq key available — vault empty and Supabase edge-secret fallback unavailable"
+        : "no Vyce key available — vault empty and Supabase edge-secret fallback unavailable",
+    );
   }
   if (!Array.isArray(messages) || messages.length === 0) {
     throw new BrainError("BAD_INPUT", "messages must be a non-empty array");
   }
 
   const timeoutMs = opts.timeoutMs ?? DEFAULT_CHAT_TIMEOUT_MS;
+  // UsageEvent meta source: groq rows carry the PROVIDER marker ("groq"); vyce
+  // rows keep the credential source ("vault" | "supabase-edge-secret").
+  const tapSource: BrainUsageTap["source"] = provider === "groq" ? "groq" : creds.source;
+
+  // EGRESS ROUTING (task 13-b): resolved once per call. "direct" keeps the
+  // pre-existing native-fetch path byte-for-byte; "proxy" routes this
+  // NON-STREAMING call through the buffered egress transport (Webshare pool).
+  const route = await resolveBrainRoute(provider);
+
+  if (route === "proxy") {
+    let answer: { status: number; bodyText: string; via: "direct" | EgressTransportName };
+    try {
+      answer = await brainEgressJsonCall(
+        provider,
+        `${creds.baseUrl}/chat/completions`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${creds.key}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model,
+            messages,
+            stream: false,
+            ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
+            ...(opts.maxTokens !== undefined ? { max_tokens: opts.maxTokens } : {}),
+            ...(opts.extraBody ?? {}),
+          }),
+        },
+        timeoutMs,
+        { model, maxProxyAttempts: BRAIN_MAX_PROXY_ATTEMPTS_CHAT },
+      );
+    } catch (err) {
+      const e =
+        err instanceof BrainError
+          ? err
+          : new BrainError("BAD_RESPONSE", `${labelFor(provider)} proxy call failed with an unexpected transport error for model "${model}"`, { model });
+      await recordBrainUsage({
+        model,
+        ok: false,
+        latencyMs: Date.now() - started,
+        error: e.code, // static code — transport failures are never key failures
+        source: tapSource,
+        role,
+        egress: "proxy",
+      });
+      throw e;
+    }
+    return finishChatCompletion(
+      provider,
+      answer.status,
+      answer.via,
+      () => {
+        try {
+          return Promise.resolve(JSON.parse(answer.bodyText) as unknown);
+        } catch {
+          return Promise.resolve(null);
+        }
+      },
+      { model, role, source: tapSource, egress: "proxy", started },
+    );
+  }
+
+  // --- direct path: the pre-existing native-fetch path (UNCHANGED) -----------
   let res: Response;
   try {
     res = await fetch(`${creds.baseUrl}/chat/completions`, {
@@ -513,65 +897,42 @@ export async function chatComplete(
       ok: false,
       latencyMs: Date.now() - started,
       error: timedOut ? "TIMEOUT" : "NETWORK",
-      source: creds.source,
+      source: tapSource,
       role,
+      egress: "direct",
     });
     throw new BrainError(
       "UNREACHABLE_FROM_SANDBOX",
       timedOut
-        ? `Vyce did not respond within ${Math.round(timeoutMs / 1000)}s calling model "${model}"`
-        : `network error reaching Vyce calling model "${model}"`,
+        ? `${labelFor(provider)} did not respond within ${Math.round(timeoutMs / 1000)}s calling model "${model}"`
+        : `network error reaching ${labelFor(provider)} calling model "${model}"`,
       { model },
     );
   }
 
-  if (!res.ok) {
-    // Body is intentionally NOT read into the error message (static strings only).
-    await recordBrainUsage({
-      model,
-      ok: false,
-      latencyMs: Date.now() - started,
-      error: `HTTP_${res.status}`,
-      source: creds.source,
-      role,
-    });
-    throw mapHttpFailure(res.status, model);
-  }
-
-  const data: unknown = await res.json().catch(() => null);
-  const parsed = parseCompletionPayload(data);
-  if (parsed.content === null) {
-    await recordBrainUsage({
-      model,
-      ok: false,
-      latencyMs: Date.now() - started,
-      error: "BAD_RESPONSE_SHAPE",
-      source: creds.source,
-      role,
-    });
-    throw new BrainError("BAD_RESPONSE", `Vyce returned an unrecognized completion shape for model "${model}"`, {
-      httpStatus: res.status,
-      model,
-    });
-  }
-
-  const latencyMs = Date.now() - started;
-  await recordBrainUsage({
+  return finishChatCompletion(provider, res.status, "direct", () => res.json().catch(() => null), {
     model,
-    ok: true,
-    latencyMs,
-    tokens: parsed.usage ? { prompt: parsed.usage.prompt, completion: parsed.usage.completion } : null,
-    source: creds.source,
     role,
+    source: tapSource,
+    egress: "direct",
+    started,
   });
-
-  return { model, content: parsed.content, latencyMs, usage: parsed.usage };
 }
 
 /**
  * Streaming chat completion — async iterable of SSE content deltas.
  * Parses "data: " lines and honors the [DONE] sentinel. Errors follow the
  * same typed taxonomy as chatComplete; UsageEvent is written in `finally`.
+ *
+ * EGRESS NOTE (task 13-b, DELIBERATE): streaming calls stay DIRECT-ONLY. The
+ * egress proxy transport (proxiedFetch) is BUFFERED — it returns a complete
+ * EgressHttp envelope and cannot stream — so routing an SSE stream through it
+ * would mean buffering the whole response and replaying it as if it streamed:
+ * dishonest, and explicitly out of scope. Streaming-over-proxy is DEFERRED
+ * until a streaming-capable tunnel transport exists. Consequence: when the
+ * routing map sends a provider via proxy, a streaming call still goes direct
+ * and may therefore fail honestly (e.g. Groq 403 WAF from this sandbox) rather
+ * than silently downgrade or pretend.
  */
 export async function* streamComplete(
   roleOrModel: string,
@@ -579,17 +940,24 @@ export async function* streamComplete(
   opts: ChatCompleteOpts = {},
 ): AsyncGenerator<string, void, unknown> {
   const started = Date.now();
-  const { model, role } = await resolveModel(roleOrModel);
-  const creds = await resolveVyceCredentials();
+  const provider: BrainProvider = opts.provider === "groq" ? "groq" : "vyce";
+  const { model, role } = await resolveModel(roleOrModel, provider);
+  const creds = provider === "groq" ? await resolveGroqCredentials() : await resolveVyceCredentials();
   if (!creds) {
     await recordBrainUsage({ model, ok: false, latencyMs: null, error: "NO_KEY", role, streamed: true });
-    throw new BrainError("NO_KEY", "no Vyce key available — vault empty and Supabase edge-secret fallback unavailable");
+    throw new BrainError(
+      "NO_KEY",
+      provider === "groq"
+        ? "no Groq key available — vault empty and Supabase edge-secret fallback unavailable"
+        : "no Vyce key available — vault empty and Supabase edge-secret fallback unavailable",
+    );
   }
   if (!Array.isArray(messages) || messages.length === 0) {
     throw new BrainError("BAD_INPUT", "messages must be a non-empty array");
   }
 
   const timeoutMs = opts.timeoutMs ?? DEFAULT_CHAT_TIMEOUT_MS;
+  const tapSource: BrainUsageTap["source"] = provider === "groq" ? "groq" : creds.source;
   let res: Response;
   try {
     res = await fetch(`${creds.baseUrl}/chat/completions`, {
@@ -618,15 +986,16 @@ export async function* streamComplete(
       ok: false,
       latencyMs: Date.now() - started,
       error: timedOut ? "TIMEOUT" : "NETWORK",
-      source: creds.source,
+      source: tapSource,
       role,
       streamed: true,
+      egress: "direct",
     });
     throw new BrainError(
       "UNREACHABLE_FROM_SANDBOX",
       timedOut
-        ? `Vyce did not respond within ${Math.round(timeoutMs / 1000)}s calling model "${model}"`
-        : `network error reaching Vyce calling model "${model}"`,
+        ? `${labelFor(provider)} did not respond within ${Math.round(timeoutMs / 1000)}s calling model "${model}"`
+        : `network error reaching ${labelFor(provider)} calling model "${model}"`,
       { model },
     );
   }
@@ -637,11 +1006,12 @@ export async function* streamComplete(
       ok: false,
       latencyMs: Date.now() - started,
       error: `HTTP_${res.status}`,
-      source: creds.source,
+      source: tapSource,
       role,
       streamed: true,
+      egress: "direct",
     });
-    throw mapHttpFailure(res.status, model);
+    throw mapUpstreamFailure(provider, res.status, model, "direct");
   }
 
   const reader = res.body.getReader();
@@ -680,7 +1050,7 @@ export async function* streamComplete(
     }
   } catch {
     streamError = "STREAM_INTERRUPTED";
-    throw new BrainError("BAD_RESPONSE", `stream from Vyce was interrupted for model "${model}"`, { model });
+    throw new BrainError("BAD_RESPONSE", `stream from ${labelFor(provider)} was interrupted for model "${model}"`, { model });
   } finally {
     void reader.cancel().catch(() => undefined);
     await recordBrainUsage({
@@ -689,9 +1059,164 @@ export async function* streamComplete(
       latencyMs: Date.now() - started,
       tokens: usage ? { prompt: usage.prompt, completion: usage.completion } : null,
       error: streamError ?? undefined,
-      source: creds.source,
+      source: tapSource,
       role,
       streamed: true,
+      egress: "direct",
     });
   }
+}
+
+// ---------------------------------------------------------------------------
+// Groq model catalog (task 13-b) — connect-time GET {base}/models, egress-aware,
+// with an honest static fallback. The static list is NEVER presented as a
+// measurement: docsSource is "measured" / "measured-via-proxy" for a live
+// answer and "embedded-fallback" otherwise.
+// ---------------------------------------------------------------------------
+
+export type GroqModelCatalog = {
+  models: string[];
+  docsSource: "measured" | "measured-via-proxy" | "embedded-fallback";
+  via: "direct" | EgressTransportName | null;
+  checkedAt: string | null;
+  error: { code: string; message: string } | null;
+};
+
+const GROQ_CATALOG_TTL = 60_000;
+let groqCatalogCache: { at: number; result: GroqModelCatalog } | null = null;
+
+/**
+ * Live Groq /models probe (route-aware: direct → expects the [measured] 403 WAF
+ * block; proxy → real answer through the pool). On ANY failure it returns the
+ * embedded fallback list WITH the honest error attached — this function never
+ * throws, so status surfaces can always render the slot truthfully.
+ */
+export async function getGroqModelCatalog(): Promise<GroqModelCatalog> {
+  const now = Date.now();
+  if (groqCatalogCache && now - groqCatalogCache.at < GROQ_CATALOG_TTL) return groqCatalogCache.result;
+
+  const result = await (async (): Promise<GroqModelCatalog> => {
+    const creds = await resolveGroqCredentials();
+    if (!creds) {
+      // NO_KEY → nothing was measured. Static list, clearly labeled, no probe.
+      return {
+        models: [...GROQ_STATIC_MODELS],
+        docsSource: "embedded-fallback",
+        via: null,
+        checkedAt: null,
+        error: {
+          code: "NO_KEY",
+          message: "no Groq key available — vault empty and Supabase edge-secret fallback unavailable",
+        },
+      };
+    }
+    try {
+      const answer = await brainEgressJsonCall(
+        "groq",
+        `${creds.baseUrl}/models`,
+        { method: "GET", headers: { Authorization: `Bearer ${creds.key}`, Accept: "application/json" } },
+        GROQ_TIMEOUT_MS,
+        { model: null, maxProxyAttempts: BRAIN_MAX_PROXY_ATTEMPTS_PROBE },
+      );
+      if (answer.status < 200 || answer.status >= 300) {
+        throw mapUpstreamFailure("groq", answer.status, null, answer.via);
+      }
+      const models = parseGroqModelsPayload(answer.bodyText);
+      if (models === null) {
+        throw new BrainError("BAD_RESPONSE", "Groq returned an unrecognized /models payload shape", {
+          httpStatus: answer.status,
+        });
+      }
+      return {
+        models,
+        docsSource: answer.via === "direct" ? "measured" : "measured-via-proxy",
+        via: answer.via,
+        checkedAt: new Date().toISOString(),
+        error: null,
+      };
+    } catch (err) {
+      const e =
+        err instanceof BrainError
+          ? err
+          : new BrainError("BAD_RESPONSE", "Groq model-catalog probe failed with an unexpected error");
+      return {
+        models: [...GROQ_STATIC_MODELS],
+        docsSource: "embedded-fallback",
+        via: null,
+        checkedAt: new Date().toISOString(),
+        error: { code: e.code, message: e.message },
+      };
+    }
+  })();
+
+  groqCatalogCache = { at: now, result };
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Groq slot status — additive panel surface (rendered as the `groq` field on
+// GET /api/vyce/status). NO_KEY does NOT trigger a network probe (a probe
+// without a key measures nothing about the slot); with a key the live
+// egress-routed catalog probe decides honestly. P7: masked preview + static
+// strings only — key material never leaves this module.
+// ---------------------------------------------------------------------------
+
+export type GroqSlotStatus = {
+  configured: boolean; // key resolvable from vault or EF fallback
+  keySource: "vault" | "supabase-edge-secret" | null;
+  maskedKey: string | null; // masked preview (••••tail) only — vault-sourced
+  modelCount: number | null; // live count only when actually measured
+  models: string[]; // live list when measured, else the labeled static fallback
+  docsSource: "measured" | "measured-via-proxy" | "embedded-fallback";
+  probedAt: string | null;
+  error: { code: string; message: string } | null;
+};
+
+export async function getGroqSlotStatus(): Promise<GroqSlotStatus> {
+  const vault = await loadGroqKey();
+  if (vault.ok) registerSecretForRedaction(vault.key);
+
+  // Vault unreadable → honest VAULT_UNREADABLE, never fake-success (parity with
+  // the Vyce status route's handling of the same condition).
+  if (!vault.ok && vault.reason === "unreadable") {
+    return {
+      configured: true,
+      keySource: null,
+      maskedKey: null,
+      modelCount: null,
+      models: [...GROQ_STATIC_MODELS],
+      docsSource: "embedded-fallback",
+      probedAt: null,
+      error: { code: "VAULT_UNREADABLE", message: "Stored Groq key could not be decrypted — re-save it." },
+    };
+  }
+
+  const creds = await resolveGroqCredentials();
+  if (!creds) {
+    return {
+      configured: false,
+      keySource: null,
+      maskedKey: null,
+      modelCount: null,
+      models: [...GROQ_STATIC_MODELS],
+      docsSource: "embedded-fallback",
+      probedAt: null,
+      error: {
+        code: "NO_KEY",
+        message: "no Groq key available — vault empty and Supabase edge-secret fallback unavailable",
+      },
+    };
+  }
+
+  const catalog = await getGroqModelCatalog();
+  return {
+    configured: true,
+    keySource: creds.source,
+    maskedKey: vault.ok && creds.source === "vault" ? vault.masked : null,
+    modelCount: catalog.error === null ? catalog.models.length : null,
+    models: catalog.models,
+    docsSource: catalog.docsSource,
+    probedAt: catalog.checkedAt,
+    error: catalog.error,
+  };
 }

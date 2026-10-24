@@ -16,7 +16,7 @@ import { WebshareCard } from "@/components/panel/connectors/webshare-card";
  */
 export function ConnectorsTab() {
   return (
-    <div className="grid gap-4 xl:grid-cols-2">
+    <div className="grid gap-4 xl:grid-cols-2 [&>*]:min-w-0">
       <GitHubCard />
       <SupabaseCard />
       <UpstashCard />

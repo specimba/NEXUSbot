@@ -215,7 +215,7 @@ export function HyperbrowserCard() {
             )}
 
             {s.configured && (
-              <p className="flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
+              <p className="flex flex-wrap items-center gap-1.5 font-mono text-[11px] [overflow-wrap:anywhere] text-muted-foreground">
                 <Globe className="size-3" aria-hidden="true" />
                 probe {s.probeTarget} · GET /api/sessions
                 {s.probedAt ? (

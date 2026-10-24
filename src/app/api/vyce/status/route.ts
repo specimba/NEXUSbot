@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth";
 import { clientKey, rateLimit } from "@/lib/guard";
-import { resolveVyceKeyFallback } from "@/lib/ai/client";
+import { getGroqSlotStatus, resolveVyceKeyFallback, type GroqSlotStatus } from "@/lib/ai/client";
 import {
   computeTierAvailability,
   emptyTierMap,
@@ -19,6 +19,10 @@ import {
  * vault → Supabase Edge-Function secret fallback (owner stored VYCE_API_KEY
  * there). A reachable host with a rejected key is NEVER reported connected.
  *
+ * Task 13-b ADDITIVE field: the top-level `groq` sibling carries the Groq
+ * provider slot status (getGroqSlotStatus) — the `status` object itself is
+ * byte-identical to the pre-13-b contract, so existing consumers are unaffected.
+ *
  * P7: only a masked key preview (••••tail) and host names ever leave this
  * route — key material is decrypted transiently server-side and dropped.
  */
@@ -30,6 +34,17 @@ export async function GET(req: Request) {
       { ok: false, error: { code: "RATE_LIMITED", message: "Too many status probes — slow down." } },
       { status: 429 },
     );
+  }
+
+  // Additive Groq slot field — computed once, guarded so a Groq-side failure can
+  // never disturb the Vyce payload contract (honest error inside the field).
+  let groq: GroqSlotStatus | { error: { code: string; message: string } };
+  try {
+    groq = await getGroqSlotStatus();
+  } catch {
+    groq = {
+      error: { code: "SLOT_UNAVAILABLE", message: "Groq slot status could not be computed right now." },
+    };
   }
 
   const baseUrl = await resolveVyceBaseUrl();
@@ -52,7 +67,7 @@ export async function GET(req: Request) {
       error: { code: "VAULT_UNREADABLE", message: "Stored Vyce key could not be decrypted — re-save it." },
       fallback: null,
     };
-    return NextResponse.json({ ok: true, status: payload });
+    return NextResponse.json({ ok: true, status: payload, groq });
   }
 
   // --- Vault key present → probe with it.
@@ -72,7 +87,7 @@ export async function GET(req: Request) {
         : { code: probe.code, message: probe.message },
       fallback: null,
     };
-    return NextResponse.json({ ok: true, status: payload });
+    return NextResponse.json({ ok: true, status: payload, groq });
   }
 
   // --- No vault key → report the Supabase edge-secret fallback state honestly.
@@ -93,7 +108,7 @@ export async function GET(req: Request) {
         error: probe.ok ? null : { code: probe.code, message: probe.message },
         fallback: { available: true, reason: null },
       };
-      return NextResponse.json({ ok: true, status: payload });
+      return NextResponse.json({ ok: true, status: payload, groq });
     }
     fallback = { available: false, reason: fb.reason };
   } catch {
@@ -112,5 +127,5 @@ export async function GET(req: Request) {
     error: null,
     fallback,
   };
-  return NextResponse.json({ ok: true, status: payload });
+  return NextResponse.json({ ok: true, status: payload, groq });
 }

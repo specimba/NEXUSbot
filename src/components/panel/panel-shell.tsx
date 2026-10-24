@@ -5,6 +5,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
+import { clearSessionToken } from "@/lib/client-auth";
 import { cn } from "@/lib/utils";
 import {
   FlaskConical,
@@ -40,6 +41,7 @@ export function PanelShell() {
     mutationFn: async () => {
       const res = await fetch("/api/auth/logout", { method: "POST" });
       if (!res.ok) throw new Error("Logout failed");
+      clearSessionToken();
       return res.json();
     },
     onSuccess: () => {

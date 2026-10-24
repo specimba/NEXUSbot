@@ -21,7 +21,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { formatDistanceToNow } from "date-fns";
-import { Eye, EyeOff, Globe, KeyRound, Network, PlugZap, RefreshCw, Trash2 } from "lucide-react";
+import { Eye, EyeOff, Globe, KeyRound, Loader2, Network, PlugZap, Radar, RefreshCw, Route, Trash2 } from "lucide-react";
 
 type WebshareStatus = {
   ok: true;
@@ -39,6 +39,65 @@ type WebshareStatus = {
 };
 
 type ConnState = "loading" | "not-configured" | "checking" | "connected" | "error";
+
+// --- Task 13-a: egress routing types (mirror of the API contracts, P7-safe —
+// statuses / classifications / country codes / counts only, never secrets) ---
+
+type EgressMode = "direct" | "proxy";
+
+type EgressRoutingResponse = {
+  ok: true;
+  routing: Record<string, EgressMode>;
+  targets: string[];
+};
+
+type EgressProbeSide = {
+  status: number | null;
+  reachable: boolean;
+  classification: string;
+  country?: string | null;
+  error?: { code: string; message: string };
+};
+
+type EgressProbeResponse = {
+  ok: true;
+  target: string;
+  checkedAt: string;
+  direct: EgressProbeSide;
+  proxied: EgressProbeSide & { attempts: number };
+  egressChanged: boolean;
+  routing: { mode: EgressMode };
+  pool: { count: number | null; validCount: number } | null;
+};
+
+const EGRESS_LABELS: Record<string, string> = {
+  groq: "Groq API",
+  vyce: "Vyce API",
+  "generic-echo": "Generic egress",
+  default: "Default",
+};
+
+const EGRESS_FALLBACK_ROWS: readonly string[] = ["groq", "vyce", "generic-echo"];
+
+/** Honest badge colors — token classes only, never a fabricated success. */
+function egressBadgeCls(side: EgressProbeSide): string {
+  if (side.error) {
+    return side.error.code === "NOT_CONFIGURED" ? "text-muted-foreground" : "text-destructive";
+  }
+  switch (side.classification) {
+    case "OK":
+      return "text-primary"; // measured success only
+    case "KEY_REJECTED": // upstream answered + rejected auth — reachable
+    case "UNREACHABLE_WAF":
+    case "NOT_FOUND":
+    case "RATE_LIMITED":
+    case "UPSTREAM_ERROR":
+    case "HTTP_OTHER":
+      return "text-accent"; // warn: an answer, but not a usable one
+    default:
+      return "text-destructive"; // transport-level failure
+  }
+}
 
 /**
  * T-206 — Webshare proxy-pool connector card.
@@ -194,6 +253,11 @@ export function WebshareCard() {
           </form>
         )}
 
+        {/* Routing decisions are independent of the connector state (task 13-a):
+            toggles stay live even while NOT CONFIGURED — proxied probes then
+            honestly report NOT_CONFIGURED instead of being gated. */}
+        {state === "not-configured" && <EgressRoutingSection />}
+
         {state === "error" && (
           <div className="space-y-3">
             <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3" role="alert">
@@ -224,6 +288,8 @@ export function WebshareCard() {
             </div>
           </div>
         )}
+
+        {state === "error" && <EgressRoutingSection />}
 
         {state === "connected" && s?.pool && (
           <div className="space-y-4" aria-live="polite">
@@ -270,12 +336,7 @@ export function WebshareCard() {
               )}
             </p>
 
-            <div className="rounded-md border border-accent/50 bg-accent/10 p-3">
-              <p className="text-xs text-accent">
-                Proxy routing for agent traffic: <strong>OFF by default</strong> — enablement lands with L1 after
-                the owner gate. This connector measures the pool; it never routes traffic yet.
-              </p>
-            </div>
+            <EgressRoutingSection />
 
             <div className="flex flex-wrap gap-2">
               <Button
@@ -314,7 +375,8 @@ function DisconnectButton({ onConfirm, pending }: { onConfirm: () => void; pendi
           <AlertDialogTitle>Remove the stored Webshare token?</AlertDialogTitle>
           <AlertDialogDescription>
             The encrypted token is deleted from the vault and the connector returns to NOT
-            CONFIGURED. The routing-OFF default is unaffected.
+            CONFIGURED. Saved egress routing decisions persist — proxied paths will honestly
+            report the missing token until it is saved again.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -325,5 +387,233 @@ function DisconnectButton({ onConfirm, pending }: { onConfirm: () => void; pendi
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  );
+}
+
+/**
+ * Task 13-a — live per-upstream egress routing control (replaces the static
+ * "routing OFF by default" notice). Talks to GET/POST /api/egress/routing and
+ * POST /api/egress/probe only; renders honest classifications as badges.
+ * Independent of the connector's configured state by design: the routing map
+ * is a plain KV, so toggles stay live while the vault is empty and the probe's
+ * proxied side honestly reports NOT_CONFIGURED.
+ */
+function EgressRoutingSection() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [probeResults, setProbeResults] = useState<Record<string, EgressProbeResponse>>({});
+
+  const routing = useQuery<EgressRoutingResponse>({
+    queryKey: ["egress", "routing"],
+    queryFn: async () => {
+      const res = await fetch("/api/egress/routing", { cache: "no-store" });
+      if (!res.ok) throw new Error("routing map unavailable");
+      return res.json();
+    },
+    staleTime: 15_000,
+    refetchInterval: 30_000,
+  });
+
+  const setMode = useMutation({
+    mutationFn: async ({ upstream, mode }: { upstream: string; mode: EgressMode }) => {
+      const res = await fetch("/api/egress/routing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ upstream, mode }),
+      });
+      const body = (await res.json().catch(() => null)) as
+        | { ok: true; routing: Record<string, EgressMode> }
+        | { ok: false; error?: { message?: string } }
+        | null;
+      if (!res.ok || !body || body.ok !== true) {
+        throw new Error(
+          (body as { error?: { message?: string } } | null)?.error?.message ?? "Routing update failed",
+        );
+      }
+      return body;
+    },
+    onSuccess: (data, vars) => {
+      queryClient.setQueryData<EgressRoutingResponse>(["egress", "routing"], {
+        ok: true,
+        routing: data.routing,
+        targets: routing.data?.targets ?? [...EGRESS_FALLBACK_ROWS],
+      });
+      void queryClient.invalidateQueries({ queryKey: ["egress", "routing"], exact: true });
+      toast({
+        title: "Egress routing updated",
+        description: `${EGRESS_LABELS[vars.upstream] ?? vars.upstream} → ${vars.mode}.`,
+      });
+    },
+    onError: (e: Error) =>
+      toast({ title: "Routing update failed", description: e.message, variant: "destructive" }),
+  });
+
+  const runProbe = useMutation({
+    mutationFn: async (target: string) => {
+      const res = await fetch("/api/egress/probe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target }),
+      });
+      const body = (await res.json().catch(() => null)) as
+        | EgressProbeResponse
+        | { ok: false; error?: { message?: string } }
+        | null;
+      if (!res.ok || !body || body.ok !== true) {
+        throw new Error(
+          (body as { error?: { message?: string } } | null)?.error?.message ?? "Egress probe failed",
+        );
+      }
+      return body;
+    },
+    onSuccess: (data) => {
+      setProbeResults((prev) => ({ ...prev, [data.target]: data }));
+    },
+    onError: (e: Error) =>
+      toast({ title: "Egress probe failed", description: e.message, variant: "destructive" }),
+  });
+
+  const targetKeys =
+    routing.data?.targets && routing.data.targets.length > 0
+      ? routing.data.targets.filter((t) => t !== "default")
+      : EGRESS_FALLBACK_ROWS;
+  const rows = [...targetKeys, "default"];
+  const busy = setMode.isPending || runProbe.isPending;
+
+  return (
+    <section className="space-y-2 rounded-md border border-border/60 p-3" aria-label="Egress routing">
+      <div className="flex flex-wrap items-center gap-2">
+        <Route className="size-4 text-primary" aria-hidden="true" />
+        <h3 className="font-mono text-sm">Egress routing</h3>
+        <Badge variant="outline" className="ml-auto border-border/60 font-mono text-[10px] text-muted-foreground">
+          {routing.isError ? "MAP UNAVAILABLE" : routing.isLoading ? "…" : "per-upstream"}
+        </Badge>
+      </div>
+
+      <p className="text-xs text-muted-foreground">
+        direct = sandbox egress IP · proxy = owner&apos;s paid Webshare pool (30 direct proxies) —
+        used to bypass region/WAF blocks (e.g. Groq 403 WAF from this sandbox).
+      </p>
+
+      {routing.isLoading && (
+        <div className="space-y-2" aria-busy="true">
+          <Skeleton className="h-14 w-full rounded-md" />
+          <Skeleton className="h-14 w-5/6 rounded-md" />
+        </div>
+      )}
+
+      {routing.isError && (
+        <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3" role="alert">
+          <p className="text-xs text-destructive">
+            Routing map unavailable — is the panel session still valid?{" "}
+            <button
+              type="button"
+              className="min-h-11 underline underline-offset-2"
+              onClick={() => routing.refetch()}
+            >
+              Retry
+            </button>
+          </p>
+        </div>
+      )}
+
+      {routing.data && (
+        <div className="space-y-2">
+          {rows.map((key) => {
+            const label = EGRESS_LABELS[key] ?? key;
+            // routeFor semantics: explicit entry → default → direct.
+            const mode: EgressMode =
+              routing.data?.routing[key] ?? routing.data?.routing["default"] ?? "direct";
+            const result = probeResults[key];
+            const probing = runProbe.isPending && runProbe.variables === key;
+            const notes: string[] = [];
+            if (result) {
+              if (result.proxied.error?.message) notes.push(result.proxied.error.message);
+              else {
+                if (result.direct.country) notes.push(`direct egress: ${result.direct.country}`);
+                if (result.proxied.country) notes.push(`proxy egress: ${result.proxied.country}`);
+              }
+            }
+            return (
+              <div key={key} className="space-y-1.5 rounded-md border border-border/60 p-2.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="min-w-0 max-w-full truncate font-mono text-xs" title={label}>
+                    {label}
+                  </span>
+                  <div className="ml-auto flex shrink-0 items-center gap-1.5">
+                    <div
+                      role="group"
+                      aria-label={`${label} egress mode`}
+                      className="flex overflow-hidden rounded-md border border-border/60"
+                    >
+                      {(["direct", "proxy"] as const).map((m) => (
+                        <button
+                          key={m}
+                          type="button"
+                          aria-pressed={mode === m}
+                          aria-label={`${label}: route ${m}`}
+                          disabled={busy}
+                          onClick={() => setMode.mutate({ upstream: key, mode: m })}
+                          className={`min-h-11 px-3 font-mono text-[11px] transition-colors disabled:opacity-50 ${
+                            mode === m
+                              ? "bg-primary text-primary-foreground"
+                              : "text-muted-foreground hover:bg-accent/10 hover:text-foreground"
+                          }`}
+                        >
+                          {m}
+                        </button>
+                      ))}
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="min-h-11 px-3 font-mono text-xs"
+                      aria-label={`Probe ${label} egress, direct and proxied`}
+                      disabled={busy}
+                      onClick={() => runProbe.mutate(key)}
+                    >
+                      {probing ? (
+                        <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                      ) : (
+                        <Radar className="size-4" aria-hidden="true" />
+                      )}
+                      Probe
+                    </Button>
+                  </div>
+                </div>
+
+                {result && (
+                  <div className="flex flex-wrap items-center gap-1.5" aria-live="polite">
+                    <Badge
+                      variant="outline"
+                      className={`border-border/60 font-mono text-[10px] ${egressBadgeCls(result.direct)}`}
+                    >
+                      direct {result.direct.status ?? "—"} · {result.direct.classification}
+                    </Badge>
+                    <Badge
+                      variant="outline"
+                      className={`border-border/60 font-mono text-[10px] ${egressBadgeCls(result.proxied)}`}
+                    >
+                      proxy {result.proxied.status ?? "—"} ·{" "}
+                      {result.proxied.error?.code ?? result.proxied.classification}
+                    </Badge>
+                    {result.egressChanged && (
+                      <Badge variant="outline" className="border-accent/60 font-mono text-[10px] text-accent">
+                        egress changed
+                      </Badge>
+                    )}
+                    {notes.length > 0 && (
+                      <span className="min-w-0 flex-1 break-words text-[11px] text-muted-foreground">
+                        {notes.join(" · ")}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
   );
 }

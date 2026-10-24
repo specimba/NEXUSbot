@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
+import { storeSessionToken } from "@/lib/client-auth";
 import { TerminalSquare } from "lucide-react";
 
 type LoginGateProps = {
@@ -33,11 +34,13 @@ export function LoginGate({ passwordConfigured, sessionCheckFailed }: LoginGateP
           | null;
         throw new Error(body?.error?.message ?? `Login failed (${res.status})`);
       }
-      return res.json();
+      return (await res.json()) as { ok: boolean; token?: string };
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       setError(null);
       setPassword("");
+      // Persist the Bearer fallback — preview iframes drop SameSite=Lax cookies.
+      if (data.token) storeSessionToken(data.token);
       void queryClient.invalidateQueries({ queryKey: ["session"] });
       toast({ title: "Signed in", description: "Welcome back, speci." });
     },
