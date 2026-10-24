@@ -108,8 +108,9 @@ export function DurabilityCard() {
   const running = run.isPending;
   const tokenMissing = d?.tokenPresent === false;
   const lastResult = d?.lastResult;
+  const authFailed = lastResult === "auth-failed";
   const failed =
-    lastResult === "failed" || lastResult === "scan-failed" || lastResult === "diverged";
+    lastResult === "failed" || lastResult === "scan-failed" || lastResult === "diverged" || authFailed;
   const okState = lastResult === "ok";
   const neverState = !okState && !failed && !tokenMissing; // "never" (or unknown) + token present
 
@@ -259,11 +260,13 @@ export function DurabilityCard() {
                     <p className="font-mono text-sm text-accent">no token — cannot push</p>
                   ) : failed ? (
                     <p className="font-mono text-sm text-destructive">
-                      {lastResult === "scan-failed"
-                        ? "secret scan failed — push aborted"
-                        : lastResult === "diverged"
-                          ? "remote diverged — push refused, no force push"
-                          : "push failed — no force push, resolve manually"}
+                      {authFailed
+                        ? "GitHub rejected the token — reconnect GitHub"
+                        : lastResult === "scan-failed"
+                          ? "secret scan failed — push aborted"
+                          : lastResult === "diverged"
+                            ? "remote diverged — push refused, no force push"
+                            : "push failed — see log below"}
                     </p>
                   ) : (
                     <p className="font-mono text-sm text-muted-foreground">never run yet</p>
@@ -308,18 +311,22 @@ export function DurabilityCard() {
             {failed && (
               <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3">
                 <p className="font-mono text-xs text-destructive" role="alert">
-                  {lastResult === "scan-failed"
-                    ? "SCAN_FAILED"
-                    : lastResult === "diverged"
-                      ? "DIVERGED"
-                      : "PUSH_FAILED"}
+                  {authFailed
+                    ? "AUTH_FAILED"
+                    : lastResult === "scan-failed"
+                      ? "SCAN_FAILED"
+                      : lastResult === "diverged"
+                        ? "DIVERGED"
+                        : "PUSH_FAILED"}
                 </p>
                 <p className="mt-1 text-sm text-destructive">
-                  {lastResult === "scan-failed"
-                    ? "The fail-closed secret scan found hits before any push. Resolve the flagged content, then run again."
-                    : lastResult === "diverged"
-                      ? "Remote main moved on its own and is no longer an ancestor of the local snapshot chain — the push was refused (fast-forward-only). The directive forbids force pushes — resolve the remote state manually, then run again."
-                      : "The push was rejected (non-fast-forward). The directive forbids force pushes — resolve the remote state manually, then run again."}
+                  {authFailed
+                    ? "GitHub rejected the stored token (authentication failed — NOT a fast-forward problem). Reconnect GitHub in the Connectors tab, then press “Run backup now” — the pending snapshot commit will push on its own; the remote never needs manual surgery."
+                    : lastResult === "scan-failed"
+                      ? "The fail-closed secret scan found hits before any push. Resolve the flagged content, then run again."
+                      : lastResult === "diverged"
+                        ? "Remote main moved on its own — the next run auto-reconciles by re-seeding the snapshot on top of it (fast-forward-only, every remote commit preserved; no force push per directive)."
+                        : "The push was rejected by GitHub (see the log tail below for the exact reason). Non-fast-forward cases are auto-reconciled by re-seeding on top of the remote head — no force push per directive."}
                 </p>
               </div>
             )}

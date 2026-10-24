@@ -12,13 +12,6 @@
 #     and the service's /run endpoint never set it: they go through the throttle.
 #     A forced run is still content-gated (unchanged tree → SKIP) — force only skips
 #     the TIME throttle, never the dedupe or the scan.
-#   - Remote-divergence pre-check before every push: fetch remote main (depth 1) and
-#     require the remote head to be an ancestor-or-equal of the local chain head
-#     (`git merge-base --is-ancestor FETCH_HEAD <local head>` — that direction is what
-#     makes our push a fast-forward). Otherwise: state lastResult:"diverged", exit 5.
-#     No force push, ever (§8). If the pre-check fetch itself fails we proceed WITHOUT
-#     it — the push stays fast-forward-only, so the worst case is an honest rejection
-#     (exit 4), never a rewritten remote chain.
 #   - Immutable daily tags: after a successful push, push tag snapshot-YYYYMMDD
 #     (TZ Europe/Istanbul) pointing at the snapshot commit. create-or-reuse: a tag
 #     that already exists on the remote is NEVER moved — skipped when it already
@@ -28,6 +21,24 @@
 #     --diff-filter subset would understate the delta) + "scan:ok" from the
 #     fail-closed scan that gated this run (scan precedes tree build; the deny-list
 #     remains defense-in-depth).
+#
+# 12-e hardening (R19, "reconnect did not fix the push" incident):
+#   - Honest push-failure classification: the push output is captured and
+#     classified — AUTH failure (revoked/invalid token) exits 6 with
+#     lastResult:"auth-failed"; non-fast-forward/other rejections keep exit 4.
+#     Previously EVERY push failure was logged as "non-fast-forward", so a
+#     revoked token (owner deletes the GitHub auth) showed a dead-end "resolve
+#     the remote manually" message that reconnecting could never clear.
+#   - Skip-logic remote proof: "SKIP: content unchanged" now ALSO requires the
+#     remote main head to equal the local chain head (one ls-remote). A push
+#     that failed after commit-building used to leave the chain head unpushed
+#     while every later run skipped forever — the panel kept showing the stale
+#     failure even though the token was already reconnected and valid.
+#   - Auto-reconcile, still no force push (§8): if the remote head is NOT an
+#     ancestor of the local chain head, the sanitized snapshot is RE-SEEDED on
+#     top of the remote head (commit-tree with parent = remote head) and pushed
+#     — a pure fast-forward that preserves every remote commit. Exit 5 stays as
+#     a safety net but genuine divergence no longer dead-ends the chain.
 #
 # upload/ + download/ + db/ + ops/vault/ + tests/ + agent-ctx/ + PNGs NEVER leave the sandbox.
 # Full local history (initial commit contains .env) stays private.
@@ -69,7 +80,7 @@ state_get() { # $1=key → value (quoted or bare JSON scalar), "" when absent
   # open and the 30-min throttle never fired).
   sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\{0,1\}\([^,\"}]*\)\"\{0,1\}.*/\1/p" "$STATE_FILE" | tail -1
 }
-S_RESULT=$(state_get lastResult)   # last real outcome (ok|failed|scan-failed|diverged|…)
+S_RESULT=$(state_get lastResult)   # last real outcome (ok|failed|auth-failed|scan-failed|diverged|…)
 S_AT=$(state_get lastAt)           # timestamp of that outcome
 S_OK_EPOCH=$(state_get lastOkEpoch)
 S_HEAD=$(state_get head)
@@ -171,47 +182,83 @@ git add -A -- . \
 TREE=$(git write-tree)
 unset GIT_INDEX_FILE
 
-# 6) skip when content unchanged (idempotent cadence runs)
+# 6) skip when content unchanged AND the remote actually has our chain head
+#    (12-e: a failed push leaves the chain head unpushed — skipping against the
+#    unpushed local head hid the pending commit forever, so the skip now
+#    requires proof the remote main is up to date).
+REMOTE_HEAD=$(git ls-remote "$REMOTE_URL" refs/heads/main 2>>"$STATE_DIR/backup-log.txt" | cut -f1 | head -1)
 if [[ -n "$BASE" && "$(git rev-parse "$BASE^{tree}" 2>/dev/null)" == "$TREE" ]]; then
-  log "SKIP: snapshot content unchanged ($TREE)"
-  exit 0
-fi
-
-# 7) chain-metadata: files changed vs the previous snapshot tree (all change
-#    types; deletions count as changes) for the commit's metadata line.
-if [[ -n "$BASE" ]]; then
-  FILES_CHANGED=$(( $(git diff-tree -r --name-only "$BASE" "$TREE" | wc -l) ))
+  if [[ -n "$REMOTE_HEAD" && "$REMOTE_HEAD" == "$BASE" ]]; then
+    log "SKIP: snapshot content unchanged ($TREE) and remote main is up to date"
+    exit 0
+  fi
+  # Content unchanged but the remote is behind (a previous push failed after
+  # commit-building): push the EXISTING chain head — no new commit needed.
+  COMMIT="$BASE"
+  log "content unchanged but remote main is behind (${REMOTE_HEAD:0:12} vs ${COMMIT:0:12}) — pushing the existing chain head"
 else
-  FILES_CHANGED=$(( $(git ls-tree -r --name-only "$TREE" | wc -l) ))
-fi
+  # 7) chain-metadata: files changed vs the previous snapshot tree (all change
+  #    types; deletions count as changes) for the commit's metadata line.
+  if [[ -n "$BASE" ]]; then
+    FILES_CHANGED=$(( $(git diff-tree -r --name-only "$BASE" "$TREE" | wc -l) ))
+  else
+    FILES_CHANGED=$(( $(git ls-tree -r --name-only "$TREE" | wc -l) ))
+  fi
 
-# 8) extend the chain (parent = previous snapshot or seeded remote head)
-if [[ -n "$BASE" ]]; then
-  COMMIT=$(git commit-tree "$TREE" -p "$BASE" \
-    -m "snapshot: $TS
+  # 8) extend the chain (parent = previous snapshot or seeded remote head)
+  if [[ -n "$BASE" ]]; then
+    COMMIT=$(git commit-tree "$TREE" -p "$BASE" \
+      -m "snapshot: $TS
 
 files-changed: $FILES_CHANGED vs ${BASE:0:12}; scan:ok")
-else
-  COMMIT=$(git commit-tree "$TREE" \
-    -m "snapshot: $TS (initial sanitized snapshot)
+  else
+    COMMIT=$(git commit-tree "$TREE" \
+      -m "snapshot: $TS (initial sanitized snapshot)
 
 files-changed: $FILES_CHANGED; scan:ok")
+  fi
+  git update-ref "refs/heads/$BRANCH" "$COMMIT"
+  log "built snapshot commit ${COMMIT:0:12} (tree ${TREE:0:12}, files-changed $FILES_CHANGED)"
 fi
-git update-ref "refs/heads/$BRANCH" "$COMMIT"
-log "built snapshot commit ${COMMIT:0:12} (tree ${TREE:0:12}, files-changed $FILES_CHANGED)"
 
-# 9) remote-divergence pre-check (12-d): the push is only ever fast-forward, so
-#    the REMOTE head must be an ancestor-or-equal of our local chain head. If
-#    remote main moved on its own (owner edit / another machine), refuse with
-#    exit 5 + lastResult:"diverged" — resolution is manual, no force push (§8).
-if git fetch --depth=1 "$REMOTE_URL" main >/dev/null 2>>"$STATE_DIR/backup-log.txt"; then
-  REMOTE_HEAD=$(git rev-parse FETCH_HEAD)
-  if git merge-base --is-ancestor "$REMOTE_HEAD" "$COMMIT"; then
+# 9) remote-divergence pre-check + auto-reconcile (12-e): the push is only ever
+#    fast-forward, so the REMOTE head must be an ancestor-or-equal of our chain
+#    head. When it is not (owner web edit / rewritten remote), the sanitized
+#    snapshot is re-seeded ON TOP of the remote head — every remote commit is
+#    preserved and the push stays a pure fast-forward. No force push, ever (§8).
+if [[ -z "$REMOTE_HEAD" ]]; then
+  if git fetch --depth=1 "$REMOTE_URL" main >/dev/null 2>>"$STATE_DIR/backup-log.txt"; then
+    REMOTE_HEAD=$(git rev-parse FETCH_HEAD)
+  fi
+fi
+if [[ -n "$REMOTE_HEAD" ]] && ! git cat-file -e "$REMOTE_HEAD^{commit}" 2>/dev/null; then
+  # ls-remote gave only a sha — materialize the object so ancestry checks and
+  # commit-tree can use it. If the fetch disagrees with the ls-remote sha, the
+  # fetched tip wins (it is what the push will negotiate against).
+  if git fetch --depth=1 "$REMOTE_URL" main >/dev/null 2>>"$STATE_DIR/backup-log.txt"; then
+    FETCHED=$(git rev-parse FETCH_HEAD 2>/dev/null || true)
+    REMOTE_HEAD="${FETCHED:-$REMOTE_HEAD}"
+  fi
+fi
+if [[ -n "$REMOTE_HEAD" ]]; then
+  if git merge-base --is-ancestor "$REMOTE_HEAD" "$COMMIT" 2>/dev/null; then
     log "divergence pre-check OK — remote main ${REMOTE_HEAD:0:12} is ancestor/equal of local head"
+  elif [[ "$(git rev-parse "$REMOTE_HEAD^{tree}" 2>/dev/null)" == "$TREE" ]]; then
+    # Remote already carries this exact content (another writer pushed it):
+    # adopt the remote head as our chain — nothing of ours to add.
+    git update-ref "refs/heads/$BRANCH" "$REMOTE_HEAD"
+    S_RESULT="ok"; S_AT="$TS"; S_OK_EPOCH="$NOW_EPOCH"; S_HEAD="$REMOTE_HEAD"
+    state_flush
+    log "remote main ${REMOTE_HEAD:0:12} already carries this tree — adopted as chain head, no push needed"
+    exit 0
   else
-    S_RESULT="diverged"; S_AT="$TS"; state_flush
-    log "DIVERGED: remote main ${REMOTE_HEAD:0:12} is NOT an ancestor of local chain head ${COMMIT:0:12} — push refused (no force push, §8); resolve the remote manually"
-    exit 5
+    OLD_HEAD="$COMMIT"
+    COMMIT=$(git commit-tree "$TREE" -p "$REMOTE_HEAD" \
+      -m "snapshot: $TS (re-seeded on remote main ${REMOTE_HEAD:0:12}; no force push)
+
+remote main was not an ancestor of ${OLD_HEAD:0:12} — re-seeded to keep the push fast-forward-only; scan:ok")
+    git update-ref "refs/heads/$BRANCH" "$COMMIT"
+    log "DIVERGED: remote main ${REMOTE_HEAD:0:12} was NOT an ancestor of local head ${OLD_HEAD:0:12} — re-seeded snapshot ${COMMIT:0:12} on top of it (fast-forward-only, no force push, §8)"
   fi
 else
   # Fail-open is safe here: the push itself stays fast-forward-only, so a missed
@@ -219,14 +266,37 @@ else
   log "divergence pre-check unavailable (fetch failed) — proceeding; push remains fast-forward-only"
 fi
 
-# 10) push fast-forward only; on failure resolve manually — no force push per §8
-if git push "$REMOTE_URL" "$BRANCH:main" 2>>"$STATE_DIR/backup-log.txt"; then
+# 10) push fast-forward only; classify failures honestly (12-e: a revoked
+#     token was misreported as "non-fast-forward" — auth failures now exit 6
+#     with lastResult:"auth-failed" so the panel says "reconnect", never the
+#     dead-end "resolve the remote manually").
+PUSHOUT=$(mktemp)
+if git push "$REMOTE_URL" "$BRANCH:main" >"$PUSHOUT" 2>&1; then
   S_RESULT="ok"; S_AT="$TS"; S_OK_EPOCH="$NOW_EPOCH"; S_HEAD="$COMMIT"
-  log "PUSH OK → specimba/NEXUSbot main @ ${COMMIT:0:12}"
+  if grep -q 'Everything up-to-date' "$PUSHOUT"; then
+    log "PUSH OK → specimba/NEXUSbot main ${COMMIT:0:12} (remote already up to date)"
+  else
+    log "PUSH OK → specimba/NEXUSbot main ${COMMIT:0:12}"
+  fi
+  rm -f "$PUSHOUT"
 else
-  S_RESULT="failed"; S_AT="$TS"; state_flush
-  log "PUSH FAILED — non-fast-forward (owner edited remote?) → resolve manually; no force push per directive"
-  exit 4
+  grep -v '^[[:space:]]*$' "$PUSHOUT" | tail -6 >> "$STATE_DIR/backup-log.txt"
+  if grep -qiE 'authentication failed|invalid username or token|could not read username|permission denied|terminal prompts disabled' "$PUSHOUT"; then
+    rm -f "$PUSHOUT"
+    S_RESULT="auth-failed"; S_AT="$TS"; state_flush
+    log "PUSH FAILED — GitHub rejected the token (authentication failed; NOT a fast-forward problem) → reconnect GitHub in the panel (Connectors tab), then run again; no force push per directive"
+    exit 6
+  elif grep -qiE 'non-fast-forward|fetch first|rejected' "$PUSHOUT"; then
+    rm -f "$PUSHOUT"
+    S_RESULT="failed"; S_AT="$TS"; state_flush
+    log "PUSH FAILED — rejected (non-fast-forward / fetch first) → resolve manually; no force push per directive"
+    exit 4
+  else
+    rm -f "$PUSHOUT"
+    S_RESULT="failed"; S_AT="$TS"; state_flush
+    log "PUSH FAILED — transport/network error (see tail above); no force push per directive"
+    exit 4
+  fi
 fi
 
 # 11) immutable daily tag (12-d): snapshot-YYYYMMDD in Europe/Istanbul at the

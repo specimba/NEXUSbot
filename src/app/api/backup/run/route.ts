@@ -17,10 +17,13 @@ const execFileAsync = promisify(execFile);
  * Executes `bash scripts/snapshot-backup.sh` (cwd = project root) and returns
  * the fresh .zscripts/backup-state.json contents plus an honest exit-code
  * mapping: 0 ok (pushed, content-unchanged SKIP, or throttle SKIP) /
- * 1 scan-failed / 3 no-token / 4 push-failed / 5 diverged. A script-level
- * outcome is reported with ok:true + lastResult (the run DID execute); §11
- * {ok:false,error:{code,message}} is reserved for API-level failures (auth,
- * rate limit, timeout, spawn failure).
+ * 1 scan-failed / 3 no-token / 4 push-failed / 5 diverged (12-e safety net —
+ * genuine divergence is auto-reconciled inside the script now) / 6 auth-failed
+ * (12-e: GitHub rejected the token — an auth problem, NOT a fast-forward
+ * problem; the fix is reconnecting GitHub, not touching the remote). A
+ * script-level outcome is reported with ok:true + lastResult (the run DID
+ * execute); §11 {ok:false,error:{code,message}} is reserved for API-level
+ * failures (auth, rate limit, timeout, spawn failure).
  *
  * 12-d hardening: the script self-throttles (30-min min-gap after the last
  * SUCCESSFUL push) and this route deliberately sets NO NEXUS_BACKUP_FORCE —
@@ -122,18 +125,23 @@ export async function POST(req: Request) {
 
   // Exit-code mapping (honest messages; the state file is trusted only for a
   // clean run — on failure it may still hold the previous successful push).
+  // 12-e: exit 6 = auth-failed (GitHub rejected the token) — deliberately
+  // distinct from exit 4 so the panel can tell the owner to RECONNECT instead
+  // of dead-ending them with "resolve the remote manually".
   const EXIT_RESULTS: Record<number, BackupStateFile["lastResult"]> = {
     1: "scan-failed",
     3: "no-token",
     4: "failed",
     5: "diverged",
+    6: "auth-failed",
   };
   const EXIT_MESSAGES: Record<number, string> = {
     0: "Snapshot pushed to specimba/NEXUSbot (fast-forward on main).",
     1: "Secret scan found hits — push aborted fail-closed. Resolve the flagged content, then run again.",
     3: "No GitHub token at ops/vault/github.token — complete the one-time GitHub device flow first.",
-    4: "Push failed (non-fast-forward). No force push per directive — resolve the remote manually.",
-    5: "Remote main has diverged from the local snapshot chain — push refused (fast-forward-only; no force push per directive). Resolve the remote manually, then run again.",
+    4: "The push was rejected by GitHub (see output). Non-fast-forward divergence is auto-reconciled by re-seeding on top of the remote head — no force push per directive.",
+    5: "Remote main diverged from the local snapshot chain and auto-reconcile could not run — push refused (fast-forward-only; no force push per directive).",
+    6: "GitHub rejected the stored token (authentication failed — NOT a fast-forward problem). Reconnect GitHub in the Connectors tab, then run backup again.",
   };
 
   return NextResponse.json({
