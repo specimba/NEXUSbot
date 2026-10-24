@@ -53,6 +53,10 @@ type BenchSourceRow = {
   error: { code: string; message: string } | null;
   /** R19-b — parse-anomaly warning (e.g. out-of-range scores), else null. */
   notes?: string | null;
+  /** R20-a — the source board's own header stamp (date/sessions/models), else null. */
+  boardMeta?: { date: string | null; sessions: string | null; models: number | null } | null;
+  /** R20-a — "board" ranks are the source's own positions; "derived" = score order; null = legacy. */
+  rankSource?: "board" | "derived" | null;
   entries: BenchEntryRow[];
 };
 
@@ -166,6 +170,14 @@ function SourceBlock({
           </>
         )}
       </p>
+
+      {row.ok && row.boardMeta && (row.boardMeta.date || row.boardMeta.sessions) && (
+        <p className="text-[11px] leading-snug text-muted-foreground/70">
+          board as of {row.boardMeta.date ?? "unknown date"}
+          {row.boardMeta.sessions ? ` · ${row.boardMeta.sessions} sessions` : ""}
+          {row.rankSource === "board" ? " · mirror of the board's own order" : ""}
+        </p>
+      )}
 
       {failed && row.error && (
         <p className="text-[11px] leading-snug text-muted-foreground/80">

@@ -10,7 +10,6 @@ import {
   type BenchRefreshResult,
   type BenchSnapshot,
 } from "@/lib/benchmarks";
-
 export const dynamic = "force-dynamic";
 
 /**
@@ -23,6 +22,12 @@ export const dynamic = "force-dynamic";
  *        board scores on, e.g. "Arena Elo (chat)" vs "Net Improvement %
  *        (agent)"), metricUnit ("percent"|"plain" — percent scores render
  *        with a % suffix) and notes (parse-anomaly warnings, else null).
+ *        R20-a ADDITIVE: each source also carries boardMeta
+ *        ({date,sessions,models} — the source board's own header stamp, so
+ *        the panel shows WHICH vintage it mirrors) and rankSource ("board" =
+ *        ranks are the board's own positions — arena boards are NEVER
+ *        re-sorted by score, their tail segments ascend; "derived" =
+ *        aa-index score-order ranks; null = legacy snapshot).
  *        Existing consumers ignore unknown fields — contract not broken.
  * POST → body {}     : refresh ALL stale-or-missing sources (sequential)
  *        body {kind} : refresh exactly that source regardless of staleness
@@ -51,6 +56,10 @@ type SourceState = {
   error: { code: string; message: string } | null;
   /** R19-b additive — parse-anomaly warning (e.g. out-of-range scores), else null. */
   notes: string | null;
+  /** R20-a additive — the source board's own header stamp (date/sessions/models), else null. */
+  boardMeta: { date: string | null; sessions: string | null; models: number | null } | null;
+  /** R20-a additive — "board" = the source's own rank positions; "derived" = score order; null = legacy. */
+  rankSource: "board" | "derived" | null;
   entries: { model: string; norm: string; score: number | null; rank: number | null }[];
 };
 
@@ -80,6 +89,8 @@ function sourceState(
         message: "no snapshot yet — the bench-cadence service fetches this source shortly after boot",
       },
       notes: null,
+      boardMeta: null,
+      rankSource: null,
       entries: [],
     };
   }
@@ -98,6 +109,8 @@ function sourceState(
     via: snap.via,
     error: snap.error,
     notes: snap.ok ? snap.notes : null,
+    boardMeta: snap.ok ? (snap.boardMeta ?? null) : null,
+    rankSource: snap.ok ? (snap.rankSource ?? null) : null,
     entries: snap.entries,
   };
 }

@@ -193,17 +193,33 @@ function orderModels(models: string[], entries: BenchEntry[] | null, orderBy: st
       .map((model) => ({ model, score: null, matched: false }));
   }
   const scored = unique.map((model) => ({ model, entry: matchBenchEntry(model, entries) }));
-  scored.sort((a, b) => {
-    if (a.entry && b.entry) {
-      const sa = typeof a.entry.score === "number" ? a.entry.score : 0;
-      const sb = typeof b.entry.score === "number" ? b.entry.score : 0;
-      if (sa !== sb) return sb - sa;
+  // R20-a — when the source board provides its OWN ranks (rankSource "board"
+  // snapshots always do), order by rank ascending: the board's position is the
+  // authority. Some arena boards append tail segments whose scores ASCEND with
+  // rank (cheap-but-strong frontier models), so score-desc ordering would
+  // contradict the board; rank ordering never does. Mixed/legacy snapshots
+  // (any matched entry without a rank) fall back to score-desc ordering.
+  const allRanked = scored.length > 0 && scored.every((s) => !s.entry || typeof s.entry.rank === "number");
+  if (allRanked) {
+    scored.sort((a, b) => {
+      const ra = a.entry?.rank ?? Number.MAX_SAFE_INTEGER;
+      const rb = b.entry?.rank ?? Number.MAX_SAFE_INTEGER;
+      if (ra !== rb) return ra - rb;
       return a.model.localeCompare(b.model);
-    }
-    if (a.entry) return -1;
-    if (b.entry) return 1;
-    return a.model.localeCompare(b.model);
-  });
+    });
+  } else {
+    scored.sort((a, b) => {
+      if (a.entry && b.entry) {
+        const sa = typeof a.entry.score === "number" ? a.entry.score : 0;
+        const sb = typeof b.entry.score === "number" ? b.entry.score : 0;
+        if (sa !== sb) return sb - sa;
+        return a.model.localeCompare(b.model);
+      }
+      if (a.entry) return -1;
+      if (b.entry) return 1;
+      return a.model.localeCompare(b.model);
+    });
+  }
   return scored.map(({ model, entry }) => ({
     model,
     score: typeof entry?.score === "number" ? entry.score : null,

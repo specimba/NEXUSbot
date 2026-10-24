@@ -167,12 +167,31 @@ export type BenchEntry = {
   rank: number | null;
 };
 
+/**
+ * Board header metadata (R20-a) — captured from the source page so the panel
+ * can show WHICH vintage of the board it mirrors (arena stamps the page with a
+ * date + session count + model count). All fields best-effort; nulls honest.
+ */
+export type BenchBoardMeta = {
+  date: string | null;
+  sessions: string | null;
+  models: number | null;
+};
+
+/** How `rank` on a snapshot's entries was produced. */
+export type BenchRankSource = "board" | "derived";
+
 export type BenchVia = "direct" | "hyperbrowser" | "pool" | "failed";
 
 export type BenchError = { code: "FETCH_FAILED" | "PARSE_FAILED" | "UPSTREAM_UNAVAILABLE"; message: string };
 
 /** Stored snapshot JSON (Settings KV "bench.snapshot.<kind>"). */
 export type BenchSnapshot = {
+  /** R20-a additive — the source board's own header metadata, when captured. */
+  boardMeta?: BenchBoardMeta | null;
+  /** R20-a additive — "board" = ranks are the source board's own positions;
+   *  "derived" = ranks re-derived from score order (aa-index); null = legacy. */
+  rankSource?: BenchRankSource | null;
   ok: boolean;
   kind: BenchKind;
   label: string;
@@ -223,14 +242,25 @@ const MODEL_FAMILY_RE = /gpt|gemini|claude|qwen|deepseek|llama|grok|kimi|mistral
 // Generic entry finalization (dedupe → sort → cap → rank)
 // ---------------------------------------------------------------------------
 
-type RawEntry = { model: string; score: number | null };
+type RawEntry = { model: string; score: number | null; rank: number | null; seq: number };
 
 /**
- * Dedupe by norm (keep the max score), sort score desc with model-name
- * tiebreak, cap at 300, assign rank from final order. Returns null when the
- * family sanity check fails — never store garbage as success.
+ * Dedupe by norm, cap at 300, produce entries.
+ *
+ * orderMode "score" (aa-index): dedupe keeps the max score, final order is
+ * score desc with model-name tiebreak, rank re-derived from that order.
+ *
+ * orderMode "board" (all arena boards, R20-a): the board's own display order
+ * IS the ranking — rows are kept in markdown sequence (seq) and `rank` is the
+ * rank line captured from the board itself. We NEVER re-sort a board by its
+ * parsed scores: arena boards append a second tail segment (cheap-but-strong
+ * frontier models whose scores ASCEND with rank — e.g. the agent board's
+ * #55 Solar Pro 4 carries 20.25 while #2 carries 13.99), so score-sorting
+ * fabricated a top-3 that exists under no real board condition (the owner's
+ * R20 complaint). Duplicate norms keep the lowest non-null board rank.
+ * Returns null when the family sanity check fails — never store garbage.
  */
-function finalizeEntries(raw: RawEntry[]): BenchEntry[] | null {
+function finalizeEntries(raw: RawEntry[], orderMode: "score" | "board"): BenchEntry[] | null {
   const byNorm = new Map<string, RawEntry>();
   for (const r of raw) {
     const name = r.model.trim().slice(0, 128);
@@ -238,13 +268,30 @@ function finalizeEntries(raw: RawEntry[]): BenchEntry[] | null {
     const norm = normalizeBenchKey(name);
     if (!norm) continue;
     const prev = byNorm.get(norm);
-    if (!prev || (r.score !== null && (prev.score === null || r.score > prev.score))) {
-      byNorm.set(norm, { model: name, score: r.score });
+    if (!prev) {
+      byNorm.set(norm, { ...r, model: name });
+      continue;
+    }
+    if (orderMode === "board") {
+      if (r.rank !== null && (prev.rank === null || r.rank < prev.rank)) {
+        byNorm.set(norm, { ...r, model: name });
+      }
+    } else if (r.score !== null && (prev.score === null || r.score > prev.score)) {
+      byNorm.set(norm, { ...r, model: name });
     }
   }
   const list = [...byNorm.values()];
   const recognized = list.some((e) => MODEL_FAMILY_RE.test(e.model.toLowerCase()));
   if (!recognized || list.length === 0) return null;
+  if (orderMode === "board") {
+    list.sort((a, b) => a.seq - b.seq); // board display order — never re-sorted
+    return list.slice(0, MAX_ENTRIES).map((e) => ({
+      model: e.model,
+      norm: normalizeBenchKey(e.model),
+      score: e.score,
+      rank: e.rank,
+    }));
+  }
   list.sort((a, b) => {
     const sa = a.score ?? Number.NEGATIVE_INFINITY;
     const sb = b.score ?? Number.NEGATIVE_INFINITY;
@@ -297,6 +344,7 @@ function parseAaObjects(text: string): RawEntry[] | null {
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) starts.push(m.index);
   const raw: RawEntry[] = [];
+  let seq = 0;
   for (const start of starts) {
     // brace-match (string/escape aware)
     let depth = 0;
@@ -333,7 +381,7 @@ function parseAaObjects(text: string): RawEntry[] | null {
     if (typeof o.name !== "string") continue;
     const scoreRaw = o.intelligenceIndex;
     if (typeof scoreRaw !== "number" || !Number.isFinite(scoreRaw)) continue;
-    raw.push({ model: o.name, score: round2(scoreRaw) });
+    raw.push({ model: o.name, score: round2(scoreRaw), rank: null, seq: seq++ });
   }
   return raw.length > 0 ? raw : null;
 }
@@ -369,12 +417,12 @@ function parseAaMarkdown(markdown: string): RawEntry[] | null {
     }
   }
   if (names.length === 0) return null;
-  const raw: RawEntry[] = names.map((model) => ({ model, score: null }));
+  const raw: RawEntry[] = names.map((model, seq) => ({ model, score: null, rank: null, seq }));
   if (digits && digits.length % 2 === 0 && digits.length / 2 <= names.length) {
     const k = digits.length / 2;
     for (let i = 0; i < k; i++) {
       const v = Number(digits.slice(i * 2, i * 2 + 2));
-      if (Number.isFinite(v)) raw[i] = { model: names[i], score: v };
+      if (Number.isFinite(v)) raw[i] = { ...raw[i], score: v };
     }
   }
   return raw.length > 0 ? raw : null;
@@ -415,6 +463,12 @@ function isMetaLine(line: string): boolean {
  * sits directly under the "Net Improvement" column header, immediately after
  * the model+lab lines — the concatenated trailing cells (sub-scores, votes,
  * cost) are correctly NOT matched by the anchored regex.
+ * [R20-a]: each row's rank is ALSO captured (best-effort) — arena rows carry
+ * a standalone rank integer one line above a concatenated min↔max movement
+ * indicator (e.g. "55" / "5454"), both above the model name. A candidate rank
+ * is only kept if it is strictly greater than the previous row's captured
+ * rank (misreads are then discarded as null, never stored). Rows keep markdown
+ * sequence as `seq` — the board's display order is the ranking (R20-a).
  * Returns RAW rows (finalize + range guard happen in parseForKind).
  */
 function parseArenaMarkdown(markdown: string, kind: BenchKind): RawEntry[] | null {
@@ -427,6 +481,7 @@ function parseArenaMarkdown(markdown: string, kind: BenchKind): RawEntry[] | nul
         : [/^(\d{3,4})\u00b1\d+\s*(?:Preliminary)?$/, /^(\d{3,4})\s*(?:Preliminary)$/]; // Elo
   const lines = markdown.split("\n");
   const raw: RawEntry[] = [];
+  let prevRank: number | null = null; // monotonic-enforcement state across rows
   for (let i = 0; i < lines.length; i++) {
     const t = lines[i].trim();
     if (!t) continue;
@@ -442,6 +497,7 @@ function parseArenaMarkdown(markdown: string, kind: BenchKind): RawEntry[] | nul
     if (score === null) continue;
     // walk back over non-empty lines to find the model name
     let name: string | null = null;
+    let nameLineIdx = -1;
     let seen = 0;
     for (let j = i - 1; j >= 0 && j > i - 14; j--) {
       const prev = lines[j].trim();
@@ -450,18 +506,89 @@ function parseArenaMarkdown(markdown: string, kind: BenchKind): RawEntry[] | nul
       const linked = linkName(prev);
       if (linked && !/arena\.ai/.test(prev)) {
         name = linked;
+        nameLineIdx = j;
         break;
       }
       if (seen >= 2 && !isMetaLine(prev) && !/^-?[\d.,%\u00b1]+$/.test(prev) && prev.length >= 2) {
         // alignment-style plain name line (2+ non-empty lines above the score)
         name = prev;
+        nameLineIdx = j;
         break;
       }
       if (seen >= 6) break;
     }
-    if (name) raw.push({ model: name, score });
+    if (!name) continue;
+    // R20-a — best-effort board-rank capture above the name line
+    const rank = captureBoardRank(lines, nameLineIdx, prevRank);
+    if (rank !== null) prevRank = rank;
+    raw.push({ model: name, score, rank, seq: raw.length });
   }
   return raw.length > 0 ? raw : null;
+}
+
+/**
+ * R20-a — walk ABOVE the model-name line for the board's own rank integer.
+ * Row anatomy [MEASURED]: ... "55" (rank) "5454" (min↔max movement) [lab?] [Model]
+ * The first digits-only line above the name is the movement indicator, the
+ * second is the rank. The walk stops at any markdown link or "±" line (the
+ * previous row's territory) — a candidate is returned only when it is a
+ * plausible rank (1..400) AND strictly greater than the previous row's rank;
+ * anything else degrades to null (honest unknown, never a misattribution).
+ */
+function captureBoardRank(lines: string[], nameLineIdx: number, prevRank: number | null): number | null {
+  let digitsSeen = 0;
+  let seen = 0;
+  for (let k = nameLineIdx - 1; k >= 0 && k > nameLineIdx - 12; k--) {
+    const t = lines[k].trim();
+    if (!t) continue;
+    seen++;
+    if (t.includes("\u00b1")) return null; // previous row's concatenated cells
+    if (/^\[[^\]]+\]\(https?:\/\/\S+\)$/.test(t)) return null; // previous row's link
+    if (/^\d{1,5}$/.test(t)) {
+      digitsSeen++;
+      if (digitsSeen === 2) {
+        const v = Number(t);
+        if (!Number.isInteger(v) || v < 1 || v > 400) return null;
+        if (prevRank !== null && v <= prevRank) return null; // monotonic or nothing
+        return v;
+      }
+      continue; // first digits line = movement indicator — keep walking
+    }
+    if (seen >= 8) return null;
+  }
+  return null;
+}
+
+/**
+ * R20-a — the source board's own header stamp, captured so the panel can show
+ * WHICH vintage it mirrors. Arena pages carry three consecutive header lines
+ * right under the board description [MEASURED]: "Oct 23, 2026" /
+ * "2,557,423 sessions" / "55 models". All three best-effort; nulls honest.
+ */
+function parseBoardMeta(markdown: string): BenchBoardMeta | null {
+  if (!markdown) return null;
+  const lines = markdown.split("\n", 80); // the stamp sits in the page header
+  let date: string | null = null;
+  let sessions: string | null = null;
+  let models: number | null = null;
+  for (const l of lines) {
+    const t = l.trim();
+    if (!t) continue;
+    if (date === null && /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2}, \d{4}$/.test(t)) {
+      date = t;
+      continue;
+    }
+    if (sessions === null && /^([\d,]+) sessions$/.test(t)) {
+      sessions = t.replace(/\s+sessions$/, "");
+      continue;
+    }
+    if (models === null && /^(\d{1,4}) models$/.test(t)) {
+      const v = Number(t.replace(/ models$/, ""));
+      if (Number.isInteger(v) && v > 0) models = v;
+    }
+  }
+  if (date === null && sessions === null && models === null) return null;
+  return { date, sessions, models };
 }
 
 // ---------------------------------------------------------------------------
@@ -599,8 +726,13 @@ async function poolGet(url: string): Promise<DirectFetchOutcome> {
 // Per-kind fetch + parse pipeline
 // ---------------------------------------------------------------------------
 
-/** Parsed outcome: finalized entries (null = unrecognizable) + range-anomaly count. */
-type ParseOutcome = { entries: BenchEntry[] | null; rangeWarnings: number };
+/** Parsed outcome: finalized entries (null = unrecognizable) + range-anomaly count + R20-a notes/meta. */
+type ParseOutcome = {
+  entries: BenchEntry[] | null;
+  rangeWarnings: number;
+  notes: string | null;
+  boardMeta: BenchBoardMeta | null;
+};
 
 /**
  * Sanity-range guard (R19-b): nulls any parsed score outside its kind's
@@ -615,34 +747,80 @@ function applyScoreRangeGuard(kind: BenchKind, raw: RawEntry[]): { raw: RawEntry
     if (r.score === null) return r;
     if (r.score < range.min || r.score > range.max) {
       warnings++;
-      return { model: r.model, score: null };
+      return { ...r, score: null };
     }
     return r;
   });
   return { raw: guarded, warnings };
 }
 
-/** Raw-row extraction per kind (no finalize, no range guard yet). */
-function collectRawEntries(kind: BenchKind, source: "html" | "markdown", text: string): RawEntry[] | null {
-  if (kind === "aa-index") {
-    if (source === "html") {
-      // primary: RSC flight chunks → model objects with intelligenceIndex
-      const flight = extractFlightText(text);
-      const fromFlight = parseAaObjects(flight);
-      if (fromFlight) return fromFlight;
-      // tolerate a plain __NEXT_DATA__ page or any embedded JSON objects
-      return parseAaObjects(text);
-    }
-    return parseAaMarkdown(text);
+/** Raw-row extraction for aa-index (no finalize, no range guard yet). */
+function collectAaEntries(source: "html" | "markdown", text: string): RawEntry[] | null {
+  if (source === "html") {
+    // primary: RSC flight chunks → model objects with intelligenceIndex
+    const flight = extractFlightText(text);
+    const fromFlight = parseAaObjects(flight);
+    if (fromFlight) return fromFlight;
+    // tolerate a plain __NEXT_DATA__ page or any embedded JSON objects
+    return parseAaObjects(text);
   }
-  return parseArenaMarkdown(text, kind);
+  return parseAaMarkdown(text);
+}
+
+/**
+ * R20-a parse-quality notes for arena boards (attached to the snapshot):
+ * declared-model-count cross-check + board-rank monotonicity. Notes are
+ * HONEST WARNINGS — the data still stores (order follows the board's own
+ * sequence), but nothing anomalous can ever pass silently again.
+ */
+function composeParseNotes(entries: BenchEntry[] | null, boardMeta: BenchBoardMeta | null): string | null {
+  if (!entries) return null;
+  const notes: string[] = [];
+  if (boardMeta?.models !== null && boardMeta?.models !== undefined && entries.length !== boardMeta.models) {
+    // Distinguish an honest storage-cap truncation from a real parse anomaly:
+    // chat boards declare 400+ models; we deliberately store the board's first
+    // MAX_ENTRIES rows (in board order = the top of the ranking).
+    if (boardMeta.models > entries.length && entries.length === MAX_ENTRIES) {
+      notes.push(`board declares ${boardMeta.models} models — stored the board's first ${MAX_ENTRIES} rows (storage cap)`);
+    } else {
+      notes.push(`board declares ${boardMeta.models} models but ${entries.length} rows parsed`);
+    }
+  }
+  const ranks = entries.map((e) => e.rank).filter((r): r is number => r !== null);
+  if (ranks.length > 0) {
+    let mono = true;
+    for (let i = 1; i < ranks.length; i++) {
+      if (ranks[i] <= ranks[i - 1]) {
+        mono = false;
+        break;
+      }
+    }
+    if (!mono) notes.push("board ranks non-monotonic — rank-capture anomaly; order follows the board's display sequence");
+  }
+  return notes.length > 0 ? notes.join("; ") : null;
 }
 
 function parseForKind(kind: BenchKind, source: "html" | "markdown", text: string): ParseOutcome {
-  const raw = collectRawEntries(kind, source, text);
-  if (!raw || raw.length === 0) return { entries: null, rangeWarnings: 0 };
+  // R20-a — arena boards mirror the board's own order + ranks; aa-index keeps
+  // its score-derived ordering (no rank lines in the flight payload).
+  const orderMode: "score" | "board" = kind === "aa-index" ? "score" : "board";
+  let raw: RawEntry[] | null = null;
+  let boardMeta: BenchBoardMeta | null = null;
+  if (kind === "aa-index") {
+    raw = collectAaEntries(source, text);
+  } else {
+    raw = parseArenaMarkdown(text, kind);
+    if (source === "markdown") boardMeta = parseBoardMeta(text);
+  }
+  if (!raw || raw.length === 0) return { entries: null, rangeWarnings: 0, notes: null, boardMeta: null };
   const guarded = applyScoreRangeGuard(kind, raw);
-  return { entries: finalizeEntries(guarded.raw), rangeWarnings: guarded.warnings };
+  const entries = finalizeEntries(guarded.raw, orderMode);
+  return {
+    entries,
+    rangeWarnings: guarded.warnings,
+    notes: composeParseNotes(entries, boardMeta),
+    boardMeta,
+  };
 }
 
 /**
@@ -667,7 +845,19 @@ function staticMessage(code: BenchError["code"], source: BenchSource): string {
 }
 
 export type FetchBenchmarksOutcome =
-  | { ok: true; via: BenchVia; entries: BenchEntry[]; modelCount: number; rangeWarnings: number }
+  | {
+      ok: true;
+      via: BenchVia;
+      entries: BenchEntry[];
+      modelCount: number;
+      rangeWarnings: number;
+      /** R20-a additive — parse-quality notes (declared-count cross-check, rank monotonicity). */
+      notes: string | null;
+      /** R20-a additive — the source board's own header stamp, when captured. */
+      boardMeta: BenchBoardMeta | null;
+      /** R20-a additive — "board" (arena) vs "derived" (aa-index) rank provenance. */
+      rankSource: BenchRankSource;
+    }
   | { ok: false; error: BenchError };
 
 /**
@@ -686,7 +876,16 @@ export async function fetchBenchmarks(kind: BenchKind): Promise<FetchBenchmarksO
   if (direct.kind === "ok") {
     const parsed = parseForKind(kind, "html", direct.text);
     if (parsed.entries) {
-      return { ok: true, via: "direct", entries: parsed.entries, modelCount: parsed.entries.length, rangeWarnings: parsed.rangeWarnings };
+      return {
+        ok: true,
+        via: "direct",
+        entries: parsed.entries,
+        modelCount: parsed.entries.length,
+        rangeWarnings: parsed.rangeWarnings,
+        notes: parsed.notes,
+        boardMeta: parsed.boardMeta,
+        rankSource: kind === "aa-index" ? "derived" : "board",
+      };
     }
     // 200 bytes with no usable data (SPA) → try the renderer next
   } else if (direct.kind === "transport-failed") {
@@ -700,7 +899,16 @@ export async function fetchBenchmarks(kind: BenchKind): Promise<FetchBenchmarksO
   if (hb.kind === "ok") {
     const parsed = parseForKind(kind, "markdown", hb.markdown);
     if (parsed.entries) {
-      return { ok: true, via: "hyperbrowser", entries: parsed.entries, modelCount: parsed.entries.length, rangeWarnings: parsed.rangeWarnings };
+      return {
+        ok: true,
+        via: "hyperbrowser",
+        entries: parsed.entries,
+        modelCount: parsed.entries.length,
+        rangeWarnings: parsed.rangeWarnings,
+        notes: parsed.notes,
+        boardMeta: parsed.boardMeta,
+        rankSource: kind === "aa-index" ? "derived" : "board",
+      };
     }
     // markdown present but unparseable → honest PARSE_FAILED at the tail
   } else if (hb.kind === "no-key" && !directTransportFailed && direct.kind !== "ok") {
@@ -716,7 +924,16 @@ export async function fetchBenchmarks(kind: BenchKind): Promise<FetchBenchmarksO
     if (pooled.kind === "ok") {
       const parsed = parseForKind(kind, "html", pooled.text);
       if (parsed.entries) {
-        return { ok: true, via: "pool", entries: parsed.entries, modelCount: parsed.entries.length, rangeWarnings: parsed.rangeWarnings };
+        return {
+          ok: true,
+          via: "pool",
+          entries: parsed.entries,
+          modelCount: parsed.entries.length,
+          rangeWarnings: parsed.rangeWarnings,
+          notes: parsed.notes,
+          boardMeta: parsed.boardMeta,
+          rankSource: kind === "aa-index" ? "derived" : "board",
+        };
       }
       pooledGotContent = true;
     }
@@ -764,6 +981,17 @@ function sanitizeSnapshot(raw: unknown): BenchSnapshot | null {
       rank: typeof eo.rank === "number" && Number.isFinite(eo.rank) ? eo.rank : null,
     });
   }
+  // R20-a additive — boardMeta/rankSource preserved when well-shaped, else null
+  const bmRaw = o.boardMeta as Record<string, unknown> | null | undefined;
+  const boardMeta: BenchBoardMeta | null =
+    bmRaw && typeof bmRaw === "object"
+      ? {
+          date: typeof bmRaw.date === "string" ? bmRaw.date.slice(0, 32) : null,
+          sessions: typeof bmRaw.sessions === "string" ? bmRaw.sessions.slice(0, 32) : null,
+          models: typeof bmRaw.models === "number" && Number.isInteger(bmRaw.models) ? bmRaw.models : null,
+        }
+      : null;
+  const rankSource: BenchRankSource | null = o.rankSource === "board" || o.rankSource === "derived" ? o.rankSource : null;
   return {
     ok: o.ok === true,
     kind: src.kind,
@@ -779,6 +1007,8 @@ function sanitizeSnapshot(raw: unknown): BenchSnapshot | null {
     modelCount: typeof o.modelCount === "number" ? o.modelCount : entries.length,
     error,
     notes: typeof o.notes === "string" && o.notes.trim().length > 0 ? o.notes.trim().slice(0, 512) : null,
+    boardMeta,
+    rankSource,
     entries,
   };
 }
@@ -840,6 +1070,13 @@ async function runRefresh(kind: BenchKind, trigger: string | undefined): Promise
   const source = benchSource(kind);
   const fetchedAt = new Date().toISOString();
   const outcome = await fetchBenchmarks(kind);
+  // R20-a — notes combine parse-quality warnings (declared-count cross-check,
+  // rank monotonicity) with the R19-b range guard; both honest, both capped.
+  const noteParts: string[] = [];
+  if (outcome.ok) {
+    if (outcome.notes) noteParts.push(outcome.notes);
+    if (outcome.rangeWarnings > 0) noteParts.push(rangeWarningNote(outcome.rangeWarnings));
+  }
   const snap: BenchSnapshot = outcome.ok
     ? {
         ok: true,
@@ -852,7 +1089,9 @@ async function runRefresh(kind: BenchKind, trigger: string | undefined): Promise
         via: outcome.via,
         modelCount: outcome.modelCount,
         error: null,
-        notes: outcome.rangeWarnings > 0 ? rangeWarningNote(outcome.rangeWarnings) : null,
+        notes: noteParts.length > 0 ? noteParts.join(" | ").slice(0, 512) : null,
+        boardMeta: outcome.boardMeta,
+        rankSource: outcome.rankSource,
         entries: outcome.entries,
       }
     : {
@@ -867,6 +1106,8 @@ async function runRefresh(kind: BenchKind, trigger: string | undefined): Promise
         modelCount: null,
         error: outcome.error,
         notes: null,
+        boardMeta: null,
+        rankSource: null,
         entries: [],
       };
   try {
