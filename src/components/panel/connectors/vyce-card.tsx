@@ -13,7 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import type { VyceStatusPayload } from "@/lib/connectors/vyce";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
-import { BrainCircuit, KeyRound, PlugZap, RefreshCw, Trash2 } from "lucide-react";
+import { AlertTriangle, BrainCircuit, KeyRound, PlugZap, RefreshCw, Trash2 } from "lucide-react";
 
 /**
  * T-207 — Vyce brain-gateway connector card. Honest states only:
@@ -60,6 +60,13 @@ function reachability(s: VyceStatusPayload): { label: string; badgeClass: string
   if (code === "VAULT_UNREADABLE") {
     return { label: "VAULT ERROR", badgeClass: "border-accent/60 text-accent", detail: s.error?.message ?? "Vault unreadable." };
   }
+  if (code === "STORED_KEY_IS_FINGERPRINT") {
+    return {
+      label: "HASH STORED, NOT A KEY",
+      badgeClass: "border-destructive/50 text-destructive",
+      detail: s.vaultIgnored ?? s.error?.message ?? "The stored value is a SHA-256 fingerprint — skipped.",
+    };
+  }
   if (code === "UNAUTHORIZED") {
     return { label: "KEY REJECTED", badgeClass: "border-destructive/50 text-destructive", detail: s.error?.message ?? "Vyce did not accept the key." };
   }
@@ -69,10 +76,14 @@ function reachability(s: VyceStatusPayload): { label: string; badgeClass: string
   if (code === "RATE_LIMITED") {
     return { label: "RATE LIMITED", badgeClass: "border-accent/60 text-accent", detail: s.error?.message ?? "Vyce asked to slow down." };
   }
+  const notConfiguredDetail =
+    s.fallback?.reason
+      ? `Edge-function fallback unusable: ${s.fallback.reason}`
+      : "No Vyce key stored in the vault yet.";
   if (code) {
     return { label: code, badgeClass: "border-destructive/50 text-destructive", detail: s.error?.message ?? "Probe error." };
   }
-  return { label: "NOT CONFIGURED", badgeClass: "text-muted-foreground border-border", detail: "No Vyce key stored in the vault yet." };
+  return { label: "NOT CONFIGURED", badgeClass: "text-muted-foreground border-border", detail: notConfiguredDetail };
 }
 
 function tierBadgeClass(state: string | null): string {
@@ -81,10 +92,19 @@ function tierBadgeClass(state: string | null): string {
   return "border-border text-muted-foreground";
 }
 
+/**
+ * A SHA-256 hex fingerprint is 64 hex chars. The owner previously stored a
+ * hashed value instead of the raw Vyce key (it can never authenticate — Vyce
+ * answers 401 invalid_api_key). Fail-closed at the UI: refuse to save a
+ * hash-shaped value and say exactly why.
+ */
+const SHA256_SHAPE = /^[a-f0-9]{64}$/i;
+
 export function VyceCard() {
   const queryClient = useQueryClient();
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [baseUrlInput, setBaseUrlInput] = useState("");
+  const [replaceOpen, setReplaceOpen] = useState(false);
 
   const status = useQuery<StatusResponse>({
     queryKey: ["connector-vyce-status"],
@@ -114,6 +134,7 @@ export function VyceCard() {
     onSuccess: (data) => {
       setApiKeyInput("");
       setBaseUrlInput("");
+      setReplaceOpen(false);
       void queryClient.invalidateQueries({ queryKey: ["connector-vyce-status"] });
       toast.success(
         "Vyce key stored",
@@ -143,7 +164,19 @@ export function VyceCard() {
 
   const s = status.data?.status ?? null;
   const reach = s ? reachability(s) : null;
-  const showForm = s !== null && !s.configured && s.keySource !== "supabase-edge-secret";
+  // The key-entry form is ALWAYS available: hidden only while a healthy vault
+  // key is stored and the owner has not asked to replace it. Crucially it shows
+  // in the supabase-edge-secret fallback state too — the fallback note says
+  // "paste a vault key below to make it primary" — AND when the stored vault
+  // value is a SHA-256 fingerprint (poisoned; replacing it is the fix).
+  const showForm =
+    s !== null && (!s.configured || replaceOpen || Boolean(s.vaultIgnored)) && !status.isLoading;
+  const pastedLooksHashed = SHA256_SHAPE.test(apiKeyInput.trim());
+  const closeForm = () => {
+    setReplaceOpen(false);
+    setApiKeyInput("");
+    setBaseUrlInput("");
+  };
 
   return (
     <Card>
@@ -195,10 +228,55 @@ export function VyceCard() {
             </div>
 
             {s.keySource === "supabase-edge-secret" && (
-              <p className="rounded-md border border-accent/40 bg-accent/10 p-2 text-xs text-accent">
-                Using the Supabase Edge-Function secret fallback (VYCE_API_KEY on the harness
-                project). Paste a vault key below to make it primary.
-              </p>
+              <div className="space-y-1 rounded-md border border-accent/40 bg-accent/10 p-2 text-xs text-accent">
+                <p>
+                  Using the Supabase Edge-Function secret fallback (VYCE_API_KEY on the harness
+                  project). Paste the raw Vyce key below to make a vault key primary.
+                </p>
+                {s.error?.code === "UNAUTHORIZED" && (
+                  <p className="text-[11px] text-accent/90">
+                    The fallback secret was rejected with HTTP 401 — if it was stored as a
+                    SHA-256 hash instead of the raw key it can never authenticate. Paste the
+                    raw key below (or re-store the raw key as VYCE_API_KEY on Supabase).
+                  </p>
+                )}
+              </div>
+            )}
+
+            {s.vaultIgnored && (
+              <div
+                className="space-y-1 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive"
+                role="alert"
+              >
+                <p className="flex items-start gap-1.5">
+                  <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+                  <span>{s.vaultIgnored}</span>
+                </p>
+                {s.fallback?.reason && (
+                  <p className="pl-5 text-[11px] text-destructive/90">
+                    Edge-function fallback not usable: {s.fallback.reason}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {!s.configured && s.keySource === null && s.fallback?.reason && (
+              <div
+                className="space-y-1 rounded-md border border-accent/40 bg-accent/10 p-2 text-xs text-accent"
+                role="status"
+              >
+                <p className="flex items-start gap-1.5">
+                  <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+                  <span>
+                    Supabase Edge-Function fallback found, but it cannot be used:{" "}
+                    {s.fallback.reason}
+                  </span>
+                </p>
+                <p className="pl-5 text-[11px] text-accent/90">
+                  Fix it in one move: paste the RAW Vyce key in the form below — a vault key
+                  always takes priority over the fallback.
+                </p>
+              </div>
             )}
 
             {s.configured && s.maskedKey ? (
@@ -212,23 +290,37 @@ export function VyceCard() {
                     key source: <span className="font-mono">{s.keySource ?? "unknown"}</span>
                   </p>
                 </div>
-                <Button
-                  variant="ghost"
-                  className="min-h-11 shrink-0 text-destructive hover:text-destructive"
-                  disabled={disconnect.isPending}
-                  aria-label="Disconnect Vyce and remove the stored key"
-                  onClick={() => disconnect.mutate()}
-                >
-                  <Trash2 className="size-4" aria-hidden="true" />
-                  Disconnect
-                </Button>
+                <div className="flex shrink-0 items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    className="min-h-11 text-muted-foreground hover:text-foreground"
+                    aria-label="Replace the stored Vyce key"
+                    onClick={() => setReplaceOpen((v) => !v)}
+                  >
+                    <KeyRound className="size-4" aria-hidden="true" />
+                    Replace
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    className="min-h-11 text-destructive hover:text-destructive"
+                    disabled={disconnect.isPending}
+                    aria-label="Disconnect Vyce and remove the stored key"
+                    onClick={() => disconnect.mutate()}
+                  >
+                    <Trash2 className="size-4" aria-hidden="true" />
+                    Disconnect
+                  </Button>
+                </div>
               </div>
-            ) : showForm ? (
+            ) : null}
+
+            {showForm ? (
               <form
                 className="space-y-2"
                 onSubmit={(e) => {
                   e.preventDefault();
-                  if (apiKeyInput.trim().length >= 8) saveKey.mutate();
+                  const v = apiKeyInput.trim();
+                  if (v.length >= 8 && !SHA256_SHAPE.test(v)) saveKey.mutate();
                 }}
               >
                 <Label htmlFor="vyce-api-key">Vyce API key</Label>
@@ -248,7 +340,9 @@ export function VyceCard() {
                   <Button
                     type="submit"
                     className="min-h-11 shrink-0 font-mono"
-                    disabled={apiKeyInput.trim().length < 8 || saveKey.isPending}
+                    disabled={
+                      apiKeyInput.trim().length < 8 || pastedLooksHashed || saveKey.isPending
+                    }
                   >
                     {saveKey.isPending ? "Saving…" : "Save key"}
                   </Button>
@@ -268,11 +362,29 @@ export function VyceCard() {
                   onChange={(e) => setBaseUrlInput(e.target.value)}
                   aria-describedby="vyce-key-note"
                 />
+                {pastedLooksHashed && (
+                  <p
+                    className="flex items-start gap-1.5 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive"
+                    role="alert"
+                  >
+                    <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+                    <span>
+                      That value is 64 hex characters — a SHA-256 fingerprint, not a raw API
+                      key. Vyce can never accept it (it would answer 401 invalid_api_key).
+                      Paste the raw key exactly as Vyce shows it (e.g. sk-…).
+                    </span>
+                  </p>
+                )}
                 <p id="vyce-key-note" className="text-xs text-muted-foreground">
                   Stored AES-256-GCM in the local vault — never displayed again, never sent to
                   the chat surface. Probe target:{" "}
                   <span className="font-mono">{s.probeTarget} · GET /v1/models · 8s timeout</span>
                 </p>
+                {s.configured && (
+                  <Button type="button" variant="ghost" className="min-h-9 self-start text-xs" onClick={closeForm}>
+                    Cancel
+                  </Button>
+                )}
               </form>
             ) : null}
 

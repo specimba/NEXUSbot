@@ -10,10 +10,12 @@ import {
   isValidVyceBaseUrl,
   loadVyceBaseUrlOverride,
   loadVyceKey,
+  looksLikeVyceFingerprint,
   normalizeVyceBaseUrl,
   type VyceRole,
 } from "@/lib/connectors/vyce";
 import { SUPABASE_MGMT_BASE, getMgmtPat, mgmtListProjects } from "@/lib/connectors/supabase";
+import { joinProviderUrl, resolveCustomProvider } from "@/lib/connectors/custom-provider";
 import {
   DEFAULT_GROQ_BASE_URL,
   GROQ_STATIC_MODELS,
@@ -241,6 +243,16 @@ export async function resolveVyceKeyFallback(): Promise<VyceFallback> {
       if (found === null) continue; // project unreachable — try the next
       const key = found.get("VYCE_API_KEY");
       if (key && key.trim().length >= 8) {
+        // Owner's live issue: the secret itself may be a SHA-256 fingerprint
+        // (64 hex) — that can never authenticate, so treat it as absent and
+        // say exactly why instead of probing with it forever.
+        if (looksLikeVyceFingerprint(key)) {
+          return {
+            ok: false,
+            reason:
+              "the VYCE_API_KEY secret on the Supabase harness project is itself a 64-hex SHA-256 hash, not the raw key — re-store the RAW key there (or paste it below to make a vault key primary)",
+          };
+        }
         const baseUrlRaw = found.get("VYCE_BASE_URL")?.trim();
         return {
           ok: true,
@@ -263,7 +275,10 @@ export async function resolveVyceCredentials(): Promise<VyceCredentials | null> 
   void refreshRedactionList(); // fire-and-forget, TTL-throttled
 
   const vault = await loadVyceKey();
-  if (vault.ok) {
+  // A fingerprint-shaped vault value (64-hex SHA-256) can never authenticate
+  // — skip it and fall through to the edge-secret path instead of replaying
+  // the owner's 401 loop with a hash.
+  if (vault.ok && !vault.fingerprint) {
     registerSecretForRedaction(vault.key);
     const override = await loadVyceBaseUrlOverride();
     return {
@@ -335,7 +350,18 @@ export async function resolveGroqKeyFallback(): Promise<GroqFallback> {
       const found = await readEdgeSecretValues(pat, project.ref, ["GROQ_API_KEY"]);
       if (found === null) continue; // project unreachable — try the next
       const key = found.get("GROQ_API_KEY");
-      if (key && key.trim().length >= 8) return { ok: true, key: key.trim() };
+      if (key && key.trim().length >= 8) {
+        // Same live issue as Vyce: the harness project's secrets were stored
+        // as SHA-256 hashes — a 64-hex value can never authenticate at Groq.
+        if (looksLikeVyceFingerprint(key)) {
+          return {
+            ok: false,
+            reason:
+              "the GROQ_API_KEY secret on the Supabase harness project is a 64-hex SHA-256 hash, not the raw key — re-store the RAW key there (or save it in the Groq vault slot)",
+          };
+        }
+        return { ok: true, key: key.trim() };
+      }
     }
     return { ok: false, reason: GROQ_FALLBACK_NOT_FOUND };
   })();
@@ -350,7 +376,9 @@ export async function resolveGroqCredentials(): Promise<GroqCredentials | null> 
   void refreshRedactionList(); // fire-and-forget, TTL-throttled
 
   const vault = await loadGroqKey();
-  if (vault.ok) {
+  // Fingerprint-shaped vault value (64-hex SHA-256) can never authenticate —
+  // skip it and fall through to the edge-secret path.
+  if (vault.ok && !looksLikeVyceFingerprint(vault.key)) {
     registerSecretForRedaction(vault.key);
     return { key: vault.key, baseUrl: DEFAULT_GROQ_BASE_URL, source: "vault" };
   }
@@ -917,6 +945,199 @@ export async function chatComplete(
     egress: "direct",
     started,
   });
+}
+
+// ---------------------------------------------------------------------------
+// Custom providers (owner-defined, beyond Vyce/Groq) — non-streaming only.
+// Streaming for custom gateways is deliberately deferred (honesty over
+// pretend-coverage): Anthropic SSE has a different event grammar, and routing
+// an SSE stream through the buffered proxy transport is impossible (same
+// constraint as streamComplete above). The KICK bot integration consumes this
+// entry point.
+// ---------------------------------------------------------------------------
+
+export type CustomChatOpts = {
+  temperature?: number;
+  maxTokens?: number;
+  timeoutMs?: number;
+  /** Override the provider row's default model for this call. */
+  model?: string;
+};
+
+/**
+ * Chat completion through an owner-defined custom provider row.
+ *   openai protocol    → POST {base}[/v1]/chat/completions, Bearer key.
+ *   anthropic protocol → POST {base}[/v1]/messages, x-api-key +
+ *                        anthropic-version: 2023-06-01; system role messages
+ *                        are lifted into the top-level `system` param (the
+ *                        Messages API rejects them inline).
+ * Egress routing honors the routing-map key `custom:<providerId>`, falling
+ * back to the "vyce" route, then direct. UsageEvent meta.source is
+ * "custom:<safe-name>"; role is null (roles are a Vyce-registry concept).
+ */
+export async function chatCompleteCustom(
+  providerId: string,
+  messages: BrainMessage[],
+  opts: CustomChatOpts = {},
+): Promise<ChatCompletionResult> {
+  const started = Date.now();
+  const row = await resolveCustomProvider(providerId);
+  if (!row) {
+    throw new BrainError("NO_KEY", "custom provider not found (or its stored key could not be decrypted)");
+  }
+  if (!Array.isArray(messages) || messages.length === 0) {
+    throw new BrainError("BAD_INPUT", "messages must be a non-empty array");
+  }
+  const model = (opts.model ?? row.model).trim();
+  if (!model) {
+    throw new BrainError("BAD_INPUT", `custom provider "${row.name}" has no model configured`);
+  }
+  if (row.protocol === "openai" && !row.key) {
+    throw new BrainError("NO_KEY", `custom provider "${row.name}" has no API key stored yet`);
+  }
+
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_CHAT_TIMEOUT_MS;
+  const metaSource = `custom:${row.name.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").slice(0, 48)}`;
+
+  let route: EgressMode = "direct";
+  try {
+    const map = await readRoutingMap();
+    route = routeFor(`custom:${providerId}`, map) === "direct" ? routeFor("vyce", map) : routeFor(`custom:${providerId}`, map);
+  } catch {
+    route = "direct";
+  }
+
+  // --- request builders per protocol ----------------------------------------
+  const isOpenAi = row.protocol === "openai";
+  const url = isOpenAi
+    ? joinProviderUrl(row.baseUrl, "openai", "chat/completions")
+    : joinProviderUrl(row.baseUrl, "anthropic", "messages");
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (isOpenAi) {
+    headers["Authorization"] = `Bearer ${row.key ?? ""}`;
+  } else {
+    headers["x-api-key"] = row.key ?? "";
+    headers["anthropic-version"] = "2023-06-01";
+  }
+
+  let bodyJson: string;
+  if (isOpenAi) {
+    bodyJson = JSON.stringify({
+      model,
+      messages,
+      stream: false,
+      ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
+      ...(opts.maxTokens !== undefined ? { max_tokens: opts.maxTokens } : {}),
+    });
+  } else {
+    const systemParts = messages.filter((m) => String(m.role).toLowerCase() === "system").map((m) => m.content);
+    const turns = messages
+      .filter((m) => ["user", "assistant"].includes(String(m.role).toLowerCase()))
+      .map((m) => ({ role: String(m.role).toLowerCase(), content: m.content }));
+    if (turns.length === 0) {
+      throw new BrainError("BAD_INPUT", "anthropic-compatible calls need at least one user/assistant message");
+    }
+    bodyJson = JSON.stringify({
+      model,
+      max_tokens: opts.maxTokens ?? 1024,
+      ...(systemParts.length > 0 ? { system: systemParts.join("\n\n") } : {}),
+      ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
+      messages: turns,
+    });
+  }
+
+  let answer: { status: number; bodyText: string; via: "direct" | EgressTransportName };
+  try {
+    answer = await brainEgressJsonCall(
+      "vyce", // transport label only — the URL/headers/body above are fully custom
+      url,
+      { method: "POST", headers, body: bodyJson },
+      timeoutMs,
+      { model, maxProxyAttempts: BRAIN_MAX_PROXY_ATTEMPTS_CHAT },
+    );
+  } catch (err) {
+    const e =
+      err instanceof BrainError
+        ? err
+        : new BrainError("BAD_RESPONSE", `custom provider "${row.name}" call failed with an unexpected transport error for model "${model}"`, { model });
+    await recordBrainUsage({
+      model,
+      ok: false,
+      latencyMs: Date.now() - started,
+      error: e.code,
+      source: metaSource as BrainUsageTap["source"],
+      egress: route,
+    });
+    throw e;
+  }
+
+  // --- response parsing per protocol ----------------------------------------
+  const status = answer.status;
+  const fail = (code: string, message: string): never => {
+    void recordBrainUsage({
+      model,
+      ok: false,
+      latencyMs: Date.now() - started,
+      error: code,
+      source: metaSource as BrainUsageTap["source"],
+      egress: route,
+    });
+    throw new BrainError(code, message, { model });
+  };
+
+  if (status === 401) {
+    fail("KEY_REJECTED", `custom provider "${row.name}" rejected the key (HTTP 401) — paste the RAW key, never a hash`);
+  }
+  if (status < 200 || status >= 300) {
+    fail(`HTTP_${status}`, `custom provider "${row.name}" answered HTTP ${status} for model "${model}"`);
+  }
+
+  let data: unknown = null;
+  try {
+    data = JSON.parse(answer.bodyText) as unknown;
+  } catch {
+    fail("BAD_RESPONSE_SHAPE", `custom provider "${row.name}" returned a non-JSON body for model "${model}"`);
+  }
+
+  const o = (data ?? {}) as Record<string, unknown>;
+  let content: string | null = null;
+  let usage: ChatCompletionResult["usage"] = null;
+  if (isOpenAi) {
+    const parsed = parseCompletionPayload(data);
+    content = parsed.content;
+    usage = parsed.usage;
+  } else {
+    const blocks = Array.isArray(o.content) ? o.content : [];
+    const text = blocks
+      .map((b) => {
+        const rec = (b ?? {}) as Record<string, unknown>;
+        return rec.type === "text" && typeof rec.text === "string" ? rec.text : null;
+      })
+      .filter((t): t is string => t !== null)
+      .join("");
+    content = text.length > 0 ? text : null;
+    const u = (o.usage ?? null) as Record<string, unknown> | null;
+    if (u && typeof u === "object") {
+      const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+      usage = { prompt: num(u.input_tokens), completion: num(u.output_tokens), total: null };
+    }
+  }
+
+  if (content === null) {
+    fail("BAD_RESPONSE_SHAPE", `custom provider "${row.name}" returned an unrecognized completion shape for model "${model}"`);
+  }
+
+  const latencyMs = Date.now() - started;
+  await recordBrainUsage({
+    model,
+    ok: true,
+    latencyMs,
+    tokens: usage ? { prompt: usage.prompt, completion: usage.completion } : null,
+    source: metaSource as BrainUsageTap["source"],
+    egress: route,
+  });
+
+  return { model, content, latencyMs, usage };
 }
 
 /**

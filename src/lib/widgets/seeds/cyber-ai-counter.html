@@ -1,0 +1,107 @@
+<div class="cyber-hud-container" id="hud-container">
+    <!-- Top Telemetry Row -->
+    <div class="hud-top-bar">
+        <!-- Module 1: Live Viewer Telemetry Counter -->
+        <div class="hud-pill viewer-module">
+            <div class="telemetry-bracket tl"></div>
+            <div class="telemetry-bracket tr"></div>
+            <div class="telemetry-bracket bl"></div>
+            <div class="telemetry-bracket br"></div>
+
+            <div class="status-indicator">
+                <span class="live-pulse"></span>
+                <div class="icon-wrapper" id="viewer-icon-box">
+                    <svg viewBox="0 0 24 24" class="kick-svg-icon" fill="currentColor">
+                        <path d="M3 2h5v6.5L13.5 2H20l-7.5 8.5L20 22h-6.5L8 15.5V22H3V2z"/>
+                    </svg>
+                </div>
+            </div>
+
+            <div class="telemetry-data">
+                <div class="telemetry-header">
+                    <span class="telemetry-label">V-FLUX // LIVE</span>
+                    <span class="telemetry-latency" id="net-latency">SYNCED</span>
+                </div>
+                <div class="counter-row">
+                    <span class="viewer-count" id="viewer-count">0</span>
+                    <span class="trend-icon" id="trend-delta">▲</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Module 2: NEXUS-OS AI Core State & Active Vyce LLM Display -->
+        <div class="hud-pill ai-core-module" id="ai-core-module">
+            <div class="telemetry-bracket tl"></div>
+            <div class="telemetry-bracket tr"></div>
+            <div class="telemetry-bracket bl"></div>
+            <div class="telemetry-bracket br"></div>
+
+            <div class="audio-equalizer" id="audio-equalizer">
+                <span class="eq-bar"></span>
+                <span class="eq-bar"></span>
+                <span class="eq-bar"></span>
+                <span class="eq-bar"></span>
+                <span class="eq-bar"></span>
+            </div>
+
+            <div class="ai-status-text">
+                <div class="ai-header-row">
+                    <span class="ai-tag">NEXUS-OS</span>
+                    <span class="ai-model-tag" id="active-model-tag">VYCE // AUTO (SONNET 4.6 PRO)</span>
+                </div>
+                <div class="ai-state-indicator">
+                    <span class="state-dot" id="state-dot"></span>
+                    <span class="ai-state" id="ai-state">STANDBY</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Module 3: Holographic Terminal Box -->
+    <div class="hologram-terminal" id="hologram-terminal">
+        <div class="terminal-corner corner-tl"></div>
+        <div class="terminal-corner corner-tr"></div>
+        <div class="terminal-corner corner-bl"></div>
+        <div class="terminal-corner corner-br"></div>
+
+        <div class="hologram-header">
+            <div class="user-block">
+                <span class="terminal-led"></span>
+                <span class="hologram-user" id="hologram-user">@SPECIMBA</span>
+            </div>
+            <div class="badges-block">
+                <span class="badge badge-tool" id="tool-badge" style="display: none;">AGENT // HYPERBROWSER</span>
+                <span class="badge badge-cortex" id="cortex-badge">CORTEX // ACTIVE</span>
+                <span class="badge badge-queue" id="queue-pill">QUEUE: 0</span>
+                <span class="badge badge-status" id="sys-status">SYS://STANDBY</span>
+                <span class="badge badge-neural" id="voice-engine-badge">VOICE // READY</span>
+            </div>
+        </div>
+
+        <div class="hologram-body" id="hologram-body">
+            <div id="hologram-text"></div>
+        </div>
+
+        <div class="laser-track">
+            <div class="laser-fill" id="progress-fill"></div>
+        </div>
+    </div>
+
+    <!-- Module 4: Grok Imagine 2.0 Holographic Showcase Card (inner DOM mirrors ensureImagineShowcaseDom() injection) -->
+    <div class="hologram-imagine-card" id="hologram-imagine-card">
+        <div class="imagine-header">
+            <span class="imagine-title" id="imagine-artist-tag">GROK IMAGINE 2.0 // @SPECIMBA</span>
+            <div class="imagine-badges">
+                <span class="badge-score" id="imagine-score-badge">PUAN: !ai puan 10</span>
+                <span class="badge-credit" id="imagine-credit-badge">BAKİYE: $5.00 (10 RESİM)</span>
+            </div>
+        </div>
+        <div class="imagine-Viewport">
+            <img id="imagine-preview-img" src="" alt="Grok Imagine 2.0 Stream Art" referrerpolicy="no-referrer" />
+        </div>
+        <div class="imagine-footer">
+            <span class="imagine-prompt-caption" id="imagine-prompt-caption">Prompt: ...</span>
+            <span class="imagine-ref-pill" id="imagine-ref-pill">+10$ (20 Resim) Ref: VYCE_8ZYQDC</span>
+        </div>
+    </div>
+</div>

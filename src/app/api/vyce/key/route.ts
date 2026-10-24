@@ -8,6 +8,7 @@ import {
   isValidVyceBaseUrl,
   loadVyceBaseUrlOverride,
   loadVyceKey,
+  looksLikeVyceFingerprint,
   maskVyceKey,
   normalizeVyceBaseUrl,
   probeVyce,
@@ -45,6 +46,15 @@ export async function PUT(req: Request) {
   const key = typeof body?.key === "string" ? body.key.trim() : "";
   if (!isPlausibleVyceKey(key)) {
     return err("BAD_KEY", "key must be a string of 8–4096 characters (Vyce API key).", 400);
+  }
+  // Server-side parity with the card guard: a 64-hex SHA-256 fingerprint is
+  // not a key — storing it again would recreate the owner's exact 401 loop.
+  if (looksLikeVyceFingerprint(key)) {
+    return err(
+      "BAD_KEY_FINGERPRINT",
+      "That value is a 64-hex SHA-256 fingerprint, not a raw API key — Vyce can never accept it (HTTP 401 invalid_api_key). Paste the raw key exactly as Vyce issued it (e.g. sk-…).",
+      400,
+    );
   }
 
   let baseUrlProvided = false;
@@ -100,6 +110,8 @@ export async function GET(req: Request) {
     ok: true,
     keyPresent: key.ok,
     masked: key.ok ? key.masked : null,
+    // True when the stored value is hash-shaped (poisoned) — callers surface it.
+    fingerprint: key.ok ? key.fingerprint : false,
     baseUrlOverridePresent: baseUrlOverride !== null,
   });
 }

@@ -55,6 +55,44 @@ model Setting {
   updatedAt DateTime @updatedAt
 }
 
+// Self-hosted widget system (Kickbot-builder parity, but ours): a widget is a
+// self-contained HTML/CSS/JS bundle plus typed user variables. Rendered in the
+// panel preview via iframe srcDoc and exported as a single-file OBS browser
+// source (local-first — no hosted widget URL, nothing leaves the sandbox).
+model Widget {
+  id        String   @id @default(cuid())
+  name      String
+  width     Int      @default(560)
+  height    Int      @default(260)
+  html      String   @default("")
+  css       String   @default("")
+  js        String   @default("")
+  variables String   @default("[]") // JSON array: [{name,label,type,value,secret}]
+  enabled   Boolean  @default(true)
+  seeded    Boolean  @default(false) // true for the Cyber AI Counter import (provenance)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Owner-defined brain providers beyond Vyce/Groq: OpenAI-compatible or
+// Anthropic-compatible gateways with explicit endpoint + model. Keys are
+// encrypted with the same AES-256-GCM envelope as the Credential vault.
+model CustomProvider {
+  id              String    @id @default(cuid())
+  name            String
+  protocol        String // "openai" | "anthropic"
+  baseUrl         String // https://… (may or may not end with /v1 — normalized at call time)
+  model           String    @default("") // default model id for brain calls
+  keyId           String    @default("") // sha256(keyMaterial) first 8 hex — "" when no key yet
+  keyCipher       String    @default("") // crypto.ts envelope; "" when no key yet
+  enabled         Boolean   @default(true)
+  lastProbeAt     DateTime?
+  lastProbeOk     Boolean?
+  lastProbeDetail String    @default("") // static probe verdict (never key material)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
 // Usage ledger (T-207) — counters only, NEVER prompt/response content (P7).
 // kind "image" rows are the ONLY user-facing credit surface (grok-imagine
 // creations, charged per print, not per electricity); kind "llm" rows are

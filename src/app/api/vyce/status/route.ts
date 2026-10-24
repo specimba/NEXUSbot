@@ -19,6 +19,11 @@ import {
  * vault → Supabase Edge-Function secret fallback (owner stored VYCE_API_KEY
  * there). A reachable host with a rejected key is NEVER reported connected.
  *
+ * Fingerprint-aware (owner's live 401 loop): a vault value that is 64-hex
+ * (SHA-256 fingerprint) can never authenticate — it is SKIPPED, the
+ * edge-secret fallback is probed instead, and `vaultIgnored` explains why
+ * in the panel. The card tells the owner to paste the RAW key.
+ *
  * Task 13-b ADDITIVE field: the top-level `groq` sibling carries the Groq
  * provider slot status (getGroqSlotStatus) — the `status` object itself is
  * byte-identical to the pre-13-b contract, so existing consumers are unaffected.
@@ -73,6 +78,53 @@ export async function GET(req: Request) {
   // --- Vault key present → probe with it.
   if (vault.ok) {
     const probe = await probeVyce(vault.key, baseUrl);
+
+    // Fingerprint-shaped vault value: it can never authenticate — do NOT stop
+    // at the 401. Probe the Supabase edge-secret fallback too and report the
+    // full truth (vault ignored + fallback verdict) so the owner sees the way
+    // out (paste the raw key) instead of a dead end.
+    if (vault.fingerprint) {
+      const ignoredMsg =
+        "The stored vault value is a 64-hex SHA-256 fingerprint, not a raw key — it was skipped (it can never authenticate). Paste the raw Vyce key below to replace it.";
+      let fb: VyceStatusPayload = {
+        configured: true,
+        connected: false,
+        keySource: "vault",
+        modelCount: null,
+        tiers: emptyTierMap(),
+        maskedKey: vault.masked,
+        probeTarget,
+        probedAt,
+        error: { code: "STORED_KEY_IS_FINGERPRINT", message: ignoredMsg },
+        fallback: { available: false, reason: null },
+        vaultIgnored: ignoredMsg,
+      };
+      try {
+        const f = await resolveVyceKeyFallback();
+        if (f.ok) {
+          const fp = await probeVyce(f.key, f.baseUrl ?? baseUrl);
+          fb = {
+            configured: true,
+            connected: fp.ok,
+            keySource: "supabase-edge-secret",
+            modelCount: fp.ok ? fp.models.length : null,
+            tiers: fp.ok ? computeTierAvailability(fp.models) : emptyTierMap(),
+            maskedKey: vault.masked,
+            probeTarget,
+            probedAt,
+            error: fp.ok ? null : { code: fp.code, message: fp.message },
+            fallback: { available: true, reason: null },
+            vaultIgnored: ignoredMsg,
+          };
+        } else {
+          fb.fallback = { available: false, reason: f.reason };
+        }
+      } catch {
+        fb.fallback = { available: false, reason: "fallback lookup failed" };
+      }
+      return NextResponse.json({ ok: true, status: fb, groq });
+    }
+
     const payload: VyceStatusPayload = {
       configured: true,
       connected: probe.ok,

@@ -1,0 +1,1001 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Toaster } from "@/components/ui/sonner";
+import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
+import { formatDistanceToNow } from "date-fns";
+import {
+  AppWindow,
+  ArrowLeft,
+  Download,
+  FlaskConical,
+  Info,
+  MonitorPlay,
+  Plus,
+  RefreshCw,
+  Save,
+  Trash2,
+} from "lucide-react";
+import {
+  WIDGET_VARIABLE_TYPES,
+  buildWidgetDocument,
+  makeChatMessageEvent,
+  makeViewerCountEvent,
+  parseWidgetVariables,
+  serializeWidgetVariables,
+  type WidgetVariable,
+  type WidgetVariableType,
+} from "@/lib/widgets/runtime";
+
+/**
+ * WIDGETS tab — the self-hosted successor of the Kickbot widget builder.
+ *
+ * WHY THIS TAB EXISTS (the owner asked plainly, so the answer lives in the UI):
+ *   • Widgets are what viewers SEE on stream — HUD overlays, counters, AI
+ *     terminals, added to OBS as a Browser Source.
+ *   • User variables are a widget's settings (colors, API keys, trigger
+ *     command…). The widget code reads them at runtime; the OBS export bakes
+ *     the current values in.
+ *   • Test events fire fake chat/viewer-count events into the preview so the
+ *     widget can be exercised without going live.
+ * The seed widget is the owner's "Specimba Cyber AI Counter" imported VERBATIM
+ * from the Kickbot saved state (same HTML/CSS/JS, same variable names) — our
+ * runtime provides the exact contract Kickbot's builder injected
+ * (userVariables + widgetEvent + the five helper functions).
+ */
+
+type WidgetRow = {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+  html: string;
+  css: string;
+  js: string;
+  variables: string;
+  enabled: boolean;
+  seeded: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type Draft = {
+  name: string;
+  width: number;
+  height: number;
+  enabled: boolean;
+  html: string;
+  css: string;
+  js: string;
+  variables: WidgetVariable[];
+};
+
+function toDraft(w: WidgetRow): Draft {
+  return {
+    name: w.name,
+    width: w.width,
+    height: w.height,
+    enabled: w.enabled,
+    html: w.html,
+    css: w.css,
+    js: w.js,
+    variables: parseWidgetVariables(w.variables),
+  };
+}
+
+function draftEqual(a: Draft, b: Draft): boolean {
+  return (
+    a.name === b.name &&
+    a.width === b.width &&
+    a.height === b.height &&
+    a.enabled === b.enabled &&
+    a.html === b.html &&
+    a.css === b.css &&
+    a.js === b.js &&
+    serializeWidgetVariables(a.variables) === serializeWidgetVariables(b.variables)
+  );
+}
+
+/* ------------------------------------------------------------------------- */
+/* Variables editor                                                           */
+/* ------------------------------------------------------------------------- */
+
+function VariableRow({
+  v,
+  index,
+  onChange,
+  onRemove,
+}: {
+  v: WidgetVariable;
+  index: number;
+  onChange: (next: WidgetVariable) => void;
+  onRemove: () => void;
+}) {
+  const idBase = `wvar-${index}`;
+  return (
+    <div className="grid gap-1.5 rounded-md border border-border/60 p-2.5">
+      <div className="grid gap-2 sm:grid-cols-[1fr_1fr_130px_auto]">
+        <div className="grid gap-1">
+          <Label htmlFor={`${idBase}-label`} className="text-[11px] text-muted-foreground">
+            Label
+          </Label>
+          <Input
+            id={`${idBase}-label`}
+            className="min-h-9"
+            value={v.label}
+            onChange={(e) => onChange({ ...v, label: e.target.value })}
+          />
+        </div>
+        <div className="grid gap-1">
+          <Label htmlFor={`${idBase}-name`} className="text-[11px] text-muted-foreground">
+            Name <span className="font-mono">(code reads userVariables.name)</span>
+          </Label>
+          <Input
+            id={`${idBase}-name`}
+            className="min-h-9 font-mono"
+            spellCheck={false}
+            value={v.name}
+            onChange={(e) => onChange({ ...v, name: e.target.value })}
+          />
+        </div>
+        <div className="grid gap-1">
+          <Label htmlFor={`${idBase}-type`} className="text-[11px] text-muted-foreground">
+            Type
+          </Label>
+          <Select value={v.type} onValueChange={(t) => onChange({ ...v, type: t as WidgetVariableType })}>
+            <SelectTrigger id={`${idBase}-type`} className="min-h-9 w-full font-mono">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {WIDGET_VARIABLE_TYPES.map((t) => (
+                <SelectItem key={t} value={t} className="font-mono">
+                  {t}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex items-end">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-9 text-destructive hover:text-destructive"
+            aria-label={`Remove variable ${v.name || index + 1}`}
+            onClick={onRemove}
+          >
+            <Trash2 className="size-3.5" aria-hidden="true" />
+          </Button>
+        </div>
+      </div>
+      <div className="grid gap-1">
+        <Label htmlFor={`${idBase}-value`} className="text-[11px] text-muted-foreground">
+          Value {v.secret && <span className="text-accent">· secret — baked into OBS exports, never shown again in plain text</span>}
+        </Label>
+        {v.type === "boolean" ? (
+          <div className="flex items-center gap-2 pt-1">
+            <Switch
+              id={`${idBase}-value`}
+              checked={v.value === "true"}
+              onCheckedChange={(c) => onChange({ ...v, value: c ? "true" : "false" })}
+            />
+            <span className="font-mono text-xs text-muted-foreground">{v.value === "true" ? "true" : "false"}</span>
+          </div>
+        ) : v.type === "color" ? (
+          <div className="flex items-center gap-2">
+            <input
+              id={`${idBase}-value`}
+              type="color"
+              aria-label={`Color value for ${v.name}`}
+              className="size-9 cursor-pointer rounded border border-border bg-transparent"
+              value={/^#[0-9a-fA-F]{6}$/.test(v.value) ? v.value : "#53fc18"}
+              onChange={(e) => onChange({ ...v, value: e.target.value })}
+            />
+            <Input
+              className="min-h-9 max-w-40 font-mono"
+              spellCheck={false}
+              value={v.value}
+              onChange={(e) => onChange({ ...v, value: e.target.value })}
+            />
+          </div>
+        ) : (
+          <Input
+            id={`${idBase}-value`}
+            type={v.type === "password" ? "password" : v.type === "number" ? "number" : "text"}
+            inputMode={v.type === "number" ? "decimal" : "text"}
+            autoComplete="off"
+            spellCheck={false}
+            className="min-h-9 font-mono"
+            value={v.value}
+            onChange={(e) => onChange({ ...v, value: e.target.value })}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------------- */
+/* Editor                                                                     */
+/* ------------------------------------------------------------------------- */
+
+function WidgetEditor({
+  widget,
+  onBack,
+}: {
+  widget: WidgetRow;
+  onBack: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [draft, setDraft] = useState<Draft>(() => toDraft(widget));
+  const [saved, setSaved] = useState<Draft>(() => toDraft(widget));
+  const [previewDoc, setPreviewDoc] = useState<string>(() =>
+    buildWidgetDocument({
+      id: widget.id,
+      name: widget.name || "widget",
+      width: widget.width,
+      height: widget.height,
+      html: widget.html,
+      css: widget.css,
+      js: widget.js,
+      variables: widget.variables,
+    }),
+  );
+  const [previewGen, setPreviewGen] = useState(0);
+  const [previewSource, setPreviewSource] = useState<"saved" | "draft">("saved");
+  const [previewScale, setPreviewScale] = useState(1);
+  const [testUser, setTestUser] = useState("testviewer");
+  const [testMessage, setTestMessage] = useState("!ai hello from the panel preview");
+  const [testViewers, setTestViewers] = useState("128");
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const previewWrapRef = useRef<HTMLDivElement | null>(null);
+
+  const dirty = !draftEqual(draft, saved);
+
+  const save = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/widgets/${widget.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: draft.name,
+          width: draft.width,
+          height: draft.height,
+          enabled: draft.enabled,
+          html: draft.html,
+          css: draft.css,
+          js: draft.js,
+          variables: serializeWidgetVariables(draft.variables),
+        }),
+      });
+      const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
+      if (!res.ok) throw new Error(body?.error?.message ?? `Save failed (HTTP ${res.status})`);
+      return res.json();
+    },
+    onSuccess: () => {
+      setSaved({ ...draft });
+      applyToPreview(draft, "saved");
+      void queryClient.invalidateQueries({ queryKey: ["widgets"] });
+      toast.success("Widget saved", { description: "Preview reloaded with the saved state." });
+    },
+    onError: (e: Error) => toast.error("Save failed", { description: e.message }),
+  });
+
+  const remove = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/widgets/${widget.id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`Delete failed (HTTP ${res.status})`);
+      return res.json();
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["widgets"] });
+      toast.success("Widget deleted");
+      onBack();
+    },
+    onError: (e: Error) => toast.error("Delete failed", { description: e.message }),
+  });
+
+  // Live preview document — an explicit apply-model: the (up to 100 KB)
+  // document is rebuilt ONLY when the operator clicks "Apply to preview" or
+  // saves, so typing in the editors never thrashes an iframe remount.
+  const applyToPreview = useCallback(
+    (source: Draft, origin: "saved" | "draft") => {
+      setPreviewDoc(
+        buildWidgetDocument({
+          id: widget.id,
+          name: source.name || "widget",
+          width: source.width,
+          height: source.height,
+          html: source.html,
+          css: source.css,
+          js: source.js,
+          variables: serializeWidgetVariables(source.variables),
+        }),
+      );
+      setPreviewGen((g) => g + 1);
+      setPreviewSource(origin);
+    },
+    [widget.id],
+  );
+
+  // Auto-fit scale: widget pixel size → available preview width.
+  useEffect(() => {
+    const el = previewWrapRef.current;
+    if (!el) return;
+    const update = () => {
+      const w = el.clientWidth - 8;
+      setPreviewScale(Math.min(1, Math.max(0.2, w / Math.max(1, draft.width))));
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [draft.width]);
+
+  const sendTest = useCallback((ev: { event_name: string; data: unknown }) => {
+    iframeRef.current?.contentWindow?.postMessage({ type: "nexus-widget-event", event: ev }, "*");
+  }, []);
+
+  const previewHeight = Math.round(draft.height * previewScale);
+  const secretEmpty = draft.variables.filter((v) => v.secret && v.value.trim() === "");
+
+  return (
+    <div className="space-y-4">
+      <Toaster position="bottom-right" richColors closeButton />
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant="ghost" className="min-h-11 font-mono" onClick={onBack} aria-label="Back to widget list">
+          <ArrowLeft className="size-4" aria-hidden="true" />
+          Widgets
+        </Button>
+        <h2 className="min-w-0 truncate font-mono text-base font-semibold">{draft.name}</h2>
+        {widget.seeded && (
+          <Badge variant="outline" className="font-mono text-[10px] border-primary/40 text-primary">
+            IMPORTED · KICKBOT SAVED STATE
+          </Badge>
+        )}
+        {dirty && (
+          <Badge variant="outline" className="font-mono text-[10px] border-accent/60 text-accent">
+            UNSAVED CHANGES
+          </Badge>
+        )}
+        <div className="ml-auto flex gap-2">
+          <Button className="min-h-11 font-mono" disabled={!dirty || save.isPending} onClick={() => save.mutate()}>
+            <Save className="size-4" aria-hidden="true" />
+            {save.isPending ? "Saving…" : "Save"}
+          </Button>
+          <Button
+            variant="outline"
+            className="min-h-11 font-mono"
+            onClick={() => applyToPreview(draft, "draft")}
+            aria-label="Reload preview with current draft"
+          >
+            <RefreshCw className="size-4" aria-hidden="true" />
+            Apply to preview
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid items-start gap-4 xl:grid-cols-[1fr_430px]">
+        {/* ---------------- LEFT: settings + variables + code ---------------- */}
+        <div className="min-w-0 space-y-4">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="font-mono text-base">Basic settings</CardTitle>
+              <CardDescription>The size the widget renders at, in pixels — OBS Browser Source should match.</CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-3 sm:grid-cols-[1fr_110px_110px_auto]">
+              <div className="grid gap-1.5">
+                <Label htmlFor="w-name">Name</Label>
+                <Input
+                  id="w-name"
+                  className="min-h-11"
+                  value={draft.name}
+                  onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="w-width">Width</Label>
+                <Input
+                  id="w-width"
+                  type="number"
+                  min={40}
+                  max={4096}
+                  className="min-h-11 font-mono"
+                  value={draft.width}
+                  onChange={(e) => setDraft({ ...draft, width: Number(e.target.value) || draft.width })}
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="w-height">Height</Label>
+                <Input
+                  id="w-height"
+                  type="number"
+                  min={40}
+                  max={4096}
+                  className="min-h-11 font-mono"
+                  value={draft.height}
+                  onChange={(e) => setDraft({ ...draft, height: Number(e.target.value) || draft.height })}
+                />
+              </div>
+              <div className="flex items-end gap-2 pb-1">
+                <Switch
+                  id="w-enabled"
+                  checked={draft.enabled}
+                  aria-label="Widget enabled"
+                  onCheckedChange={(c) => setDraft({ ...draft, enabled: c })}
+                />
+                <Label htmlFor="w-enabled" className="text-xs text-muted-foreground">
+                  {draft.enabled ? "enabled" : "disabled"}
+                </Label>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex-row items-start justify-between space-y-0 pb-3">
+              <div className="space-y-1">
+                <CardTitle className="font-mono text-base">User variables ({draft.variables.length})</CardTitle>
+                <CardDescription>
+                  Settings this widget reads at runtime. Widget code accesses{" "}
+                  <span className="font-mono text-foreground">userVariables.&lt;name&gt;.value</span>.
+                </CardDescription>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="min-h-9 shrink-0 font-mono"
+                onClick={() =>
+                  setDraft({
+                    ...draft,
+                    variables: [
+                      ...draft.variables,
+                      { name: `var_${draft.variables.length + 1}`, label: "New variable", type: "text", value: "" },
+                    ],
+                  })
+                }
+              >
+                <Plus className="size-3.5" aria-hidden="true" />
+                Add
+              </Button>
+            </CardHeader>
+            <CardContent>
+              {draft.variables.length === 0 ? (
+                <p className="rounded-md border border-dashed border-border/70 p-3 text-sm text-muted-foreground">
+                  No variables — the widget runs on its code defaults.
+                </p>
+              ) : (
+                <div className="max-h-96 space-y-2 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
+                  {draft.variables.map((v, i) => (
+                    <VariableRow
+                      key={i}
+                      v={v}
+                      index={i}
+                      onChange={(next) =>
+                        setDraft({
+                          ...draft,
+                          variables: draft.variables.map((old, j) => (j === i ? next : old)),
+                        })
+                      }
+                      onRemove={() =>
+                        setDraft({ ...draft, variables: draft.variables.filter((_, j) => j !== i) })
+                      }
+                    />
+                  ))}
+                </div>
+              )}
+              {secretEmpty.length > 0 && (
+                <p className="mt-2 rounded-md border border-accent/40 bg-accent/10 p-2 text-xs text-accent">
+                  Empty secrets: {secretEmpty.map((v) => v.name).join(", ")}. The widget renders, but any
+                  feature needing those keys (Vyce/Groq/Supabase calls) will fail until you fill them —
+                  values are baked into the OBS export.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="font-mono text-base">Code</CardTitle>
+              <CardDescription>
+                Runs inside an isolated page on the Kickbot contract:{" "}
+                <span className="font-mono text-foreground">userVariables</span>,{" "}
+                <span className="font-mono text-foreground">widgetEvent</span> DOM events, and the injected
+                helpers (<span className="font-mono">extractRawChatPayload</span>,{" "}
+                <span className="font-mono">hasAiTrigger</span>, <span className="font-mono">stripAiTrigger</span>,{" "}
+                <span className="font-mono">decodeKickEmotesInText</span>,{" "}
+                <span className="font-mono">fetchWithTimeout</span>).
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Tabs defaultValue="js">
+                <TabsList className="mb-2">
+                  <TabsTrigger value="html" className="font-mono">
+                    HTML
+                  </TabsTrigger>
+                  <TabsTrigger value="css" className="font-mono">
+                    CSS
+                  </TabsTrigger>
+                  <TabsTrigger value="js" className="font-mono">
+                    JavaScript
+                  </TabsTrigger>
+                </TabsList>
+                {(["html", "css", "js"] as const).map((field) => (
+                  <TabsContent key={field} value={field} className="mt-0">
+                    <Textarea
+                      aria-label={`Widget ${field} code`}
+                      spellCheck={false}
+                      className="min-h-72 max-h-96 overflow-y-auto whitespace-pre font-mono text-xs leading-relaxed scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent"
+                      value={draft[field]}
+                      onChange={(e) => setDraft({ ...draft, [field]: e.target.value })}
+                    />
+                    <p className="mt-1 text-right font-mono text-[10px] text-muted-foreground">
+                      {draft[field].length.toLocaleString()} chars
+                    </p>
+                  </TabsContent>
+                ))}
+              </Tabs>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* ---------------- RIGHT: preview + test events ---------------- */}
+        <div className="min-w-0 space-y-4 xl:sticky xl:top-24">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 font-mono text-base">
+                <MonitorPlay className="size-4 text-primary" aria-hidden="true" />
+                Preview
+              </CardTitle>
+              <CardDescription>
+                {draft.width} × {draft.height}px · shown at {Math.round(previewScale * 100)}% ·{" "}
+                {previewSource === "saved" ? "saved state" : "draft applied"}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div
+                ref={previewWrapRef}
+                className="w-full overflow-hidden rounded-md border border-border/60 bg-[repeating-conic-gradient(#1a1a1a_0%_25%,#0a0a0a_0%_50%)] bg-[length:16px_16px] p-1"
+              >
+                <div style={{ height: `${previewHeight}px` }} className="relative w-full">
+                  <iframe
+                    key={previewGen}
+                    ref={iframeRef}
+                    title={`Preview of ${draft.name}`}
+                    srcDoc={previewDoc}
+                    className="absolute left-0 top-0 origin-top-left border-0"
+                    style={{ width: `${draft.width}px`, height: `${draft.height}px`, transform: `scale(${previewScale})` }}
+                  />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 font-mono text-base">
+                <FlaskConical className="size-4 text-primary" aria-hidden="true" />
+                Test events
+              </CardTitle>
+              <CardDescription>Fires fake events into the preview — exactly what the live feed will deliver.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid gap-1.5">
+                <Label htmlFor="t-user">Username</Label>
+                <Input id="t-user" className="min-h-9 font-mono" value={testUser} onChange={(e) => setTestUser(e.target.value)} />
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="t-msg">Chat message</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="t-msg"
+                    className="min-h-9 flex-1 font-mono"
+                    value={testMessage}
+                    onChange={(e) => setTestMessage(e.target.value)}
+                  />
+                  <Button
+                    variant="outline"
+                    className="min-h-9 shrink-0 font-mono"
+                    onClick={() => sendTest(makeChatMessageEvent(testUser || "testviewer", testMessage))}
+                  >
+                    Send chat
+                  </Button>
+                </div>
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="t-viewers">Viewer count</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="t-viewers"
+                    type="number"
+                    className="min-h-9 flex-1 font-mono"
+                    value={testViewers}
+                    onChange={(e) => setTestViewers(e.target.value)}
+                  />
+                  <Button
+                    variant="outline"
+                    className="min-h-9 shrink-0 font-mono"
+                    onClick={() => sendTest(makeViewerCountEvent(Number(testViewers) || 0))}
+                  >
+                    Send viewers
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 font-mono text-base">
+                <Download className="size-4 text-primary" aria-hidden="true" />
+                OBS export
+              </CardTitle>
+              <CardDescription>
+                One self-contained HTML file — add it in OBS via Sources → Browser → “Local file”. Re-export
+                after changing variables or code.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {secretEmpty.length > 0 && (
+                <p className="rounded-md border border-accent/40 bg-accent/10 p-2 text-xs text-accent">
+                  Export includes empty secrets ({secretEmpty.map((v) => v.name).join(", ")}) — those features
+                  stay offline until the values are filled here.
+                </p>
+              )}
+              <p className="text-xs text-muted-foreground">
+                The file embeds current variable values (including secrets) so it runs standalone — treat the
+                export like a credential and keep it local.
+              </p>
+              <Button
+                variant="outline"
+                className="min-h-11 w-full font-mono"
+                disabled={dirty}
+                onClick={() => {
+                  window.location.href = `/api/widgets/${widget.id}/bundle`;
+                }}
+              >
+                <Download className="size-4" aria-hidden="true" />
+                {dirty ? "Save first, then export" : "Download OBS bundle"}
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-mono">Delete widget?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {widget.name} and its variables will be removed. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="min-h-11">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="min-h-11 bg-destructive font-mono text-destructive-foreground hover:bg-destructive/90"
+              disabled={remove.isPending}
+              onClick={(e) => {
+                e.preventDefault();
+                remove.mutate();
+              }}
+            >
+              {remove.isPending ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------------- */
+/* List                                                                       */
+/* ------------------------------------------------------------------------- */
+
+function WidgetList({ onOpen }: { onOpen: (w: WidgetRow) => void }) {
+  const queryClient = useQueryClient();
+  const [createOpen, setCreateOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<WidgetRow | null>(null);
+  const [newName, setNewName] = useState("My widget");
+  const [newWidth, setNewWidth] = useState(560);
+  const [newHeight, setNewHeight] = useState(260);
+
+  const widgets = useQuery<{ ok: true; widgets: WidgetRow[] }>({
+    queryKey: ["widgets"],
+    queryFn: async () => {
+      const res = await fetch("/api/widgets", { cache: "no-store" });
+      if (!res.ok) throw new Error("widgets unavailable");
+      return res.json();
+    },
+  });
+
+  const create = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/widgets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newName.trim() || "My widget", width: newWidth, height: newHeight }),
+      });
+      const body = (await res.json().catch(() => null)) as { widget?: WidgetRow; error?: { message?: string } } | null;
+      if (!res.ok) throw new Error(body?.error?.message ?? `Create failed (HTTP ${res.status})`);
+      return body?.widget ?? null;
+    },
+    onSuccess: (w) => {
+      void queryClient.invalidateQueries({ queryKey: ["widgets"] });
+      setCreateOpen(false);
+      if (w) onOpen(w);
+    },
+    onError: (e: Error) => toast.error("Create failed", { description: e.message }),
+  });
+
+  const remove = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/widgets/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`Delete failed (HTTP ${res.status})`);
+      return res.json();
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["widgets"] });
+      setDeleteTarget(null);
+      toast.success("Widget deleted");
+    },
+    onError: (e: Error) => toast.error("Delete failed", { description: e.message }),
+  });
+
+  const rows = widgets.data?.widgets ?? [];
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 font-mono">
+            <AppWindow className="size-5 text-primary" aria-hidden="true" />
+            Widgets
+            <span className="text-xs font-normal text-muted-foreground">what your viewers see on stream</span>
+          </CardTitle>
+          <CardDescription>
+            Self-hosted overlay widgets for OBS — the same builder contract as Kickbot, running on NEXUS OS.
+            Each widget is a self-contained HTML/CSS/JS bundle with its own user variables; the preview below
+            fires test events, and the OBS export is a single local file (nothing is hosted, L0).
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap items-center gap-2">
+          <Button className="min-h-11 font-mono" onClick={() => setCreateOpen(true)}>
+            <Plus className="size-4" aria-hidden="true" />
+            New widget
+          </Button>
+          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Info className="size-3.5" aria-hidden="true" />
+            The old Variables registry ({"{{namespace.field}}"} templates) moves into the bot-commands work —
+            this tab is now the thing viewers actually see.
+          </p>
+        </CardContent>
+      </Card>
+
+      {widgets.isLoading ? (
+        <div className="grid gap-4 sm:grid-cols-2" aria-hidden="true">
+          <Skeleton className="h-36 rounded-lg" />
+          <Skeleton className="h-36 rounded-lg" />
+        </div>
+      ) : widgets.isError ? (
+        <p className="text-sm text-destructive" role="alert">
+          Widget list unavailable — retrying automatically.
+        </p>
+      ) : rows.length === 0 ? (
+        <p className="rounded-md border border-dashed border-border/70 p-6 text-center text-sm text-muted-foreground">
+          No widgets yet — create one.
+        </p>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2">
+          {rows.map((w) => (
+            <Card
+              key={w.id}
+              className="group cursor-pointer transition-colors hover:border-primary/40"
+              role="button"
+              tabIndex={0}
+              aria-label={`Open widget ${w.name}`}
+              onClick={() => onOpen(w)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onOpen(w);
+                }
+              }}
+            >
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center justify-between gap-2 font-mono text-sm">
+                  <span className="min-w-0 truncate">{w.name}</span>
+                  <span className="flex shrink-0 items-center gap-1.5">
+                    {w.seeded && (
+                      <Badge variant="outline" className="font-mono text-[9px] border-primary/40 text-primary">
+                        IMPORTED
+                      </Badge>
+                    )}
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "font-mono text-[9px]",
+                        w.enabled ? "border-primary/40 text-primary" : "text-muted-foreground",
+                      )}
+                    >
+                      {w.enabled ? "ENABLED" : "DISABLED"}
+                    </Badge>
+                  </span>
+                </CardTitle>
+                <CardDescription className="font-mono text-[11px]">
+                  {w.width} × {w.height}px · {parseWidgetVariables(w.variables).length} variables ·{" "}
+                  {w.html.length + w.css.length + w.js.length > 0
+                    ? `${((w.html.length + w.css.length + w.js.length) / 1024).toFixed(1)} KB code`
+                    : "empty"}{" "}
+                  · updated{" "}
+                  <time dateTime={w.updatedAt} suppressHydrationWarning>
+                    {formatDistanceToNow(new Date(w.updatedAt), { addSuffix: true })}
+                  </time>
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex items-center justify-between gap-2">
+                <p className="truncate font-mono text-[11px] text-muted-foreground">
+                  {parseWidgetVariables(w.variables)
+                    .slice(0, 4)
+                    .map((v) => v.name)
+                    .join(", ")
+                    .concat(parseWidgetVariables(w.variables).length > 4 ? ", …" : "") || "no variables"}
+                </p>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-8 shrink-0 text-destructive hover:text-destructive"
+                  aria-label={`Delete ${w.name}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setDeleteTarget(w);
+                  }}
+                >
+                  <Trash2 className="size-3.5" aria-hidden="true" />
+                </Button>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* New-widget dialog */}
+      <AlertDialog open={createOpen} onOpenChange={setCreateOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-mono">New widget</AlertDialogTitle>
+            <AlertDialogDescription>
+              Starts from the NEXUS starter template (label + counter + chat/viewer event handling) you can
+              reshape freely.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="grid gap-3">
+            <div className="grid gap-1.5">
+              <Label htmlFor="nw-name">Name</Label>
+              <Input id="nw-name" className="min-h-11" value={newName} onChange={(e) => setNewName(e.target.value)} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-1.5">
+                <Label htmlFor="nw-width">Width (px)</Label>
+                <Input
+                  id="nw-width"
+                  type="number"
+                  min={40}
+                  max={4096}
+                  className="min-h-11 font-mono"
+                  value={newWidth}
+                  onChange={(e) => setNewWidth(Number(e.target.value) || 560)}
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="nw-height">Height (px)</Label>
+                <Input
+                  id="nw-height"
+                  type="number"
+                  min={40}
+                  max={4096}
+                  className="min-h-11 font-mono"
+                  value={newHeight}
+                  onChange={(e) => setNewHeight(Number(e.target.value) || 260)}
+                />
+              </div>
+            </div>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="min-h-11">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="min-h-11 bg-primary font-mono text-primary-foreground hover:bg-primary/90"
+              disabled={create.isPending}
+              onClick={(e) => {
+                e.preventDefault();
+                create.mutate();
+              }}
+            >
+              {create.isPending ? "Creating…" : "Create"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete confirm */}
+      <AlertDialog open={deleteTarget !== null} onOpenChange={(v) => !v && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-mono">Delete widget?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTarget?.name} will be removed. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="min-h-11">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="min-h-11 bg-destructive font-mono text-destructive-foreground hover:bg-destructive/90"
+              disabled={remove.isPending}
+              onClick={(e) => {
+                e.preventDefault();
+                if (deleteTarget) remove.mutate(deleteTarget.id);
+              }}
+            >
+              {remove.isPending ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------------- */
+/* Tab root                                                                   */
+/* ------------------------------------------------------------------------- */
+
+export function WidgetsTab() {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Shared cache with WidgetList's identical query — selection reads from it
+  // with zero extra round-trips.
+  const widgets = useQuery<{ ok: true; widgets: WidgetRow[] }>({
+    queryKey: ["widgets"],
+    queryFn: async () => {
+      const res = await fetch("/api/widgets", { cache: "no-store" });
+      if (!res.ok) throw new Error("widgets unavailable");
+      return res.json();
+    },
+    staleTime: 10_000,
+  });
+
+  const selected = selectedId ? (widgets.data?.widgets.find((w) => w.id === selectedId) ?? null) : null;
+
+  if (selected) {
+    return <WidgetEditor widget={selected} onBack={() => setSelectedId(null)} />;
+  }
+  return <WidgetList onOpen={(w) => setSelectedId(w.id)} />;
+}

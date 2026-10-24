@@ -90,9 +90,19 @@ export function vyceProbeTarget(baseUrl: string): string {
 // ---------------------------------------------------------------------------
 
 export type VyceKeyLoad =
-  | { ok: true; key: string; masked: string; keyId: string; updatedAt: string }
+  | { ok: true; key: string; masked: string; keyId: string; updatedAt: string; fingerprint: boolean }
   | { ok: false; reason: "missing" }
   | { ok: false; reason: "unreadable" };
+
+/**
+ * A SHA-256 hex fingerprint is exactly 64 hex chars. The owner's live issue:
+ * a hash-shaped value got stored as "the key" (vault or Supabase secret) —
+ * it can NEVER authenticate (Vyce answers 401 invalid_api_key). Every layer
+ * that resolves a Vyce key must skip + flag fingerprint-shaped values.
+ */
+export function looksLikeVyceFingerprint(value: string): boolean {
+  return /^[a-f0-9]{64}$/i.test(value.trim());
+}
 
 export async function loadVyceKey(): Promise<VyceKeyLoad> {
   const row = await db.credential.findUnique({
@@ -107,6 +117,7 @@ export async function loadVyceKey(): Promise<VyceKeyLoad> {
       masked: maskSecret(key),
       keyId: row.keyId,
       updatedAt: row.updatedAt.toISOString(),
+      fingerprint: looksLikeVyceFingerprint(key),
     };
   } catch {
     return { ok: false, reason: "unreadable" };
@@ -278,4 +289,10 @@ export type VyceStatusPayload = {
   error: { code: string; message: string } | null;
   /** Supabase Edge-Function secret fallback state (owner stored VYCE_API_KEY there). */
   fallback: { available: boolean; reason: string | null } | null;
+  /**
+   * Owner's live issue: the stored vault value is a SHA-256 fingerprint
+   * (64 hex) — it can never authenticate, so it was SKIPPED and the fallback
+   * was probed instead. This field carries the human explanation.
+   */
+  vaultIgnored?: string | null;
 };
