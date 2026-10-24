@@ -16,6 +16,7 @@ import {
   SlidersHorizontal,
   Sun,
   Radio,
+  Braces,
 } from "lucide-react";
 
 /**
@@ -24,6 +25,7 @@ import {
 const TABS = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "stream", label: "Stream", icon: Radio },
+  { id: "variables", label: "Variables", icon: Braces },
   { id: "connectors", label: "Connectors", icon: PlugZap },
   { id: "settings", label: "Settings", icon: SlidersHorizontal },
   { id: "eval", label: "Eval", icon: FlaskConical, locked: true },
@@ -125,6 +127,7 @@ export function PanelShell() {
       <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6">
         {tab === "overview" && <OverviewTab />}
         {tab === "stream" && <StreamTab />}
+        {tab === "variables" && <VariablesTab />}
         {tab === "connectors" && <ConnectorsTab />}
         {tab === "settings" && <SettingsTab />}
         {tab === "eval" && <EvalTab />}
@@ -144,6 +147,7 @@ export function PanelShell() {
 
 import { OverviewTab } from "./overview";
 import { StreamTab } from "./stream";
+import { VariablesTab } from "./variables";
 import { ConnectorsTab } from "./connectors";
 import { SettingsTab } from "./settings";
 import { EvalTab } from "./eval-locked";
