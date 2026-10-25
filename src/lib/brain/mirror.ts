@@ -137,7 +137,9 @@ function safeParseStatus(raw: string): Partial<MirrorStatus> | null {
 function mergedStatus(prev: Partial<MirrorStatus> | null): MirrorStatus {
   const dPushed = Math.max(0, statusCache.pushed - flushedPushed);
   const dFailed = Math.max(0, statusCache.failed - flushedFailed);
-  const probedThisProcess = Boolean(statusCache.probedAt);
+  // "Probed" means a COMPLETED probe/push in this process — an in-flight probe
+  // must not flip ok/probeNote/pooler to their boot defaults (E1 race fix).
+  const probedThisProcess = Boolean(statusCache.probedAt) && !probeInFlight;
   return {
     ok: probedThisProcess ? statusCache.ok : (prev?.ok ?? statusCache.ok),
     pushed: (prev?.pushed ?? 0) + dPushed,
@@ -286,6 +288,15 @@ let lastProbeAt = 0;
  * Never throws.
  */
 export async function probeMirror(): Promise<MirrorStatus> {
+  probeInFlight = true;
+  try {
+    return await runProbe();
+  } finally {
+    probeInFlight = false;
+  }
+}
+
+async function runProbe(): Promise<MirrorStatus> {
   const creds = await getCreds();
   statusCache.configured = Boolean(creds);
   statusCache.probedAt = new Date().toISOString();
@@ -344,7 +355,9 @@ export async function probeMirror(): Promise<MirrorStatus> {
 
   await flushStatus(true);
   lastProbeAt = Date.now();
-  return { ...statusCache };
+  // Return the MERGED lifetime view (persisted totals + this boot's delta),
+  // not the raw in-process cache — routes answer with lifetime truth.
+  return readMirrorStatus();
 }
 
 /**

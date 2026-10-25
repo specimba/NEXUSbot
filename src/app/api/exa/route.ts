@@ -10,6 +10,7 @@ import {
   exaListMonitors,
   exaCreateMonitor,
   readWebhookInbox,
+  type ExaMonitorDraft,
 } from "@/lib/connectors/exa";
 import { getMgmtPat, mgmtUpsertSecrets, isValidProjectRef, resolveCortexProjectRef, resolveCortexAnonKey } from "@/lib/connectors/supabase";
 import { EXA_DIGEST_SETTING, buildNewsDigest } from "@/lib/brain/exa-news";
@@ -176,10 +177,15 @@ export async function POST(req: Request) {
     const host = req.headers.get("host") ?? "localhost:3000";
     const webhookUrl = `${proto}://${host}/api/exa/webhook`;
     const period = String(body?.period ?? "1d");
+    const allowedPeriods: readonly ExaMonitorDraft["period"][] = ["1h", "6h", "12h", "1d", "1w", "7d"];
     const created = await exaCreateMonitor({
       query,
       numResults: typeof body?.numResults === "number" ? body.numResults : 10,
-      period: period === "1h" || period === "12h" || period === "1w" ? period : "1d",
+      // Docs (MEASURED 2026-10-25): single durations ≥ 1h; exaCreateMonitor
+      // maps "1w" → "7d" for the wire format.
+      period: allowedPeriods.includes(period as ExaMonitorDraft["period"])
+        ? (period as ExaMonitorDraft["period"])
+        : "1d",
       webhookUrl,
     });
     if (!created.ok) {
