@@ -450,7 +450,7 @@ export async function exaContents(
   urls: string[],
   highlightQuery?: string,
 ): Promise<
-  | { ok: true; pages: Array<{ url: string; title: string; highlight: string; summary: string }>; tookMs: number }
+  | { ok: true; pages: Array<{ url: string; title: string; highlight: string; summary: string; text: string }>; tookMs: number }
   | { ok: false; error: string; tookMs: number }
 > {
   const started = Date.now();
@@ -468,9 +468,14 @@ export async function exaContents(
       ? { query: clampStr(highlightQuery, 200), numSentences: 2 }
       : { numSentences: 2 },
     summary: { query: "One-sentence summary of this page" },
+    // v29.14: full text too — highlights alone missed data tables (the
+    // g1.globo.com apuração numbers live outside the 2-sentence highlight
+    // window and the brain answered "sayfada görünmüyor" on a page that HAD
+    // the numbers). Same 1-contents-page credit either way.
+    text: { maxCharacters: 3_000 },
   };
   const res = await exaFetch<{
-    results?: Array<{ url?: string; title?: string; highlights?: string[]; summary?: string }>;
+    results?: Array<{ url?: string; title?: string; highlights?: string[]; summary?: string; text?: string }>;
   }>("/contents", body);
   if (!res.ok) {
     await bumpExaUsage("contents", 0, { error: res.error });
@@ -483,6 +488,7 @@ export async function exaContents(
       title: clampStr(r.title ?? "", 140),
       highlight: clampStr((r.highlights ?? []).join(" … "), 320),
       summary: clampStr(r.summary ?? "", 260),
+      text: clampStr(r.text ?? "", 3_000),
     }));
   await bumpExaUsage("contents", clean.length, { estCostUsd: EXA_EST_USD.perContentsPage * clean.length });
   return { ok: true, pages, tookMs: Date.now() - started };

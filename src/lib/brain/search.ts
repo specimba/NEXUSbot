@@ -122,7 +122,7 @@ export async function runPageRead(
     return {
       ok: Boolean(html),
       title: clampStr(res?.data?.title || "", 160),
-      text: clampStr(stripHtml(html), 1600),
+      text: clampStr(stripHtml(html), 3_200),
       imageUrl: extractOgImage(html),
       publishedTime: clampStr(res?.data?.publishedTime || "", 40),
       error: html ? "" : "empty page body",

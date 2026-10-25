@@ -950,3 +950,28 @@ Stage Summary:
 - Backup lanes are real-payload-verified (the catalog sweep's nemotron-3.5/agnes-3.0 were 400-dead on real chat — sweep methodology corrected in comments; re-verify with real payloads, not 12-token pings).
 - Files: src/lib/brain/cortex.ts (dual lanes, handicap, primary-window rule, parkZai, SMALLTALK_RE, comments), src/components/panel/durability-card.tsx (mobile flex-wrap).
 - Owner-side remaining: nothing. If the vyce gateway's evening stall pattern (all queues slowing together) recurs, the race now degrades as VYCE-slow instead of z-ai-fast; a follow-up candidate remains a keep-alive/pool transport for vyce to cut the stall frequency itself.
+
+---
+Task ID: 20
+Agent: Z.ai Code (continuation session)
+Task: Owner complaint "still big nonsense and still rotating to z.ai old sdk models" — kill the remaining z-ai chat leaks, fix the hallucination class (fabricated personal memories / coordinates / blind URL answers), verify end-to-end.
+
+Work Log:
+- Audit: found the previous session's mid-refactor landmine — cortex.ts called parkZai() at both phase-2 race exits while only parkFloor() existed → every phase-2 win (backup/Groq lane victory) would throw ReferenceError → 500. Fixed both call sites (parkFloor). This was masked because primaries had been winning phase 1.
+- Ledger forensics (UsageEvent): the 02:01 +03 ("100 milyon oy" @10734ms) and 02:05 +03 ("uydurup durma lan" @10726ms) NEXUS // Z-AI CORE wins were the DESIGNED all-lanes-dead fallback: deepseek-v4-flash + glm-5.3-flash + beam-1.0 ALL errored UNREACHABLE_FROM_SANDBOX simultaneously (gateway-wide outage); at 02:05 the new groq leg also fired but openai/gpt-oss-120b 403'd at Groq's WAF. No wiring leak.
+- z-ai SDK status: z-ai CHAT models are fully out of the race (replaced by the Groq floor lane "VYCE // GROQ OSS" — openai/gpt-oss-120b via the panel vault connector). z-ai survives ONLY as invisible infra: web_search + page_reader fetch utilities in lib/brain/search.ts — no z-ai model ever speaks; answers always carry a VYCE/EXA/EDGE label.
+- URL forced fetch (new): URL_RE in classifyIntent → RESEARCH; new urlAnswer() ladder — Exa /contents livecrawl + z-ai page_reader run IN PARALLEL (first usable page wins, 6s+3.5s gates) because the serial ladder burned 10-15s of the 16s budget (measured: viewer waited 19.8s for EDGE on the g1 URL). Grounded race prompt: answer ONLY from fetched text, "Sayfada bu bilgi şu an görünmüyor" when absent — never fill from priors.
+- Reader windows widened: exaContents now also returns full page text (maxCharacters 3000, same credit) and runPageRead clamp 1600→3200 chars — highlights alone missed the g1 apuração data table (brain said "görünmüyor" on a page that had the numbers; after widening: Lula 45,16% / 53.879.538 geçerli oy read straight from the live page).
+- Anti-fabrication persona guardrails (buildSystemPrompt): never claim to have SEEN a viewer (no camera — the "beni kafede mi gördün" class), never invent coordinates/addresses/dates for unknown people (the "mimar altan" 41.0082°N class), memory-ladder turns are viewer chatter (jokes/fakes) and must never be repeated as verified fact.
+- RESEARCH_RE: added \bkim\b so "X kim amk" fact questions route to grounded Exa /answer instead of raw model priors (SMALLTALK guard still traps greetings first).
+- STATUS intent: dead-stack line no longer advertises z-ai ("devrede: Groq / statik hat").
+- Verified live: URL tests 4.2-6.1s with web=page-read returning REAL g1 numbers; "beni kafede mi gördün" → explicit "Kamera/göz yok, göremiyorum ki"; "koordinat ver" → honest refusal; "mimar altan" → grounded Exa answer with real names + citations.
+- Production proof of the phase-2 fix: 02:20:26 +03 a real stream call hit deep primary TIMEOUT + both backups TIMEOUT → Groq floor won at 3121ms with a clean 200 (exactly the path that would have crashed pre-fix).
+- Browser walkthrough: login → Overview/Pipeline render, interaction log shows newest rows VYCE // BEAM / EXA ANSWER / DEEPSEEK FLASH / EDGE / GROK IMAGINE with the LAST Z-AI CORE row frozen at 02:05 +03 (nothing newer); zero horizontal overflow at 1440px and 390px; footer pushed naturally on long page and flush at scroll end; no console/page errors; dev.log clean.
+
+Stage Summary:
+- "NEXUS // Z-AI CORE" is now unreachable by construction: chat leg replaced by the Groq floor lane; z-ai remains only as silent fetch infrastructure. The last z-ai ledger row (02:05 +03) was the designed all-lanes-dead fallback during a gateway-wide outage, not a wiring leak.
+- URL questions are grounded in the actual page (parallel dual readers, widened windows) instead of answered blind with web:no.
+- Hallucination guardrails verified against all three pasted failure examples; memory ladder explicitly demoted to unverified chatter.
+- Files: src/lib/brain/cortex.ts (v29.14: parkFloor fix, urlAnswer, URL_RE, persona guardrails, \bkim\b, status line), src/lib/connectors/exa.ts (exaContents full text), src/lib/brain/search.ts (page read 3200 chars).
+- Known-good degradation on total outage: VYCE slow → dual VYCE backups → Groq OSS → EDGE → static honest line (never z-ai). Groq's WAF 403 on the pool IP is the one flaky floor lane tonight; if it 403s during a full vyce outage the static line answers (owner-approved over z-ai voice).
