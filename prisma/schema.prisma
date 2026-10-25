@@ -93,6 +93,57 @@ model CustomProvider {
   updatedAt       DateTime  @updatedAt
 }
 
+// L0 brain pipeline log (v29.8) — ONE row per !ai interaction, full-fidelity
+// for evaluation / training / security review. This is the owner's explicit
+// ask: log interactions AND responses inside the pipeline catch.
+model InteractionLog {
+  id               String   @id @default(cuid())
+  channel          String   @default("specimba")
+  username         String // Kick sender handle (lowercased for queries)
+  displayHandle    String   @default("") // original case handle
+  command          String   @default("ai") // ai | model | credits | imagine | reset | …
+  message          String   @default("") // viewer prompt (clamped 2k)
+  response         String   @default("") // brain reply (clamped 2k)
+  model            String   @default("") // deepseek-v4-flash-lr | GPT-OSS 120B | …
+  modelId          String   @default("") // raw model id when known
+  provider         String   @default("") // vyce | groq | edge | direct | none
+  route            String   @default("") // primary | fallback:oss-120b | circuit-open | …
+  status           String   @default("ok") // ok | direct | refused | busy | error | timeout
+  latencyMs        Int?
+  promptTokens     Int?
+  completionTokens Int?
+  webUsed          Boolean  @default(false) // server research snippets attached
+  flags            String   @default("[]") // JSON array of technique ids (NexusGuard)
+  injectionScore   Int      @default(0) // 0..3 severity
+  memoryUsed       Boolean  @default(false) // server dialogue ladder was attached
+  error            String   @default("")
+  createdAt        DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([username, createdAt])
+  @@index([status, createdAt])
+}
+
+// Security memory (v29.8) — learned caveats from viewer abuse attempts.
+// Upserted by /api/brain/log whenever NexusGuard flags a message; the most
+// recent/heaviest lessons are injected into the system prompt so the brain
+// keeps refusing the same rookie techniques consistently (owner ask:
+// "small learning caveats for our AI to improve security memory").
+model SecurityLesson {
+  id         String   @id @default(cuid())
+  technique  String // FAKE_AUTHORITY | PROMPT_INJECTION | RESET_ATTEMPT | SECRET_FISHING | FLOOD_ABUSE | COMMAND_ABUSE
+  username   String   @default("") // lowercased handle, "" when unknown
+  snippet    String   @default("") // redacted 120-char excerpt of the attempt
+  counter    String   @default("") // what the brain answered (first refusal)
+  hits       Int      @default(1)
+  severity   Int      @default(1) // 1..3
+  lastSeenAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  @@unique([technique, username])
+  @@index([lastSeenAt])
+}
+
 // Usage ledger (T-207) — counters only, NEVER prompt/response content (P7).
 // kind "image" rows are the ONLY user-facing credit surface (grok-imagine
 // creations, charged per print, not per electricity); kind "llm" rows are
