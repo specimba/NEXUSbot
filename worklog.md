@@ -611,3 +611,27 @@ Stage Summary:
 - OBS Browser Source URL shipped and browser-verified end-to-end (token auth + session auth + guard rails).
 - Durability: repo.tar refreshed with live DB; platform pre-stop continues to capture on clean stops.
 - Open item for owner: supabase_anon_key looks non-JWT (44 chars) — panel now warns inline; recommend re-copying the full anon JWT from Supabase → Project Settings → API.
+
+---
+Task ID: 7 (live Kick chat bridge + !ai pipeline revival + download crash fix)
+Agent: Z.ai Code (main)
+Task: Owner reported (a) UNAUTHORIZED JSON "crash" on the OBS download button, (b) the OBS stream URL + kick.com popout URL produce "nothing happened" — no live chat reaches the widget.
+
+Work Log:
+- Screenshots (VLM): panel+preview healthy; owner LIVE on Kick with viewers typing "!ai test" into a dead widget; download crash shows raw UNAUTHORIZED JSON replacing the panel.
+- Root cause (crash): "Download OBS bundle" used window.location.href — a navigation that CANNOT carry the dual-channel Bearer token, so cookie-less preview iframes land on the raw 401 JSON. Fixed: fetch+blob download (auth shim attaches Bearer), 401 → honest toast + panel reload. Browser-verified: click keeps the panel intact.
+- Kick chat protocol research (real verdicts, no spam): OLD Pusher endpoint (ws-us2/app/32cbd69e4b950bf97679) is DEAD — server: code 4001 "App key not in this cluster". Ground truth from kick.com's own popout chunks + live page tracing: chat now runs on Centrifuge via wss://realtime.{us-east-1|us-west-2}.platform.kick.com/connection/websocket; handshake = POST web.kick.com/api/v1/realtime/channels/{id}/chat/connection (gateway URL) + POST /api/v1/realtime/auth/connection (guest JWT, ~45min TTL); bare "{}" frame = server ping → answer "{}"; publications = {push:{channel,pub:{data:{event:"App\Events\ChatMessageEvent",data:"<json>"}}}} — SAME inner schema as legacy Pusher (verified live on a busy chatroom, single 35s connection).
+- Built mini-services/kick-bridge (port 3010, raw ws server, auto-discovered by .zscripts/dev.sh boot scanner): resolves channel via api/v2, one anonymous Centrifuge upstream with keepalive/backoff/proactive 40min token refresh, 45s viewer poll, fans out chatMessageEvent/viewerCountUpdatedEvent/bridgeStatusEvent in the exact widgetEvent contract; ?ch= restricted to the configured channel (default specimba); /health endpoint.
+- runtime.ts shim section 6: LIVE KICK FEED connector — activates ONLY on real http(s) hosts (OBS stream URL); srcdoc preview and file:// bundle never touch the network. Reconnect with backoff+jitter.
+- REAL TRAFFIC VERIFIED: bridge captured 4 live messages from yavuzerdem99 + owner messages (specimba "tek sette 1 holo oluyo") + viewer counts 7→8→7; browser page connected through the Caddy gateway (clients:2).
+- Deep !ai pipeline debugging (the real "nothing happened"): the widget references ~16 Kickbot-builder-injected globals that were NEVER defined in our runtime — StreamConsciousness, NexusCognitiveMemory, StreamTelemetryState, extractAndBanRejectedTopics, getLiveTurkishDateTime, detectLanguage, IntelligenceCache, StickyResearchContext, expandFollowUpQuery, lookupMusicOrArtist, universalLiveWebSearch, fetchDuckDuckGoInstantAnswer, lookupKnowledgeGraph, unfurlLinksInPrompt, fetchLiveWeather, extractCleanEntitySearchQuery. Every !ai cycle crashed at recordInteraction (returned undefined → chatterProfile.totalInteractions TypeError) and every render died in detectLanguage (TTS enabled by owner). Shim section 3.5 now provides faithful implementations: memory dossier store ({dossiers:{handle,role,totalInteractions,lastPrompt,lastReply}} + OpenAI-shaped dialogue messages), timeline recorder, poison-topic detector (lazy-binds the widget's own POISON_MEMORY_REGEX), Turkish wall clock, TTS language heuristic, and honest no-data web-intel stubs so research routes degrade to the plain LLM ladder.
+- Found+fixed shim syntax bug along the way (join('\n') in a TS template literal emitted a real newline; also backticks in template comments terminate the literal).
+- END-TO-END RESULT (browser-verified on the gateway stream URL): "!ai kisa selam ver" → JEV // ROUTING → VYCE // DEEPSEEK V4 FLASH LR (real fetch) → typed hologram reply "Selam TestViewer, aramıza hoş geldin. Kart muhabbeti koyu gidiyor…" → HOLD // READING. Owner's live chat flows into StreamConsciousness in parallel.
+- lint clean, tsc clean, dev.log green; /home/sync/repo.tar refreshed (831MB) with tonight's work; probe files cleaned.
+
+Stage Summary:
+- Download "crash" fixed at root (fetch+blob + dual-channel auth).
+- The Kickbot bridge exists as a real local service: Kick live chat + viewer counts reach the widget through the OBS stream URL, verified with the owner's own live stream traffic.
+- The full legacy bot (!ai → JEV router → Vyce → hologram + TTS) is revived end-to-end — first fully working cycle since Kickbot.
+- Boot-durable: dev.sh auto-starts kick-bridge; tar carries it.
+- Honest gaps: web-intel helpers (music lookup, DDG, weather, knowledge graph) are stubs — research routes degrade to the plain Vyce ladder; real implementations can be wired via our backend later. Centrifuge gateway region rotates; the bridge fetches the URL per-connection instead of hardcoding.

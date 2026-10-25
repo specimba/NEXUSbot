@@ -270,6 +270,203 @@ export function buildWidgetShim(variables: WidgetVariable[]): string {
     }
   };
 
+  // 3.5) Kickbot service parity — group 2. The saved widget JS ALSO references
+  //     higher-level services the Kickbot builder injected at runtime; none of
+  //     them are defined inside the widget JS, so without these every plain
+  //     chat message (StreamConsciousness.record) and every !ai trigger
+  //     (extractAndBanRejectedTopics, NexusCognitiveMemory, …) would throw a
+  //     ReferenceError inside the event handler and the widget would look
+  //     dead on stream. Faithful minimal implementations, in-memory with a
+  //     bounded localStorage persistence where the browser allows it.
+  window.StreamTelemetryState = {
+    viewerCount: 0, peakViewerCount: 0, isLive: false,
+    streamTitle: '', streamCategory: '', hasDirectKickLock: false,
+    getStreamSummary: function () {
+      try {
+        var live = this.isLive ? 'LIVE' : 'OFFLINE';
+        var v = this.viewerCount > 0 ? this.viewerCount + ' izleyici' : 'izleyici bilgisi yok';
+        var t = this.streamTitle ? ' // ' + String(this.streamTitle).slice(0, 80) : '';
+        var c = this.streamCategory ? ' // ' + String(this.streamCategory).slice(0, 40) : '';
+        return 'Yayın durumu: ' + live + ' // ' + v + t + c;
+      } catch (e) { return 'Yayın durumu: bilinmiyor'; }
+    }
+  };
+  (function () {
+    var TIMELINE_KEY = 'nexus_sc_timeline';
+    var timeline = []; // {user, text, at}
+    try { var raw = window.localStorage.getItem(TIMELINE_KEY); if (raw) timeline = JSON.parse(raw).slice(-200); } catch (e) {}
+    function persist() { try { window.localStorage.setItem(TIMELINE_KEY, JSON.stringify(timeline.slice(-200))); } catch (e) {} }
+    window.StreamConsciousness = {
+      record: function (username, text, data) {
+        try {
+          timeline.push({ user: String(username || '?'), text: String(text || '').slice(0, 400), at: new Date().toISOString() });
+          if (timeline.length > 200) timeline = timeline.slice(-200);
+          persist();
+        } catch (e) {}
+      },
+      getSpeakerMonologueSummary: function (username, count) {
+        try {
+          var mine = timeline.filter(function (m) { return m.user && m.user.toLowerCase() === String(username || '').toLowerCase(); });
+          if (!mine.length) return '';
+          return mine.slice(-(Number(count) || 6)).map(function (m) { return m.text; }).join(' | ');
+        } catch (e) { return ''; }
+      },
+      getStructuredRoomTranscript: function (sender) {
+        try {
+          var recent = timeline.slice(-25);
+          return recent.map(function (m) {
+            return (m.user && String(m.user).toLowerCase() === String(sender || '').toLowerCase() ? '[SEN] ' : '') + m.user + ': ' + m.text;
+          }).join('\\n');
+        } catch (e) { return ''; }
+      },
+      purgeTopicFromTimeline: function (topics) {
+        try {
+          var list = (Array.isArray(topics) ? topics : [topics]).map(function (t) { return String(t || '').toLowerCase(); }).filter(Boolean);
+          if (!list.length) return;
+          timeline = timeline.filter(function (m) {
+            var low = ' ' + m.text.toLowerCase() + ' ';
+            return !list.some(function (t) { return low.indexOf(' ' + t) !== -1 || low.indexOf(t) !== -1; });
+          });
+          persist();
+        } catch (e) {}
+      }
+    };
+  })();
+  (function () {
+    var MEM_KEY = 'nexus_cog_memory';
+    // Shape the widget expects from load(): { dossiers: { lowerSender: profile } }.
+    // The Kickbot builder persisted per-chatter profiles; this is the faithful
+    // local re-implementation (bounded, localStorage-backed where allowed).
+    var store = { dossiers: {} };
+    try { var raw = window.localStorage.getItem(MEM_KEY); if (raw) { var j = JSON.parse(raw); if (j && typeof j === 'object') store = { dossiers: j.dossiers && typeof j.dossiers === 'object' ? j.dossiers : {} }; } } catch (e) {}
+    function persist() { try { window.localStorage.setItem(MEM_KEY, JSON.stringify(store)); } catch (e) {} }
+    var keys = Object.keys(store.dossiers);
+    if (keys.length > 400) { keys.sort(function (a, b) { return (store.dossiers[a].lastSeenTs || 0) - (store.dossiers[b].lastSeenTs || 0); }).slice(0, keys.length - 400).forEach(function (k) { delete store.dossiers[k]; }); }
+    function profileFor(sender) {
+      var lower = String(sender || '?').toLowerCase();
+      var p = store.dossiers[lower];
+      if (!p) { p = store.dossiers[lower] = { handle: String(sender || '?'), role: 'izleyici', totalInteractions: 0, lastPrompt: '', lastSeenTs: 0 }; }
+      return p;
+    }
+    window.NexusCognitiveMemory = {
+      load: function () { return store; },
+      recordInteraction: function (sender, prompt) {
+        try {
+          var p = profileFor(sender);
+          p.totalInteractions = (Number(p.totalInteractions) || 0) + 1;
+          p.lastPrompt = String(prompt || '').slice(0, 400);
+          p.lastSeenTs = Date.now();
+          persist();
+          return p;
+        } catch (e) { return profileFor(sender); }
+      },
+      appendDialogueTurn: function (sender, prompt, reply) {
+        try {
+          var p = profileFor(sender);
+          p.lastPrompt = String(prompt || '').slice(0, 400);
+          p.lastReply = String(reply || '').slice(0, 1200);
+          p.lastSeenTs = Date.now();
+          persist();
+        } catch (e) {}
+      },
+      getRecentDialogueMessagesForSender: function (sender, prompt, maxTurns) {
+        // OpenAI-style message objects — the widget SPREADS this array into
+        // the messages ladder, so strings here would corrupt the request.
+        try {
+          var p = store.dossiers[String(sender || '').toLowerCase()];
+          if (!p || !p.lastPrompt) return [];
+          var n = Math.max(1, Number(maxTurns) || 1);
+          var out = [{ role: 'user', content: String(p.lastPrompt).slice(0, 400) }];
+          if (p.lastReply) out.push({ role: 'assistant', content: String(p.lastReply).slice(0, 1200) });
+          return out.slice(-n * 2);
+        } catch (e) { return []; }
+      },
+      wipeActiveTopicMemory: function (topics) {
+        try {
+          var list = (Array.isArray(topics) ? topics : [topics]).map(function (t) { return String(t || '').toLowerCase(); }).filter(Boolean);
+          if (!list.length) return;
+          for (var k of Object.keys(store.dossiers)) {
+            var p = store.dossiers[k];
+            var low = (' ' + String(p.lastPrompt || '') + ' ' + String(p.lastReply || '') + ' ').toLowerCase();
+            if (list.some(function (t) { return low.indexOf(t) !== -1; })) delete store.dossiers[k];
+          }
+          persist();
+        } catch (e) {}
+      }
+    };
+  })();
+  // IntelligenceCache / StickyResearchContext — builder-injected research
+  // stores; only their wipe/clear methods are reachable from the saved JS.
+  window.IntelligenceCache = {
+    clearAll: function () {},
+    get: function () { return null; },
+    set: function () {}
+  };
+  window.StickyResearchContext = {
+    wipeResearchMemory: function () {},
+    get: function () { return null; },
+    set: function () {}
+  };
+  // detectLanguage(text) — the TTS voice picker (Filiz for tr, Joanna else).
+  window.detectLanguage = function (text) {
+    try {
+      var t = String(text || '');
+      if (/[çğıöşüÇĞİÖŞÜ]/.test(t)) return 'tr';
+      if (/\b(bir|nedir|kimdir|nasıl|için|ama|çok|değil|var mı|yok)\b/i.test(t)) return 'tr';
+      return 'en';
+    } catch (e) { return 'en'; }
+  };
+  // The builder's web-intel functions had REAL implementations behind them
+  // (music lookups, DDG instant answers, weather, knowledge graph). Minimal
+  // HONEST versions: resolve with "no data" shapes so the JEV router degrades
+  // gracefully to the plain LLM ladder instead of throwing. Real research can
+  // be wired later through our own backend.
+  window.lookupMusicOrArtist = function (q) { return Promise.resolve(null); };
+  window.universalLiveWebSearch = function (q) { return Promise.resolve(null); };
+  window.fetchDuckDuckGoInstantAnswer = function (q) { return Promise.resolve(''); };
+  window.lookupKnowledgeGraph = function (q) { return null; };
+  window.unfurlLinksInPrompt = function (raw) { return Promise.resolve({ text: '', imageUrl: '' }); };
+  window.fetchLiveWeather = function (q) { return Promise.resolve(null); };
+  window.expandFollowUpQuery = function (raw, profile) {
+    try {
+      var prior = profile && profile.lastPrompt;
+      if (prior && String(raw || '').length < 24 && /(o|bu|onun|hangisi|devam|neyse)/i.test(String(raw || ''))) {
+        return String(prior).slice(0, 200) + ' — ' + String(raw || '');
+      }
+    } catch (e) {}
+    return String(raw || '');
+  };
+  window.extractCleanEntitySearchQuery = function (q) { return String(q || '').trim(); };
+  // extractAndBanRejectedTopics(text, sender) — the builder's poison-topic
+  // detector. The poison regex itself is declared by the WIDGET script
+  // (top-level const → global lexical binding, visible to later callers), so
+  // this resolves lazily at call time, AFTER the widget JS has loaded.
+  window.extractAndBanRejectedTopics = function (text, sender) {
+    try {
+      var re = typeof POISON_MEMORY_REGEX !== 'undefined' ? POISON_MEMORY_REGEX : null;
+      if (!re) return [];
+      var m = re.exec(String(text || ''));
+      if (!m) return [];
+      var topic = String(m[0]).toLowerCase().trim().split(/\\s+/).slice(0, 3).join(' ');
+      return topic ? [topic] : [];
+    } catch (e) { return []; }
+  };
+  // getLiveTurkishDateTime() — Kickbot's Turkish wall clock (Istanbul).
+  window.getLiveTurkishDateTime = function () {
+    try {
+      var d = new Date();
+      var days = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
+      var months = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+      var utc = d.getTime() + d.getTimezoneOffset() * 60000;
+      var ist = new Date(utc + 3 * 3600000); // Europe/Istanbul = UTC+3 (no DST)
+      var hh = String(ist.getHours()).padStart(2, '0');
+      var mm = String(ist.getMinutes()).padStart(2, '0');
+      return ist.getDate() + ' ' + months[ist.getMonth()] + ' ' + ist.getFullYear() + ', ' + days[ist.getDay()] + ' ' + hh + ':' + mm + ' (TSİ)';
+    } catch (e) {
+      return new Date().toISOString().slice(0, 16).replace('T', ' ');
+    }
+  };
+
   // 4) Event bridge — postMessage({ type:'nexus-widget-event', event:{…} })
   //    → document.dispatchEvent(new CustomEvent('widgetEvent', { detail })).
   //    The panel preview uses it for test events; the future KICK bot feed
@@ -298,6 +495,49 @@ export function buildWidgetShim(variables: WidgetVariable[]): string {
           }).catch(function () {});
         } catch (e) {}
       }, 2000);
+    }
+  } catch (e) {}
+
+  // 6) LIVE KICK FEED — the kick-bridge mini service (port 3010) relays the
+  //    channel's public chat + viewer count over a raw WebSocket. The
+  //    connector activates ONLY when the document is served from a real
+  //    http(s) host (the OBS stream URL): the panel preview iframe (srcdoc →
+  //    no location.host) and the file:// bundle stay on their existing
+  //    channels and never hit the network.
+  try {
+    var __liveProto = window.location.protocol;
+    if (window.location.host && (__liveProto === 'http:' || __liveProto === 'https:')) {
+      var __ch = 'specimba';
+      try {
+        if (__vars.streamer_name && __vars.streamer_name.value) __ch = String(__vars.streamer_name.value);
+      } catch (e) {}
+      __ch = encodeURIComponent(String(__ch).trim().toLowerCase() || 'specimba');
+      var __feedUrl = (__liveProto === 'https:' ? 'wss://' : 'ws://') + window.location.host +
+        '/?XTransformPort=3010&ch=' + __ch;
+      var __feedTries = 0;
+      var __feedTimer = null;
+      var __feedOpen = function () {
+        try {
+          var fx = new WebSocket(__feedUrl);
+          fx.onopen = function () { __feedTries = 0; };
+          fx.onmessage = function (m) {
+            try {
+              var ev = JSON.parse(m.data);
+              if (ev && ev.event_name) {
+                document.dispatchEvent(new CustomEvent('widgetEvent', { detail: ev }));
+              }
+            } catch (e) {}
+          };
+          fx.onclose = function () {
+            // exponential backoff + jitter; OBS refresh also reconnects instantly
+            var delay = Math.min(30000, 1000 * Math.pow(2, Math.max(0, __feedTries++)) + Math.floor(Math.random() * 500));
+            if (__feedTimer) clearTimeout(__feedTimer);
+            __feedTimer = setTimeout(__feedOpen, delay);
+          };
+          fx.onerror = function () { try { fx.close(); } catch (e) {} };
+        } catch (e) {}
+      };
+      __feedOpen();
     }
   } catch (e) {}
 })();
