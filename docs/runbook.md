@@ -42,6 +42,23 @@ the platform regenerates the `.env` file on every boot.
 | `bash tests/verify-core.sh` | Core E2E: auth, vault, events, tokens, budgets (18 checks) |
 | `bash scripts/ensure-env.sh` | Idempotent `.env` bootstrap (never prints values) |
 
+### Workspace download (Overview → Snapshot durability → "Download workspace")
+
+- The **platform's own** workspace downloader ("Failed to archive workspace
+  files") chokes on the full sandbox (~2.5 GB / 65k files incl. node_modules,
+  .next, .git) — treat it as permanently unreliable.
+- The **panel's button is the reliable path** (v29.15): it mints a ONE-TIME
+  download link (single-use, 5 min) and always shows a fallback panel with a
+  real "Save zip" anchor + a copyable URL. The URL downloads with **no cookie
+  needed** — so it works even when the embedded preview iframe silently blocks
+  file saves (the "button not responsive" report was the iframe eating the
+  programmatic download; server logs showed the zip was built and served 200
+  every time).
+- If no file lands: click **"Open in New Tab"** above the preview and press the
+  button there, or paste the copyable link into any browser tab.
+- The zip = clean source + `RECOVERY.txt` (panel password + quick-start).
+  Never contains `.env`, db, node_modules, upload/, or vault files.
+
 ## §2 Incident history (so it never repeats)
 
 - **2026-10-22 — workspace cold-reset**: platform restored the sandbox to the initial
