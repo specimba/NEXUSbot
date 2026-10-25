@@ -1,5 +1,13 @@
 /**
- * NEXUS-OS Cyber AI HUD Widget Engine (v29.7 — Supabase Agent v5 Security Hardened: Zero Browser Shared Secret / Zero x-vyce-key Header + Public Anon JWT Only + Dual Vyce Base URL Fallback — Vyce.ai 11-Model Live Switcher & HUD Telemetry + Grok Imagine 2.0 (`grok-imagine-2`) On-Screen Holographic Studio + $5 Gift / +$10 `VYCE_8ZYQDC` Referral Credit Economy Edition)
+ * NEXUS-OS Cyber AI HUD Widget Engine (v29.11 — Search Economy & Imagine Fit-Screen Edition)
+ *   v29.11: (1) Imagine showcase card is now a fixed CENTER OVERLAY — the whole
+ *   generated image is always visible (object-fit: contain, capped to the OBS
+ *   Browser Source viewport) instead of an in-flow row that rendered below the
+ *   fold on a 260px-tall source. (2) Widget-side research stays on the panel
+ *   brain (/api/brain/search); ALL Hyperbrowser credit spending now happens in
+ *   the edge function (nexus-cortex v29.11) behind an intent gate + hourly
+ *   budgets — random bant er no longer triggers web searches.
+ * (v29.7 — Supabase Agent v5 Security Hardened: Zero Browser Shared Secret / Zero x-vyce-key Header + Public Anon JWT Only + Dual Vyce Base URL Fallback — Vyce.ai 11-Model Live Switcher & HUD Telemetry + Grok Imagine 2.0 (`grok-imagine-2`) On-Screen Holographic Studio + $5 Gift / +$10 `VYCE_8ZYQDC` Referral Credit Economy Edition)
  * Engineered for kick.com/specimba (Baş Mimar: Canberk Karaerkek)
  *
  * NEW IN v29.8 (NEXUS OS panel — pipeline telemetry, memory & routing consistency):
@@ -735,22 +743,27 @@ function ensureImagineShowcaseDom() {
                     border: 1px solid rgba(0, 240, 255, 0.55);
                     border-radius: 6px;
                     padding: 8px 12px 10px 12px;
-                    position: relative;
+                    position: fixed;
+                    left: 50%;
+                    top: 50%;
+                    transform: translate(-50%, -50%) scale(0.98);
+                    width: min(96vw, 548px);
+                    max-height: 96vh;
+                    z-index: 90;
+                    overflow: hidden;
                     box-shadow: 0 8px 28px rgba(0, 0, 0, 0.92), 0 0 18px rgba(0, 240, 255, 0.22);
                     backdrop-filter: blur(12px);
                     opacity: 0;
-                    transform: translateY(-6px) scale(0.98);
-                    transition: opacity 0.35s ease, transform 0.35s ease;
+                    transition: opacity 0.35s ease;
                     pointer-events: none;
                     display: none;
                     flex-direction: column;
                     gap: 6px;
-                    margin-top: 2px;
                 }
                 .hologram-imagine-card.active {
                     display: flex;
                     opacity: 1;
-                    transform: translateY(0) scale(1);
+                    transform: translate(-50%, -50%) scale(1);
                     pointer-events: auto;
                 }
                 .imagine-header {
@@ -759,6 +772,7 @@ function ensureImagineShowcaseDom() {
                     align-items: center;
                     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
                     padding-bottom: 4px;
+                    flex: 0 0 auto;
                 }
                 .imagine-title {
                     font-size: 10px;
@@ -784,7 +798,8 @@ function ensureImagineShowcaseDom() {
                 }
                 .imagine-Viewport {
                     width: 100%;
-                    height: 235px;
+                    flex: 0 1 auto;
+                    min-height: 0;
                     border-radius: 4px;
                     overflow: hidden;
                     background: rgba(0, 0, 0, 0.75);
@@ -795,10 +810,13 @@ function ensureImagineShowcaseDom() {
                     position: relative;
                 }
                 .imagine-Viewport img {
-                    width: 100%;
-                    height: 100%;
-                    object-fit: cover;
                     display: block;
+                    max-width: 100%;
+                    max-height: calc(96vh - 64px);
+                    width: auto;
+                    height: auto;
+                    object-fit: contain;
+                    margin: 0 auto;
                 }
                 .imagine-footer {
                     display: flex;
@@ -808,6 +826,7 @@ function ensureImagineShowcaseDom() {
                     font-size: 9.5px;
                     color: rgba(255, 255, 255, 0.85);
                     font-family: var(--font-mono, monospace);
+                    flex: 0 0 auto;
                 }
                 .imagine-prompt-caption {
                     white-space: nowrap;
@@ -2120,12 +2139,12 @@ NexusSyncBus.initListener(
 updateQueueBadge();
 initBootTelemetryOnce();
 syncDirectKickTelemetry();
-// v29.10 — STATIC EXPORT GUARD: the downloaded OBS bundle runs from file:// and
+// v29.11 — STATIC EXPORT GUARD (unchanged from v29.10): the downloaded OBS bundle runs from file:// and
 // cannot reach the panel API / kick-bridge (relative URLs are invalid offline).
 // The live HUD needs the panel URL as an OBS Browser Source — tell the operator
 // on-stream instead of failing silently (the "local file not working" report).
 if (typeof location !== 'undefined' && location.protocol === 'file:') {
-    console.warn('[NEXUS-OS v29.10] Static export detected (file://): canli Kick sohbeti, izleyici telemetrisi ve AI pipeline KAPALI. Panel OBS Browser Source URL\'ini OBS\'te URL olarak ekle (Local file degil).');
+    console.warn('[NEXUS-OS v29.11] Static export detected (file://): canli Kick sohbeti, izleyici telemetrisi ve AI pipeline KAPALI. Panel OBS Browser Source URL\'ini OBS\'te URL olarak ekle (Local file degil).');
     try {
         const banner = document.createElement('div');
         banner.id = 'nexus-static-export-banner';
