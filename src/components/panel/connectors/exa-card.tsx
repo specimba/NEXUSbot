@@ -54,7 +54,15 @@ type ExaStatus = {
     freshCount?: number;
     error?: string;
   } | null;
-  monitors: Array<{ id?: string; state?: string; search?: { query?: string }; trigger?: { period?: string } }>;
+  monitors: Array<{
+    id?: string;
+    name?: string | null;
+    status?: string;
+    state?: string;
+    search?: { query?: string };
+    trigger?: { period?: string } | null;
+    nextRunAt?: string | null;
+  }>;
   monitorsError: string;
   webhookInbox: Array<{ receivedAt: string; monitorId: string; kind: string }>;
   edge: { reachable: boolean; service: string; exaArmed: boolean };
@@ -365,11 +373,11 @@ export function ExaCard() {
             <ul className="max-h-28 space-y-1 overflow-y-auto pr-1 text-[11px]">
               {s.monitors.map((m, i) => (
                 <li key={m.id ?? i} className="flex items-center justify-between gap-2 rounded border border-border/50 px-2 py-1">
-                  <span className="truncate">{m.search?.query ?? "(query n/a)"}</span>
+                  <span className="truncate">{m.search?.query ?? m.name ?? "(query n/a)"}</span>
                   <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
                     <Timer className="h-3 w-3" aria-hidden />
-                    {m.trigger?.period ?? "?"}
-                    {m.state ? ` · ${m.state}` : ""}
+                    {m.trigger?.period ?? "manual"}
+                    {(m.status ?? m.state) ? ` · ${m.status ?? m.state}` : ""}
                   </span>
                 </li>
               ))}
@@ -392,10 +400,11 @@ export function ExaCard() {
               onChange={(e) => setMonitorPeriod(e.target.value)}
               aria-label="Monitor interval"
             >
+              {/* Docs: single durations, minimum 1h (1h | 6h | 1d | 7d). */}
               <option value="1h">1h</option>
-              <option value="12h">12h</option>
+              <option value="6h">6h</option>
               <option value="1d">1d</option>
-              <option value="1w">1w</option>
+              <option value="7d">7d</option>
             </select>
             <Button size="sm" variant="secondary" className="h-8" disabled={!s?.armed || createMonitor.isPending} onClick={() => createMonitor.mutate()}>
               Create

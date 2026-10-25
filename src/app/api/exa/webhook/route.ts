@@ -37,7 +37,6 @@ export async function POST(req: Request) {
     return new Response(null, { status: 400 });
   }
 
-  const parsedBody = JSON.stringify(parsed);
   // Optional integrity flag (E1): when a one-time webhookSecret from monitor
   // creation is stored in the vault, verify Exa-Signature
   // (t=<ts>,v1=HMAC-SHA256(secret, "<ts>.<rawBody>")). A mismatch or missing
