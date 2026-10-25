@@ -252,6 +252,7 @@ const BRAIN_SHIM_V298 = String.raw`  // web research bridges → /api/brain/sear
           if (maxRun > 25 || emojiCount > 18) flags.push('FLOOD_ABUSE');
         }
         if (/^[\s.,!?;:*_~^]+$/.test(t)) flags.push('COMMAND_ABUSE');
+
       } catch (e) {}
       return flags;
     }
@@ -532,6 +533,26 @@ export function buildWidgetShim(variables: WidgetVariable[]): string {
   // router still falls through to the plain LLM ladder.
   // Regexes live in BRAIN_SHIM_V298 (String.raw) so backslashes survive.
   ${BRAIN_SHIM_V298}
+  // v29.8 — normalizeArtistAndEntityTypos: the last builder-injected helper
+  // that was still missing (preFetchContextualData threw on line 1 for EVERY
+  // message, silently killing the whole JEV router: no snippets, no routing,
+  // no follow-up expansion). Faithful light parity: known artist/typo fixes.
+  window.normalizeArtistAndEntityTypos = function (raw) {
+    try {
+      var t = String(raw || '');
+      var map = [
+        [/\bhieler\b/gi, 'HEALER'],
+        [/\bsnakes\s*of\s*rossia\b/gi, 'Snakes of Russia'],
+        [/\bvora\s*sans\b/gi, 'Vora Sans'],
+        [/\bi\s*hate\s*models\b/gi, 'I Hate Models'],
+        [/\bteknloji\b/gi, 'teknoloji']
+      ];
+      for (var i = 0; i < map.length; i++) t = t.replace(map[i][0], map[i][1]);
+      return t.trim();
+    } catch (e) { return String(raw || ''); }
+  };
+  window.lookupKnowledgeGraph = function (q) { return null; };
+
   window.expandFollowUpQuery = function (raw, profile) {
     try {
       var prior = profile && profile.lastPrompt;

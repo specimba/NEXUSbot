@@ -72,6 +72,18 @@ model Widget {
   seeded    Boolean  @default(false) // true for the Cyber AI Counter import (provenance)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // Stable OBS Browser Source link. The old flow minted a fresh ingest token
+  // per click and kept the URL only in React state — every panel refresh
+  // produced a DIFFERENT URL. Now the link is durable:
+  //   obsTokenId    — IngestToken row backing the link (revocable/resettable)
+  //   obsLinkCipher — vault-encrypted "/api/widgets/<id>/stream?token=<plain>"
+  //                   (origin-independent: only the host part can ever change)
+  //   obsBaseUrl    — host anchor, e.g. "http://localhost:3000" (OBS on the
+  //                   same machine as the panel). null → follow current origin.
+  obsTokenId    String?
+  obsLinkCipher String?
+  obsBaseUrl    String?
 }
 
 // Owner-defined brain providers beyond Vyce/Groq: OpenAI-compatible or

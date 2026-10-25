@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { requireSession } from "@/lib/auth";
 import { clientKey, rateLimit } from "@/lib/guard";
 import { validateWidgetPayload } from "@/lib/widgets/runtime";
+import { toWidgetApi } from "@/lib/widgets/api";
 
 /**
  * GET    /api/widgets/[id] — full widget row.
@@ -23,7 +24,7 @@ export async function GET(req: Request, ctx: Ctx) {
   const { id } = await ctx.params;
   const widget = await db.widget.findUnique({ where: { id } });
   if (!widget) return err("NOT_FOUND", "Widget not found.", 404);
-  return NextResponse.json({ ok: true, widget });
+  return NextResponse.json({ ok: true, widget: toWidgetApi(widget) });
 }
 
 export async function PUT(req: Request, ctx: Ctx) {
@@ -67,7 +68,7 @@ export async function PUT(req: Request, ctx: Ctx) {
   }
 
   const widget = await db.widget.update({ where: { id }, data });
-  return NextResponse.json({ ok: true, widget });
+  return NextResponse.json({ ok: true, widget: toWidgetApi(widget) });
 }
 
 export async function DELETE(req: Request, ctx: Ctx) {

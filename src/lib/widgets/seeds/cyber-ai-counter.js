@@ -376,6 +376,10 @@ const NexusRouteState = {
 };
 NexusRouteState.load();
 
+// v29.8 — whole-cycle deadline so the ladder gives up in time and the busy
+// line arrives before the busyWatchdog (28s) even thinks about firing.
+let NEXUS_CYCLE_DEADLINE = 0;
+
 const NexusModelController = {
     STORAGE_KEY: 'NEXUS_ACTIVE_VYCE_MODEL_v29_4',
     runtimeOverride: null,
@@ -1337,7 +1341,7 @@ async function preFetchContextualData(rawPrompt, chatterProfile, sender = '') {
     }
 
     const wantsExplicitMusicLookup = /(?:^|\s)(dinliyoz|dinliyoruz|dinliyorum|çalan\s*şarkı|bu\s*şarkı|müzik\s*soruyoz|sanatçı|müzisyen|healer|the\s*messenger|lorn|out\s*of\s*the\s*frame|snakes\s*of\s*russia|cnjr|vora\s*sans|dj|999999999|poltergst|ihm|i\s*hate\s*models|6ejou|techno|prodüktör)(?=$|\s|[?!.,])/i.test(p);
-    const wantsExplicitFactualLookup = wantsExplicitMusicLookup || /(elemanın\s*olayı\s*ne|olayı\s*ne|tanju\s*özcan|ümit\s*özdağ|landman|grammy|nereli|kimdir|kim\s*la|kim\s*bu|nedir|araştır)/i.test(p);
+    const wantsExplicitFactualLookup = wantsExplicitMusicLookup || /(elemanın\s*olayı\s*ne|olayı\s*ne|tanju\s*özcan|ümit\s*özdağ|landman|grammy|nereli|kimdir|kim\s*la|kim\s*bu|nedir|araştır|haberler?|son\s*dakika|gündem|güncel|en\s*son|ne\s*var|ne\s*oldu|fiyat|döviz|bitcoin|kripto|skor|seçim|latest|news)/i.test(p);
     const cleanEntityQuery = extractCleanEntitySearchQuery(expandedPrompt);
 
     if (wantsExplicitFactualLookup && cleanEntityQuery.length >= 2 && !linkObj.text) {
@@ -1579,6 +1583,7 @@ async function callVyceFrontierAPI(messages, vyceKey, jevCategory = 'FAST_BANTER
     const fallbackBase = 'https://api.vyce.ai/v1';
 
     for (const vModel of orderedVyceModels.slice(0, 2)) {
+        if (Date.now() > NEXUS_CYCLE_DEADLINE - 4000) return null; // keep room for the Groq ladder
         const bases = (fallbackBase !== primaryBase) ? [primaryBase, fallbackBase] : [primaryBase];
         for (let bi = 0; bi < bases.length; bi++) {
             const base = bases[bi];
@@ -1693,6 +1698,7 @@ async function callHybridBrainPipeline(messages, groqKey, vyceKey, useServerBrow
         ? GROQ_HIGH_IQ_PIPELINE.filter(m => m.id === stickyId).concat(GROQ_HIGH_IQ_PIPELINE.filter(m => m.id !== stickyId))
         : GROQ_HIGH_IQ_PIPELINE;
     for (const modelConfig of ordered) {
+        if (Date.now() > NEXUS_CYCLE_DEADLINE - 2000) break; // cycle deadline — answer or busy
         updateModelBadge(modelConfig.label);
         try {
             const payload = { model: modelConfig.id, messages, temperature: isResearchMode ? 0.38 : 0.62, max_completion_tokens: 480 };
@@ -1761,7 +1767,7 @@ function commandFromModelLabel(label) {
 }
 
 function buildNexusSystemPrompt(opts) {
-    const { sender, chatterProfile, isSenderArchitect, activeVyceModel, bannedTopicsArr, snippetText, structuredTranscript, streamSummary, liveClockStr, userWallet, forceConcise, guardFlags, securityLessons } = opts;
+    const { sender, chatterProfile, isSenderArchitect, activeVyceModel, bannedTopicsArr, snippetText, structuredTranscript, streamSummary, liveClockStr, userWallet, forceConcise, guardFlags, securityLessons, needsDeepWebSearch } = opts;
     const lines = [];
     lines.push(`Sen NEXUS-OS v29.8 canlı yayın zekâsısın — @${config.streamerName} kanalının ortak beyni (co-host). Aktif model tercihi: ${activeVyceModel}.`);
     lines.push(`DİL ve ÜSLUP: Yazanın dilinde konuş (çoğunlukla Türkçe). Doğal, kıvrak, kendi halinde; yıldız, diyez veya emoji kullanma. ${forceConcise ? 'Tek net cümle (12-24 kelime).' : '2-3 cümle (18-44 kelime); gereksiz uzatma.'}`);
@@ -1779,6 +1785,7 @@ function buildNexusSystemPrompt(opts) {
     if (bannedTopicsArr && bannedTopicsArr.length) lines.push(`KAPALI KONULAR (yayın sahibi kararı): ${bannedTopicsArr.slice(0, 20).join(', ')}. Bunlar sorulursa kısa ve esprili şekilde geçiştir.`);
     lines.push(`ARAÇLAR: İzleyiciler "!ai çiz <hayal>" ile ekrana görsel yansıtır (Grok Imagine 2.0, $0.50/görsel). @${sender} bakiyesi: $${userWallet.balanceUsd.toFixed(2)}. Kredi biterse ${config.vyceReferralUrl} (Kod: ${config.vyceReferralCode}) ile +$10 kazanabilir.`);
     if (snippetText) lines.push(`GÜNCEL BİLGİ (canlı web araştırması, güvenilir): ${String(snippetText).slice(0, 1200)}`);
+    else if (needsDeepWebSearch) lines.push(`WEB ARAŞTIRMASI ŞU AN YANIT VERMEDİ: Güncel veri gelmediğini KISA ve doğal şekilde söyle; "internete erişimim yok" gibi teknik ifadeler KULLANMA, kendi bilginin anlık olmayabileceğini belirtip sohbeti canlı tut.`);
     if (structuredTranscript) lines.push(`ODA TRANSKRİPTİ (son mesajlar): ${String(structuredTranscript).slice(0, 1800)}`);
     lines.push(`SAAT: ${liveClockStr} | ${streamSummary}`);
     return lines.join('\n');
@@ -1786,6 +1793,7 @@ function buildNexusSystemPrompt(opts) {
 
 async function executeNexusCycle(sender, prompt) {
     const cycleStartedAt = Date.now();
+    NEXUS_CYCLE_DEADLINE = cycleStartedAt + 21000;
     const groqKey = config.groqKey;
     const vyceKey = config.vyceKey;
     const senderLower = sender.toLowerCase();
@@ -1823,7 +1831,7 @@ async function executeNexusCycle(sender, prompt) {
                 visionImageUrl: '',
                 forceConcise: false,
                 jevCategory: 'FAST_BANTER'
-            }), 4200))
+            }), 6500))
         ]);
     } catch (e) {
         pre = { snippetText: '', expandedPrompt: prompt, isResearchMode: false, needsDeepWebSearch: false, allowAgentTools: false, visionImageUrl: '', forceConcise: false, jevCategory: 'FAST_BANTER' };
@@ -1874,7 +1882,7 @@ async function executeNexusCycle(sender, prompt) {
     const systemPrompt = buildNexusSystemPrompt({
         sender, chatterProfile, isSenderArchitect, activeVyceModel, bannedTopicsArr,
         snippetText, structuredTranscript, streamSummary, liveClockStr, userWallet,
-        forceConcise, guardFlags, securityLessons
+        forceConcise, guardFlags, securityLessons, needsDeepWebSearch
     });
 
     const messages = [
@@ -1913,7 +1921,7 @@ async function executeNexusCycle(sender, prompt) {
         NexusSyncBus.broadcastRender(sender, finalReply, modelLabel);
         logNexusInteraction({
             username: sender, command: 'ai', message: prompt, response: finalReply,
-            model: modelLabel || '', modelId: modelId || '', provider: provider || '',
+            model: modelLabel || '', modelId: modelId || '', provider: provider || (routeInfo === 'edge' ? 'edge' : ''),
             route: routeInfo, status: guardFlags.length ? 'refused' : 'ok',
             latencyMs: Date.now() - cycleStartedAt, promptTokens, completionTokens,
             webUsed: Boolean(snippetText && snippetText.length > 0), memoryUsed,
