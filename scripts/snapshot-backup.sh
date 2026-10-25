@@ -221,8 +221,15 @@ if git push "$REMOTE_URL" "$BRANCH:main" 2>>"$STATE_DIR/backup-log.txt"; then
   S_RESULT="ok"; S_AT="$TS"; S_OK_EPOCH="$NOW_EPOCH"; S_HEAD="$COMMIT"
   log "PUSH OK → specimba/NEXUSbot main @ ${COMMIT:0:12}"
 else
+  # 2026-10-25 lesson: a dead GitHub token ("Invalid username or token") used to be
+  # mislabeled "non-fast-forward", sending the owner chasing a divergence that
+  # did not exist. Name the auth failure honestly (22:59 incident).
+  if tail -n 3 "$STATE_DIR/backup-log.txt" | grep -qi "invalid username or token\|authentication failed\|403.*resource not accessible"; then
+    log "PUSH FAILED — GitHub rejected the stored token (expired/revoked/insufficient scope). Re-connect GitHub (Connectors → GitHub → device flow), then run again. The snapshot chain itself is healthy."
+  else
+    log "PUSH FAILED — non-fast-forward (owner edited remote?) → resolve manually; no force push per directive"
+  fi
   S_RESULT="failed"; S_AT="$TS"; state_flush
-  log "PUSH FAILED — non-fast-forward (owner edited remote?) → resolve manually; no force push per directive"
   exit 4
 fi
 
