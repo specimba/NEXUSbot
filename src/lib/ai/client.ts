@@ -134,6 +134,8 @@ export type BrainErrorCode =
   | "UNREACHABLE_FROM_SANDBOX"
   | "RATE_LIMITED"
   | "BAD_RESPONSE"
+  | "BAD_RESPONSE_SHAPE"
+  | `HTTP_${number}`
   | "BAD_INPUT";
 
 export class BrainError extends Error {
@@ -634,7 +636,7 @@ export function getUsageDb(): PrismaClient | null {
       const Fresh = loadFreshPrismaModule()?.PrismaClient ?? PrismaClient;
       const fresh = new Fresh({ log: ["query"] });
       if ("usageEvent" in fresh) {
-        void cached.$disconnect().catch(() => undefined);
+        void (cached as { $disconnect?: () => Promise<unknown> }).$disconnect?.().catch(() => undefined);
         g.prisma = fresh;
         return fresh;
       }
@@ -1073,7 +1075,7 @@ export async function chatCompleteCustom(
 
   // --- response parsing per protocol ----------------------------------------
   const status = answer.status;
-  const fail = (code: string, message: string): never => {
+  const fail: (code: BrainErrorCode, message: string) => never = (code, message) => {
     void recordBrainUsage({
       model,
       ok: false,
@@ -1137,7 +1139,7 @@ export async function chatCompleteCustom(
     egress: route,
   });
 
-  return { model, content, latencyMs, usage };
+  return { model, content: content ?? "", latencyMs, usage };
 }
 
 /**

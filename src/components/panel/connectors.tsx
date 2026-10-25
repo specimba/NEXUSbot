@@ -1,6 +1,7 @@
 "use client";
 
 import { CustomProvidersCard } from "@/components/panel/connectors/custom-providers-card";
+import { ExaCard } from "@/components/panel/connectors/exa-card";
 import { GitHubCard } from "@/components/panel/connectors/github-card";
 import { HyperbrowserCard } from "@/components/panel/connectors/hyperbrowser-card";
 import { SupabaseCard } from "@/components/panel/connectors/supabase-card";
@@ -20,12 +21,13 @@ export function ConnectorsTab() {
   return (
     <div className="space-y-4">
       <div className="grid gap-4 xl:grid-cols-2 [&>*]:min-w-0">
-        <GitHubCard />
+        <ExaCard />
+        <VyceCard />
         <SupabaseCard />
         <UpstashCard />
         <HyperbrowserCard />
         <WebshareCard />
-        <VyceCard />
+        <GitHubCard />
       </div>
       <CustomProvidersCard />
     </div>

@@ -1,6 +1,7 @@
 import { cookies, headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { db } from "@/lib/db";
 
 /**
  * NEXUS OS panel auth — single-operator, password-based bootstrap auth.
@@ -45,14 +46,71 @@ export function verifySessionToken(token: string | undefined): boolean {
   return Number.isFinite(exp) && Date.now() < exp;
 }
 
-/** Timing-safe panel password check. Returns false when PANEL_PASSWORD is unset. */
-export function checkPanelPassword(input: unknown): boolean {
+/** Setting key that holds the durable sha256(password) — survives sandbox .env resets. */
+export const PANEL_PASSWORD_SETTING = "panel.passwordHash";
+
+function sha256Hex(text: string): string {
+  return createHash("sha256").update(text).digest("hex");
+}
+
+/**
+ * Timing-safe panel password check with TWO credential channels:
+ *  1. Durable DB hash (Setting panel.passwordHash) — survives sandbox cold boots
+ *     that regenerate .env with a fresh random password (the owner lockout bug).
+ *  2. .env PANEL_PASSWORD — recovery channel; owner reads it via runbook §0.
+ * Returns false when NEITHER channel is configured.
+ */
+export async function checkPanelPassword(input: unknown): Promise<boolean> {
   if (typeof input !== "string" || input.length === 0 || input.length > 256) return false;
+  const digest = createHash("sha256").update(input).digest();
+
+  const row = await db.setting
+    .findUnique({ where: { key: PANEL_PASSWORD_SETTING } })
+    .catch(() => null);
+  if (row?.value) {
+    const stored = Buffer.from(row.value, "hex");
+    if (stored.length === digest.length && timingSafeEqual(stored, digest)) return true;
+  }
+
   const expected = process.env.PANEL_PASSWORD;
-  if (!expected) return false;
-  const a = createHash("sha256").update(input).digest();
-  const b = createHash("sha256").update(expected).digest();
-  return timingSafeEqual(a, b);
+  if (expected) {
+    const envDigest = createHash("sha256").update(expected).digest();
+    if (timingSafeEqual(envDigest, digest)) return true;
+  }
+  return false;
+}
+
+/**
+ * Make the just-used password durable: when the owner logs in with the .env
+ * recovery password and no DB hash exists yet, persist its hash so the next
+ * sandbox reset cannot lock them out again. Idempotent; never overwrites an
+ * existing DB credential (that would let a leaked .env value take over).
+ */
+export async function seedPanelPasswordFromEnv(): Promise<void> {
+  const expected = process.env.PANEL_PASSWORD;
+  if (!expected) return;
+  const existing = await db.setting
+    .findUnique({ where: { key: PANEL_PASSWORD_SETTING } })
+    .catch(() => null);
+  if (existing?.value) return;
+  await db.setting
+    .upsert({
+      where: { key: PANEL_PASSWORD_SETTING },
+      create: { key: PANEL_PASSWORD_SETTING, value: sha256Hex(expected) },
+      update: {},
+    })
+    .catch(() => {});
+}
+
+/** Owner-initiated rotation: write the durable DB hash (used by Settings + scripts). */
+export async function setPanelPassword(input: string): Promise<boolean> {
+  if (typeof input !== "string" || input.length < 8 || input.length > 256) return false;
+  await db.setting.upsert({
+    where: { key: PANEL_PASSWORD_SETTING },
+    create: { key: PANEL_PASSWORD_SETTING, value: sha256Hex(input) },
+    update: { value: sha256Hex(input) },
+  });
+  return true;
 }
 
 export function panelPasswordConfigured(): boolean {

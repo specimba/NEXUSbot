@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { storeSessionToken } from "@/lib/client-auth";
-import { TerminalSquare } from "lucide-react";
+import { Eye, TerminalSquare } from "lucide-react";
 
 type LoginGateProps = {
   passwordConfigured: boolean;
@@ -18,8 +18,30 @@ type LoginGateProps = {
 export function LoginGate({ passwordConfigured, sessionCheckFailed }: LoginGateProps) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [recovery, setRecovery] = useState<string | null>(null);
+  const [recoveryLoading, setRecoveryLoading] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  const revealRecovery = async () => {
+    setRecoveryLoading(true);
+    try {
+      const res = await fetch("/api/auth/recovery", { cache: "no-store" });
+      const body = (await res.json()) as { password?: string | null; visible?: boolean };
+      setRecovery(body.password ?? null);
+      if (!body.password) {
+        toast({
+          title: "No recovery value",
+          description: "On-screen reveal is disabled or unset — see docs/runbook.md §0.",
+        });
+      }
+    } catch {
+      setRecovery(null);
+      toast({ title: "Reveal failed", description: "Could not read the recovery value.", variant: "destructive" });
+    } finally {
+      setRecoveryLoading(false);
+    }
+  };
 
   const login = useMutation({
     mutationFn: async (pwd: string) => {
@@ -74,6 +96,15 @@ export function LoginGate({ passwordConfigured, sessionCheckFailed }: LoginGateP
               Session check failed — the API may be restarting. Try again shortly.
             </p>
           )}
+          {recovery && (
+            <div className="mb-3 rounded-md border border-primary/40 bg-primary/10 p-2 text-xs">
+              <p className="mb-1 font-semibold text-primary">Recovery password</p>
+              <p className="break-all font-mono text-[13px] leading-relaxed">{recovery}</p>
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                Copy it, sign in, then rotate in Settings → Panel access.
+              </p>
+            </div>
+          )}
           <form
             className="space-y-4"
             onSubmit={(e) => {
@@ -105,11 +136,22 @@ export function LoginGate({ passwordConfigured, sessionCheckFailed }: LoginGateP
             <Button type="submit" className="h-11 w-full font-mono" disabled={login.isPending}>
               {login.isPending ? "Authenticating…" : "Sign in"}
             </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              className="h-9 w-full font-mono text-xs text-muted-foreground"
+              onClick={revealRecovery}
+              disabled={recoveryLoading}
+            >
+              <Eye className="mr-1 size-3.5" aria-hidden="true" />
+              {recoveryLoading ? "Reading…" : "Locked out? Show recovery password"}
+            </Button>
           </form>
           <p className="mt-4 text-center text-[11px] leading-relaxed text-muted-foreground">
-            Password lives in the <code className="font-mono">.env</code> file (project root, key{" "}
-            <code className="font-mono">PANEL_PASSWORD</code>). See{" "}
-            <code className="font-mono">docs/runbook.md</code> §0.
+            The password is stored durably in the panel database — it survives sandbox
+            resets. The button above reveals the current recovery copy on this screen,
+            so a reset can never lock you out again. Rotate in Settings → Panel access.{" "}
+            See <code className="font-mono">docs/runbook.md</code> §0.
           </p>
         </CardContent>
       </Card>

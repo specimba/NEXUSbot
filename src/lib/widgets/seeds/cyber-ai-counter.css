@@ -168,25 +168,33 @@ html, body {
 .laser-track { width: 100%; height: 2.5px; background: rgba(255, 255, 255, 0.06); border-radius: 2px; overflow: hidden; margin-top: 7px; }
 .laser-fill { width: 100%; height: 100%; background: linear-gradient(90deg, var(--neon-purple), var(--neon-green)); transform-origin: left; transform: scaleX(0); }
 
-/* Grok Imagine 2.0 Holographic Showcase Card */
+/* Grok Imagine 2.0 Holographic Showcase Card - v29.11: fixed CENTER OVERLAY.
+   The widget's OBS Browser Source is only 260px tall; as an in-flow row the
+   card rendered below the fold ("only the top small part seen"). Now it
+   floats above the HUD, centered on the source viewport, and the image is
+   object-fit: contain so the WHOLE generated image is always visible. */
 .hologram-imagine-card {
     background: var(--bg-dark); border: 1px solid rgba(176, 38, 255, 0.65);
-    border-radius: 6px; padding: 8px 12px 10px 12px; position: relative;
+    border-radius: 6px; padding: 8px 12px 10px 12px;
+    position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: min(96vw, 548px); max-height: 96vh; z-index: 90; overflow: hidden;
     box-shadow: 0 8px 28px rgba(0, 0, 0, 0.92), 0 0 18px rgba(176, 38, 255, 0.25);
     backdrop-filter: blur(12px); display: none; flex-direction: column; gap: 6px;
 }
 .hologram-imagine-card.active { display: flex; animation: imaginePopIn 0.35s cubic-bezier(0.2, 0.8, 0.2, 1); }
 @keyframes imaginePopIn {
-    0% { opacity: 0; transform: translateY(-6px) scale(0.98); }
-    100% { opacity: 1; transform: translateY(0) scale(1); }
+    0% { opacity: 0; transform: translate(-50%, -48%) scale(0.97); }
+    100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 }
-.imagine-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 4px; }
+.imagine-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 4px; flex: 0 0 auto; }
 .imagine-title { font-size: 10.5px; font-weight: 900; color: var(--neon-cyan); font-family: var(--font-mono); letter-spacing: 0.5px; }
 .imagine-badges { display: flex; gap: 5px; align-items: center; }
 .badge-credit { background: rgba(83, 252, 24, 0.16); color: var(--neon-green); border: 1px solid rgba(83, 252, 24, 0.45); }
 .badge-rating { background: rgba(176, 38, 255, 0.2); color: #f8fafc; border: 1px solid rgba(176, 38, 255, 0.5); }
-.imagine-frame { width: 100%; height: 250px; border-radius: 4px; overflow: hidden; background: rgba(0,0,0,0.6); border: 1px solid rgba(0, 240, 255, 0.28); display: flex; align-items: center; justify-content: center; }
-#imagine-img { width: 100%; height: 100%; object-fit: cover; }
-.imagine-footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-family: var(--font-mono); }
+/* v29.11: height grows with the image (capped to the source viewport) instead
+   of a fixed 250px crop - whole image visible, letterboxed when needed. */
+.imagine-frame { width: 100%; flex: 0 1 auto; min-height: 0; border-radius: 4px; overflow: hidden; background: rgba(0,0,0,0.6); border: 1px solid rgba(0, 240, 255, 0.28); display: flex; align-items: center; justify-content: center; }
+#imagine-img { display: block; max-width: 100%; max-height: calc(96vh - 64px); width: auto; height: auto; object-fit: contain; margin: 0 auto; }
+.imagine-footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-family: var(--font-mono); flex: 0 0 auto; }
 .imagine-prompt { font-size: 10px; color: #e2e8f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 58%; }
 .imagine-ref-tag { font-size: 8.5px; font-weight: 800; color: var(--neon-green); letter-spacing: 0.3px; }

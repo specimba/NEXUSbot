@@ -113,6 +113,120 @@ export function SettingsTab() {
           )}
         </CardContent>
       </Card>
+
+      <PanelAccessCard />
     </div>
+  );
+}
+
+/**
+ * Panel access (v29.12) — durable password rotation. The password lives in the
+ * panel DB (survives sandbox .env regeneration — the lockout bug this panel
+ * once had); .env stays as the documented recovery channel.
+ */
+function PanelAccessCard() {
+  const { toast } = useToast();
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [repeat, setRepeat] = useState("");
+
+  const rotate = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/auth/password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentPassword: current, newPassword: next }),
+      });
+      const body = (await res.json().catch(() => null)) as
+        | { ok: boolean; error?: { message?: string } }
+        | null;
+      if (!res.ok || !body?.ok) {
+        throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
+      }
+      return body;
+    },
+    onSuccess: () => {
+      setCurrent("");
+      setNext("");
+      setRepeat("");
+      toast({
+        title: "Panel password updated",
+        description: "Stored durably in the panel DB. Use the new password at the next sign-in.",
+      });
+    },
+    onError: (e: Error) =>
+      toast({ title: "Rotation failed", description: e.message, variant: "destructive" }),
+  });
+
+  const canSubmit =
+    current.length > 0 && next.length >= 8 && next === repeat && !rotate.isPending;
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+          Panel access
+        </CardTitle>
+        <CardDescription>
+          The password is stored durably in the panel database and survives sandbox resets — even
+          when <code className="font-mono text-[11px]">.env</code> is regenerated. The{" "}
+          <code className="font-mono text-[11px]">.env</code> value (key{" "}
+          <code className="font-mono text-[11px]">PANEL_PASSWORD</code>) remains the documented
+          recovery channel.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (canSubmit) rotate.mutate();
+          }}
+        >
+          <div className="space-y-1.5">
+            <Label htmlFor="panel-pass-current">Current password</Label>
+            <Input
+              id="panel-pass-current"
+              type="password"
+              autoComplete="current-password"
+              className="h-11 max-w-sm font-mono"
+              value={current}
+              onChange={(e) => setCurrent(e.target.value)}
+            />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="panel-pass-new">New password (min 8 chars)</Label>
+              <Input
+                id="panel-pass-new"
+                type="password"
+                autoComplete="new-password"
+                className="h-11 font-mono"
+                value={next}
+                onChange={(e) => setNext(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="panel-pass-repeat">Repeat new password</Label>
+              <Input
+                id="panel-pass-repeat"
+                type="password"
+                autoComplete="new-password"
+                className="h-11 font-mono"
+                value={repeat}
+                onChange={(e) => setRepeat(e.target.value)}
+                aria-invalid={repeat.length > 0 && next !== repeat}
+              />
+              {repeat.length > 0 && next !== repeat ? (
+                <p className="text-xs text-destructive">Passwords do not match.</p>
+              ) : null}
+            </div>
+          </div>
+          <Button type="submit" className="min-h-11 font-mono" disabled={!canSubmit}>
+            {rotate.isPending ? "Updating…" : "Update password"}
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
   );
 }

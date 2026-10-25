@@ -64,6 +64,7 @@ export type EgressErrorCode =
   | "PROXY_AUTH_REJECTED"
   | "PROXY_TIMEOUT"
   | "TUNNEL_TLS_FAILED"
+  | "UNREACHABLE_FROM_SANDBOX"
   | "UPSTREAM_BAD_RESPONSE"
   | "UPSTREAM_TIMEOUT"
   | WebshareErrorCode;
@@ -171,7 +172,7 @@ function connectThroughProxy(
   const password = decodeURIComponent(parsed.password);
 
   return new Promise((resolve, reject) => {
-    const socket = net.connect({ host: parsed.hostname, port: parsed.port || 80 });
+    const socket = net.connect({ host: parsed.hostname, port: Number(parsed.port) || 80 });
     socket.setNoDelay(true);
     let buf = "";
     let settled = false;

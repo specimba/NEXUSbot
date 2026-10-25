@@ -355,7 +355,7 @@ export function GitHubCard() {
                 className="min-w-0 flex-1 break-all rounded bg-background/60 px-1.5 py-0.5 font-mono text-xs text-foreground"
                 aria-label="Panel OAuth callback URL"
               >
-                {s.callbackUrl}
+                {s?.callbackUrl}
               </code>
               <Button
                 type="button"
@@ -578,10 +578,10 @@ export function GitHubCard() {
             <p className="font-mono text-xs text-muted-foreground">
               App credentials:{" "}
               <span className="text-foreground">
-                {s.credentialSource === "vault" ? "vault (encrypted)" : s.credentialSource}
+                {s?.credentialSource === "vault" ? "vault (encrypted)" : s?.credentialSource}
               </span>{" "}
-              · scope: <span className="text-foreground">{s.scopes.join(" ")}</span> · token → encrypted vault +{" "}
-              <span className="text-foreground">{s.tokenMirror}</span>
+              · scope: <span className="text-foreground">{s?.scopes?.join(" ")}</span> · token → encrypted vault +{" "}
+              <span className="text-foreground">{s?.tokenMirror}</span>
             </p>
 
             <PatRefusalForm patValue={patValue} setPatValue={setPatValue} patRefused={patRefused} onSubmit={refusePat} />
@@ -593,10 +593,10 @@ export function GitHubCard() {
               <div className="min-w-0">
                 <p className="flex items-center gap-2 font-mono text-sm">
                   <KeyRound className="size-4 text-primary" aria-hidden="true" />
-                  {s.login ?? "unknown login"}
+                  {s?.login ?? "unknown login"}
                 </p>
                 <p className="mt-1 font-mono text-xs text-muted-foreground">
-                  {s.probe
+                  {s?.probe
                     ? `MEASURED · GET api.github.com/user → ${s.probe.httpStatus}${s.probe.ok ? "" : " (token stale?)"}`
                     : "probe pending"}
                 </p>

@@ -3,6 +3,7 @@ import {
   SESSION_COOKIE,
   checkPanelPassword,
   issueSessionToken,
+  seedPanelPasswordFromEnv,
   sessionCookieOptions,
 } from "@/lib/auth";
 import { clientKey, pruneRateLimits, rateLimit } from "@/lib/guard";
@@ -17,12 +18,16 @@ export async function POST(req: Request) {
   }
 
   const body = (await req.json().catch(() => null)) as { password?: unknown } | null;
-  if (!checkPanelPassword(body?.password)) {
+  if (!(await checkPanelPassword(body?.password))) {
     return NextResponse.json(
       { ok: false, error: { code: "BAD_PASSWORD", message: "Wrong panel password" } },
       { status: 401 },
     );
   }
+
+  // First successful login with the recovery password → persist its hash in the
+  // DB so future sandbox .env resets cannot lock the owner out again.
+  await seedPanelPasswordFromEnv();
 
   const token = issueSessionToken();
 

@@ -17,6 +17,7 @@ import {
   Sun,
   Radio,
   AppWindow,
+  ScrollText,
 } from "lucide-react";
 
 /**
@@ -28,6 +29,7 @@ import {
 const TABS = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "stream", label: "Stream", icon: Radio },
+  { id: "pipeline", label: "Pipeline", icon: ScrollText },
   { id: "widgets", label: "Widgets", icon: AppWindow },
   { id: "connectors", label: "Connectors", icon: PlugZap },
   { id: "settings", label: "Settings", icon: SlidersHorizontal },
@@ -130,6 +132,7 @@ export function PanelShell() {
       <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6">
         {tab === "overview" && <OverviewTab />}
         {tab === "stream" && <StreamTab />}
+        {tab === "pipeline" && <PipelineTab />}
         {tab === "widgets" && <WidgetsTab />}
         {tab === "connectors" && <ConnectorsTab />}
         {tab === "settings" && <SettingsTab />}
@@ -150,6 +153,7 @@ export function PanelShell() {
 
 import { OverviewTab } from "./overview";
 import { StreamTab } from "./stream";
+import { PipelineTab } from "./pipeline";
 import { WidgetsTab } from "./widgets";
 import { ConnectorsTab } from "./connectors";
 import { SettingsTab } from "./settings";

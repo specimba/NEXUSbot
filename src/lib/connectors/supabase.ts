@@ -248,7 +248,11 @@ export async function mgmtListSecrets(
   return { ...res, secrets };
 }
 
-/** POST /v1/projects/{ref}/secrets — body [{key, value}] (Mgmt API contract). */
+/**
+ * POST /v1/projects/{ref}/secrets — body [{name, value}].
+ * [MEASURED 2026-10-25, deploy-edge-cortex.ts]: the Mgmt API rejects `key`
+ * with 400 "expected string, received undefined" — the wire field is `name`.
+ */
 export async function mgmtUpsertSecrets(
   pat: string,
   ref: string,
@@ -256,7 +260,7 @@ export async function mgmtUpsertSecrets(
 ): Promise<MgmtResult> {
   return mgmtRequest(pat, `/v1/projects/${encodeURIComponent(ref)}/secrets`, {
     method: "POST",
-    body: items.map((i) => ({ key: i.key, value: i.value })),
+    body: items.map((i) => ({ name: i.key, value: i.value })),
   });
 }
 
@@ -275,6 +279,41 @@ export async function mgmtDeleteSecrets(pat: string, ref: string, keys: Readonly
 /** Supabase project refs are 20-char alphanumeric strings. */
 export function isValidProjectRef(value: unknown): value is string {
   return typeof value === "string" && /^[a-z0-9]{20}$/i.test(value);
+}
+
+/**
+ * The live bot's Supabase project ref lives in the widget's supabase_url
+ * variable (https://<ref>.supabase.co/functions/v1/...) — single source of
+ * truth shared by the Exa auto-arm flow and the deploy-cortex route.
+ */
+export async function resolveCortexProjectRef(): Promise<string | null> {
+  const { db } = await import("@/lib/db");
+  const widget = await db.widget.findFirst({ where: { name: "Specimba Cyber AI Counter" } });
+  if (!widget) return null;
+  let vars: Array<{ name?: string; value?: string }> = [];
+  try {
+    vars = JSON.parse(widget.variables || "[]") as Array<{ name?: string; value?: string }>;
+  } catch {
+    return null;
+  }
+  const url = vars.find((v) => v.name === "supabase_url")?.value ?? "";
+  const m = url.match(/^https:\/\/([a-z0-9]{20})\.supabase\.co/i);
+  return m ? m[1] : null;
+}
+
+/** Widget's stored supabase anon key (Bearer for edge health probes). */
+export async function resolveCortexAnonKey(): Promise<string | null> {
+  const { db } = await import("@/lib/db");
+  const widget = await db.widget.findFirst({ where: { name: "Specimba Cyber AI Counter" } });
+  if (!widget) return null;
+  let vars: Array<{ name?: string; value?: string }> = [];
+  try {
+    vars = JSON.parse(widget.variables || "[]") as Array<{ name?: string; value?: string }>;
+  } catch {
+    return null;
+  }
+  const key = vars.find((v) => v.name === "supabase_anon_key")?.value?.trim() ?? "";
+  return key || null;
 }
 
 /** Edge Function secret keys: env-style identifiers. */

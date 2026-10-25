@@ -4,6 +4,7 @@ import { requireSession } from "@/lib/auth";
 import { clientKey, rateLimit } from "@/lib/guard";
 import {
   getCustomProviderRow,
+  isCustomProtocol,
   isPlausibleProviderKey,
   isValidCustomBaseUrl,
   normalizeCustomBaseUrl,

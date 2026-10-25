@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -9,10 +10,14 @@ import { Toaster } from "@/components/ui/sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import {
+  Check,
   CloudUpload,
+  Copy,
+  Download,
   ExternalLink,
   Github,
   KeyRound,
+  Link2,
   Loader2,
   RefreshCw,
   ShieldAlert,
@@ -58,6 +63,73 @@ type RunResponse = {
   error?: { code: string; message: string };
 };
 
+/** v29.13 — the owner's working "Download workspace": source-only zip with a
+ * RECOVERY.txt (panel password) inside. Replaces the platform's failing
+ * full-workspace archive.
+ *
+ * v29.15 — the embedded preview iframe can SILENTLY swallow programmatic
+ * downloads (sandboxed frames without allow-downloads block <a download>
+ * clicks with no error and no toast — exactly the "button not responsive"
+ * report). So the flow is now:
+ *   1. POST /api/backup/workspace → mint a ONE-TIME download token (5 min).
+ *   2. Try the automatic blob download (works when the context allows it).
+ *   3. ALWAYS render a fallback panel with a REAL anchor link + a copyable
+ *      URL that downloads with NO cookie at all — paste it into any tab.
+ */
+type PreparedDownload = {
+  url: string;
+  filename: string;
+  expiresAt: number;
+};
+
+async function requestWorkspaceDownload(): Promise<PreparedDownload> {
+  const res = await fetch("/api/backup/workspace", {
+    method: "POST",
+    cache: "no-store",
+  });
+  const body = (await res.json().catch(() => null)) as {
+    ok?: boolean;
+    url?: string;
+    filename?: string;
+    expiresInSec?: number;
+    error?: { message?: string };
+  } | null;
+  if (!res.ok || !body?.ok || !body.url) {
+    throw new Error(body?.error?.message ?? `Export failed (HTTP ${res.status})`);
+  }
+  return {
+    url: body.url,
+    filename: body.filename ?? `NEXUS-OS-source-${new Date().toISOString().slice(0, 10)}.zip`,
+    expiresAt: Date.now() + (body.expiresInSec ?? 300) * 1000,
+  };
+}
+
+/** Best-effort automatic save — resolves even when the frame blocks it
+ * (a blocked <a download>.click() throws nothing, which is the whole bug). */
+function tryAutomaticDownload(prepared: PreparedDownload): void {
+  try {
+    const a = document.createElement("a");
+    a.href = prepared.url;
+    a.download = prepared.filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } catch {
+    // Silent by design — the fallback panel below is the guaranteed path.
+  }
+}
+
+/** True when the panel is rendered inside the platform's embedded preview
+ * frame — the context that silently swallows file downloads. Cross-origin
+ * frames throw on window.self access; catching means we ARE framed. */
+function detectIframe(): boolean {
+  try {
+    return window.self !== window.top;
+  } catch {
+    return true;
+  }
+}
+
 const STATUS_KEY = ["backup", "status"] as const;
 
 async function fetchBackupStatus(): Promise<BackupStatus> {
@@ -72,6 +144,12 @@ async function fetchBackupStatus(): Promise<BackupStatus> {
 
 export function DurabilityCard() {
   const queryClient = useQueryClient();
+
+  // Iframe detection happens at click time (event handler — no effect, no
+  // hydration mismatch): before the first download there is nothing to show.
+  const [inIframe, setInIframe] = useState(false);
+  const [prepared, setPrepared] = useState<PreparedDownload | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const status = useQuery<BackupStatus>({
     queryKey: STATUS_KEY,
@@ -103,6 +181,45 @@ export function DurabilityCard() {
     },
     onError: (e: Error) => toast.error("Backup run failed", { description: e.message }),
   });
+
+  const exportWorkspace = useMutation({
+    mutationFn: requestWorkspaceDownload,
+    onSuccess: (data) => {
+      const framed = detectIframe();
+      setInIframe(framed);
+      setPrepared(data);
+      setCopied(false);
+      tryAutomaticDownload(data);
+      toast.success("Download ready", {
+        description: framed
+          ? "The embedded preview often blocks file saves — if nothing landed, use the link panel below."
+          : "If the file did not appear, use the fallback link in the panel below.",
+      });
+    },
+    onError: (e: Error) => toast.error("Workspace export failed", { description: e.message }),
+  });
+  const exporting = exportWorkspace.isPending;
+
+  const absoluteDownloadUrl = prepared
+    ? typeof window !== "undefined"
+      ? new URL(prepared.url, window.location.origin).toString()
+      : prepared.url
+    : "";
+
+  async function copyDownloadLink(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(absoluteDownloadUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2_500);
+    } catch {
+      // Clipboard blocked — the input below is selectable as the fallback.
+      const input = document.getElementById("nexus-download-link") as HTMLInputElement | null;
+      input?.select();
+      document.execCommand?.("copy");
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2_500);
+    }
+  }
 
   const d = status.data;
   const running = run.isPending;
@@ -285,6 +402,25 @@ export function DurabilityCard() {
                   />
                 </Button>
                 <Button
+                  variant="outline"
+                  className="min-h-11 font-mono"
+                  aria-label="Download the source workspace as a zip (includes RECOVERY.txt with the panel password)"
+                  disabled={exporting}
+                  onClick={() => exportWorkspace.mutate()}
+                >
+                  {exporting ? (
+                    <>
+                      <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                      Zipping…
+                    </>
+                  ) : (
+                    <>
+                      <Download className="size-4" aria-hidden="true" />
+                      Download workspace
+                    </>
+                  )}
+                </Button>
+                <Button
                   className="min-h-11 min-w-44 font-mono"
                   aria-label="Run the sanitized snapshot backup now"
                   disabled={running || status.isLoading}
@@ -324,13 +460,85 @@ export function DurabilityCard() {
               </div>
             )}
 
+            {/* v29.15 — ALWAYS-VISIBLE download fallback: a real anchor (not a
+                programmatic blob) plus a cookie-free one-time URL. This is the
+                guaranteed delivery path when the preview iframe swallows
+                downloads silently. */}
+            {prepared && (
+              <div
+                className="rounded-md border border-primary/30 bg-primary/5 p-3"
+                role="region"
+                aria-label="Workspace download fallback link"
+              >
+                <p className="flex items-center gap-2 font-mono text-xs uppercase tracking-wide text-primary">
+                  <Download className="size-4" aria-hidden="true" />
+                  Download ready — {prepared.filename}
+                </p>
+                {inIframe ? (
+                  <p className="mt-2 text-sm text-foreground">
+                    You are viewing the panel inside the <strong>embedded preview</strong>, which can
+                    silently block file downloads. Two guaranteed paths:
+                    <span className="mt-1 block">
+                      1. Click <strong>&ldquo;Open in New Tab&rdquo;</strong> above the preview, then press
+                      &ldquo;Download workspace&rdquo; there — or
+                    </span>
+                    <span className="block">2. copy the link below and paste it into any browser tab.</span>
+                  </p>
+                ) : (
+                  <p className="mt-2 text-sm text-foreground">
+                    If the automatic download did not start, click the button below or paste the link
+                    into a browser tab (works without sign-in).
+                  </p>
+                )}
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <a
+                    href={prepared.url}
+                    download={prepared.filename}
+                    className="inline-flex min-h-11 items-center gap-2 rounded-md bg-primary px-4 py-2 font-mono text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                    aria-label="Save the workspace zip now"
+                  >
+                    <Download className="size-4" aria-hidden="true" />
+                    Save zip
+                  </a>
+                  <Button
+                    variant="outline"
+                    className="min-h-11 font-mono"
+                    onClick={() => void copyDownloadLink()}
+                    aria-label="Copy the one-time download link"
+                  >
+                    {copied ? (
+                      <Check className="size-4 text-primary" aria-hidden="true" />
+                    ) : (
+                      <Copy className="size-4" aria-hidden="true" />
+                    )}
+                    {copied ? "Copied" : "Copy link"}
+                  </Button>
+                </div>
+                <div className="mt-2 flex items-center gap-2">
+                  <Link2 className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                  <input
+                    id="nexus-download-link"
+                    readOnly
+                    value={absoluteDownloadUrl}
+                    onFocus={(e) => e.currentTarget.select()}
+                    className="min-w-0 flex-1 rounded border border-border/60 bg-background px-2 py-1.5 font-mono text-[11px] text-muted-foreground"
+                    aria-label="One-time workspace download URL (expires in 5 minutes)"
+                  />
+                </div>
+                <p className="mt-2 font-mono text-[11px] text-muted-foreground">
+                  Single-use link, valid 5 minutes. Zip = clean source + RECOVERY.txt (panel
+                  password) — never .env, db, node_modules or vault files.
+                </p>
+              </div>
+            )}
+
             {/* Server-scrubbed log tail (defensive filter even though the log holds no secrets). */}
             <details className="rounded-md border border-border/60">
               <summary className="flex min-h-11 cursor-pointer select-none items-center gap-2 px-3 font-mono text-xs uppercase tracking-wide text-muted-foreground hover:text-foreground">
                 Backup log (last 8 lines)
               </summary>
               <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words border-t border-border/60 px-3 py-2 font-mono text-[11px] leading-relaxed text-muted-foreground">
-                {d.recentLog && d.recentLog.length > 0
+                {d?.recentLog && d.recentLog.length > 0
                   ? d.recentLog.join("\n")
                   : "no log lines yet — run the backup to populate .zscripts/backup-log.txt"}
               </pre>

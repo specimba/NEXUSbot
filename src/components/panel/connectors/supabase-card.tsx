@@ -27,7 +27,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Database, HeartPulse, KeyRound, Link2, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Database, HeartPulse, KeyRound, Link2, Loader2, Plus, RefreshCw, Rocket, Trash2 } from "lucide-react";
 
 type SupabaseStatus = {
   ok: boolean;
@@ -185,7 +185,7 @@ export function SupabaseCard() {
             {/* ---- PAT row ---- */}
             <div className="space-y-2">
               <Label htmlFor="supabase-pat-input" className="text-xs text-muted-foreground">
-                Management API access token {status.data.patPresent ? "(replace)" : ""}
+                Management API access token {status.data?.patPresent ? "(replace)" : ""}
               </Label>
               <div className="flex gap-2">
                 <Input
@@ -198,7 +198,7 @@ export function SupabaseCard() {
                   onChange={(e) => setPatValue(e.target.value)}
                   aria-describedby="supabase-pat-hint"
                 />
-                {status.data.patPresent && (
+                {status.data?.patPresent && (
                   <AlertDialog>
                     <AlertDialogTrigger asChild>
                       <Button
@@ -245,8 +245,8 @@ export function SupabaseCard() {
                 </Button>
               </div>
               <p id="supabase-pat-hint" className="font-mono text-xs text-muted-foreground">
-                {status.data.patPresent
-                  ? `stored ${status.data.masked ?? ""} · Mgmt ${status.data.mgmt.usageThisMinute}/${status.data.mgmt.limitPerMinute} this minute`
+                {status.data?.patPresent
+                  ? `stored ${status.data?.masked ?? ""} · Mgmt ${status.data?.mgmt?.usageThisMinute ?? "–"}/${status.data?.mgmt?.limitPerMinute ?? "–"} this minute`
                   : "dashboard → Access Tokens → generate scoped token · value encrypted at rest (AES-256-GCM)"}
               </p>
             </div>
@@ -258,7 +258,10 @@ export function SupabaseCard() {
             <HealthSection health={health} />
 
             {/* ---- Edge Function secrets (masked) ---- */}
-            {status.data.patPresent && <SecretsSection health={health} />}
+            {status.data?.patPresent && <SecretsSection health={health} />}
+
+            {/* ---- One-click cortex deploy (v29.14: hedged race + Exa tier) ---- */}
+            {status.data?.patPresent && <DeployCortexSection />}
           </>
         )}
       </CardContent>
@@ -730,6 +733,105 @@ function SecretsSection(props: { health: ReturnType<typeof useQuery<SupabaseHeal
             </>
           )}
         </>
+      )}
+    </section>
+  );
+}
+
+/**
+ * One-click ship of the local edge/nexus-cortex/index.ts to BOTH live
+ * functions (v29.14: hedged provider race + Exa research tier). Uses the
+ * measured Mgmt wire format via /api/connectors/supabase/deploy-cortex and
+ * reports the live probe (service version + exaArmed) so the result is fact,
+ * not optimism.
+ */
+type DeployResult = {
+  ok: boolean;
+  secretsStatus: number;
+  deploys: Array<{ slug: string; status: number; detail: string }>;
+  probes: Array<{ slug: string; status: number; service: string; exaArmed?: boolean }>;
+  note?: string;
+  error?: { code: string; message: string };
+};
+
+function DeployCortexSection() {
+  const { toast } = useToast();
+  const [result, setResult] = useState<DeployResult | null>(null);
+
+  const deploy = useMutation({
+    mutationFn: async (): Promise<DeployResult> => {
+      const res = await fetch("/api/connectors/supabase/deploy-cortex", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      const body = (await res.json().catch(() => null)) as DeployResult | null;
+      if (!body) throw new Error(`HTTP ${res.status}`);
+      return body;
+    },
+    onSuccess: (data) => {
+      setResult(data);
+      if (data.ok) {
+        toast({
+          title: "Cortex deployed",
+          description: data.probes.map((p) => `${p.slug}: ${p.service || "?"}`).join(" · "),
+        });
+      } else {
+        toast({
+          title: "Deploy failed",
+          description: data.error?.message ?? data.deploys.find((d) => d.status >= 300 || d.status === 0)?.detail ?? "unknown",
+          variant: "destructive",
+        });
+      }
+    },
+    onError: (e: Error) =>
+      toast({ title: "Deploy failed", description: e.message, variant: "destructive" }),
+  });
+
+  return (
+    <section aria-label="Deploy cortex" className="space-y-2 rounded-md border border-border/60 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-sm font-medium">Edge cortex deploy — v29.14</p>
+          <p className="text-xs text-muted-foreground">
+            Hedged provider race (no more dead-air) + Exa research tier. Ships to nexus-cortex +
+            nexus-cortex-harness and upserts the budget secrets.
+          </p>
+        </div>
+        <Button
+          size="sm"
+          className="min-h-9 shrink-0 font-mono"
+          disabled={deploy.isPending}
+          onClick={() => deploy.mutate()}
+        >
+          {deploy.isPending ? (
+            <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+          ) : (
+            <Rocket className="size-4" aria-hidden="true" />
+          )}
+          Deploy
+        </Button>
+      </div>
+      {result ? (
+        <div className="space-y-1 text-xs">
+          <p className="font-mono text-muted-foreground">secrets: HTTP {result.secretsStatus}</p>
+          {result.deploys.map((d) => (
+            <p key={d.slug} className="font-mono">
+              deploy {d.slug}: {d.status >= 200 && d.status < 300 ? "✓ " : "✗ "}
+              HTTP {d.status} {d.status >= 300 || d.status === 0 ? d.detail.slice(0, 80) : ""}
+            </p>
+          ))}
+          {result.probes.map((p) => (
+            <p key={`probe-${p.slug}`} className="font-mono">
+              probe {p.slug}: {p.service || "no service id"}
+              {typeof p.exaArmed === "boolean" ? (p.exaArmed ? " · exa ARMED" : " · exa off") : ""}
+            </p>
+          ))}
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          Not deployed yet. The probe line shows the running version — trust it over any claim.
+        </p>
       )}
     </section>
   );

@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { requireSession } from "@/lib/auth";
 import { clientKey, rateLimit } from "@/lib/guard";
 import { ensureSeedWidgets } from "@/lib/widgets/seed";
+import { toWidgetApi } from "@/lib/widgets/api";
 import {
   STARTER_WIDGET,
   serializeWidgetVariables,
@@ -35,8 +36,10 @@ export async function GET(req: Request) {
     return err("RATE_LIMITED", "Too many requests — slow down.", 429);
   }
   await ensureSeedWidgets();
-  const widgets = await db.widget.findMany({ orderBy: { createdAt: "asc" } });
-  return NextResponse.json({ ok: true, widgets });
+  const rows = await db.widget.findMany({ orderBy: { createdAt: "asc" } });
+  // toWidgetApi strips the OBS-link vault columns and attaches the decrypted
+  // stable link (obsLink) — the raw row never leaves the server.
+  return NextResponse.json({ ok: true, widgets: rows.map(toWidgetApi) });
 }
 
 export async function POST(req: Request) {
@@ -67,5 +70,5 @@ export async function POST(req: Request) {
       seeded: false,
     },
   });
-  return NextResponse.json({ ok: true, widget: created }, { status: 201 });
+  return NextResponse.json({ ok: true, widget: toWidgetApi(created) }, { status: 201 });
 }

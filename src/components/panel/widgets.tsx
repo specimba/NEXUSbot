@@ -33,6 +33,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 import {
+  Anchor,
   AppWindow,
   ArrowLeft,
   Check,
@@ -45,6 +46,7 @@ import {
   MonitorPlay,
   Plus,
   RefreshCw,
+  RotateCcw,
   Save,
   Trash2,
 } from "lucide-react";
@@ -89,6 +91,12 @@ type WidgetRow = {
   seeded: boolean;
   createdAt: string;
   updatedAt: string;
+  /** Stable OBS link (server-decrypted; vault columns never reach the client). */
+  obsLink?: {
+    path: string;
+    baseUrl: string | null;
+  } | null;
+  obsLinkBroken?: boolean;
 };
 
 type Draft = {
@@ -331,11 +339,30 @@ function WidgetEditor({
     onError: (e: Error) => toast.error("Delete failed", { description: e.message }),
   });
 
-  // OBS Browser Source URL — OBS cannot carry the panel session, so the URL
-  // embeds a one-time ingest token created here. Plaintext lives only in the
-  // displayed URL (server stores the SHA-256); a lost token → create a new one.
-  const [obsUrl, setObsUrl] = useState<string | null>(null);
+  // OBS Browser Source URL — STABLE LINK. OBS cannot carry the panel session,
+  // so the URL embeds an ingest token; the token+path now live AES-256-GCM-
+  // encrypted on the widget row (panel DB), so the SAME URL survives panel
+  // refreshes. The old flow minted a new token per click and kept it only in
+  // React state — every refresh produced a different URL. Only the host part
+  // can ever change: freeze it with an anchor (http://localhost:3000 = OBS on
+  // the panel machine → permanent link) or let it follow the current address.
+  const [origin, setOrigin] = useState("");
   const [obsCopied, setObsCopied] = useState(false);
+  const [baseDraft, setBaseDraft] = useState("");
+  const [resetOpen, setResetOpen] = useState(false);
+  const [revokeOpen, setRevokeOpen] = useState(false);
+
+  useEffect(() => {
+    setOrigin(window.location.origin);
+  }, []);
+
+  const obsLink = widget.obsLink ?? null;
+  const obsUrl = obsLink ? `${obsLink.baseUrl ?? origin}${obsLink.path}` : null;
+
+  // Keep the anchor input in sync with the server row (after mutations).
+  useEffect(() => {
+    setBaseDraft(widget.obsLink?.baseUrl ?? "");
+  }, [widget.obsLink]);
 
   // OBS bundle download — fetch + blob instead of window.location.href: a raw
   // navigation CANNOT carry the Bearer token (cookie-less preview iframes), so
@@ -385,31 +412,53 @@ function WidgetEditor({
       });
   }, [obsUrl]);
 
-  const createObsToken = useMutation({
-    mutationFn: async () => {
-      const res = await fetch("/api/ingest-tokens", {
+  // All stable-link operations (create / reset / set-base / revoke) hit ONE
+  // route on the same server — no extra hop, no external service, no domain.
+  const obsLinkMutation = useMutation({
+    mutationFn: async (payload: { action: "create" | "reset" | "set-base" | "revoke"; baseUrl?: string | null }) => {
+      const res = await fetch(`/api/widgets/${widget.id}/obs-link`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ label: `obs-${widget.name}`.slice(0, 48) }),
+        body: JSON.stringify(payload),
       });
       // Read the body ONCE (double res.json() throws "body stream already read").
       const body = (await res.json().catch(() => null)) as
-        | { token?: string; error?: { message?: string } }
+        | {
+            ok?: boolean;
+            obsLink?: { path: string; baseUrl: string | null } | null;
+            error?: { message?: string };
+          }
         | null;
-      if (!res.ok || !body?.token) {
-        throw new Error(body?.error?.message ?? `Token creation failed (HTTP ${res.status})`);
+      if (!res.ok) throw new Error(body?.error?.message ?? `Link operation failed (HTTP ${res.status})`);
+      return body;
+    },
+    onSuccess: (body, payload) => {
+      void queryClient.invalidateQueries({ queryKey: ["widgets"] });
+      if (payload.action === "create" || payload.action === "reset") {
+        const link = body?.obsLink;
+        if (link) {
+          const url = `${link.baseUrl ?? window.location.origin}${link.path}`;
+          navigator.clipboard?.writeText(url).catch(() => undefined);
+        }
+        toast.success(payload.action === "create" ? "Stable OBS link created" : "OBS token rotated", {
+          description:
+            "Copied to clipboard. Path + token are permanent (stored encrypted in the panel DB) — only the host part can ever change.",
+        });
+        setResetOpen(false);
+      } else if (payload.action === "set-base") {
+        toast.success(payload.baseUrl ? `Anchored to ${payload.baseUrl}` : "Anchor cleared", {
+          description: payload.baseUrl
+            ? "The link no longer follows this preview address — it is frozen to the anchor."
+            : "The link now follows whatever address the panel is opened from.",
+        });
+      } else if (payload.action === "revoke") {
+        toast.success("OBS link revoked", {
+          description: "The URL now returns 401 — create a fresh link whenever needed.",
+        });
+        setRevokeOpen(false);
       }
-      return body.token;
     },
-    onSuccess: (token) => {
-      const url = `${window.location.origin}/api/widgets/${widget.id}/stream?token=${encodeURIComponent(token)}`;
-      setObsUrl(url);
-      copyObsUrl();
-      toast.success("OBS Browser Source URL ready", {
-        description: "Copied to clipboard — OBS: Sources → Browser → paste as URL.",
-      });
-    },
-    onError: (e: Error) => toast.error("OBS token failed", { description: e.message }),
+    onError: (e: Error) => toast.error("OBS link failed", { description: e.message }),
   });
 
   // Live preview document — an explicit apply-model: the (up to 100 KB)
@@ -766,7 +815,9 @@ function WidgetEditor({
               </CardTitle>
               <CardDescription>
                 One self-contained HTML file — add it in OBS via Sources → Browser → “Local file”. Re-export
-                after changing variables or code.
+                after changing variables or code. STATIC ONLY: the file cannot reach the panel API or the Kick
+                bridge, so live chat / viewer count / the AI pipeline stay offline — the widget shows an on-stream
+                banner saying exactly that. For the LIVE overlay use the OBS Browser Source URL instead.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
@@ -799,19 +850,35 @@ function WidgetEditor({
                 OBS Browser Source URL
               </CardTitle>
               <CardDescription>
-                OBS → Sources → + → Browser → paste this as the URL (no “Local file” needed, and no
-                re-export — the URL always serves the saved state). Live Kick chat + viewer count are
-                delivered over this URL by the kick-bridge service.
+                OBS → Sources → + → Browser → paste the URL below as the URL (NOT “Local file”). It never changes on
+                panel refresh — the path + token are stored encrypted in the panel DB. If you ever see the panel
+                LOGIN page instead of the widget, you copied the address prefix instead of this full URL.
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-2">
-              {obsUrl ? (
+            <CardContent className="space-y-3">
+              {widget.obsLinkBroken ? (
                 <>
-                  <div className="flex gap-2">
+                  <p className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">
+                    The stored link can no longer be decrypted (vault key rotated?) — create a fresh
+                    one below.
+                  </p>
+                  <Button
+                    variant="outline"
+                    className="min-h-11 w-full font-mono"
+                    disabled={obsLinkMutation.isPending}
+                    onClick={() => obsLinkMutation.mutate({ action: "create" })}
+                  >
+                    <KeyRound className="size-4" aria-hidden="true" />
+                    {obsLinkMutation.isPending ? "Creating link…" : "Create fresh stable link"}
+                  </Button>
+                </>
+              ) : obsLink && obsUrl ? (
+                <>
+                  <div className="flex flex-wrap gap-2">
                     <Input
                       readOnly
                       aria-label="OBS Browser Source URL"
-                      className="min-h-9 flex-1 font-mono text-xs"
+                      className="min-h-9 min-w-[240px] flex-1 font-mono text-xs"
                       value={obsUrl}
                       onFocus={(e) => e.currentTarget.select()}
                     />
@@ -828,27 +895,126 @@ function WidgetEditor({
                       )}
                       {obsCopied ? "Copied" : "Copy"}
                     </Button>
+                    <Button
+                      variant="ghost"
+                      className="min-h-9 shrink-0 font-mono text-xs"
+                      onClick={() => obsUrl && window.open(obsUrl, "_blank", "noopener")}
+                      aria-label="Open the OBS URL in a new tab to test it"
+                    >
+                      <MonitorPlay className="size-4" aria-hidden="true" />
+                      Open test
+                    </Button>
                   </div>
+
+                  <div className="space-y-2 rounded-md border border-border/60 p-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <Label className="text-[11px] text-muted-foreground">
+                        Advanced — address prefix (host anchor)
+                      </Label>
+                      <Badge variant="outline" className="font-mono text-[10px]">
+                        {obsLink.baseUrl ? `frozen: ${obsLink.baseUrl}` : "follows current address (recommended)"}
+                      </Badge>
+                    </div>
+                    <div className="flex gap-2">
+                      <Input
+                        aria-label="Host anchor base URL"
+                        className="min-h-9 flex-1 font-mono text-xs"
+                        placeholder="http://localhost:3000 (OBS on the panel machine)"
+                        value={baseDraft}
+                        spellCheck={false}
+                        onChange={(e) => setBaseDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            const v = baseDraft.trim();
+                            obsLinkMutation.mutate({ action: "set-base", baseUrl: v === "" ? null : v });
+                          }
+                        }}
+                      />
+                      <Button
+                        variant="outline"
+                        className="min-h-9 shrink-0 font-mono"
+                        disabled={obsLinkMutation.isPending || baseDraft.trim() === (obsLink.baseUrl ?? "")}
+                        onClick={() => {
+                          const v = baseDraft.trim();
+                          obsLinkMutation.mutate({ action: "set-base", baseUrl: v === "" ? null : v });
+                        }}
+                      >
+                        <Anchor className="size-4" aria-hidden="true" />
+                        Save
+                      </Button>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        variant="ghost"
+                        className="min-h-9 font-mono text-xs"
+                        disabled={obsLinkMutation.isPending || origin === "" || (obsLink.baseUrl ?? "") === origin}
+                        onClick={() => obsLinkMutation.mutate({ action: "set-base", baseUrl: origin })}
+                      >
+                        <Anchor className="size-3.5" aria-hidden="true" />
+                        Anchor to current address
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        className="min-h-9 font-mono text-xs"
+                        disabled={obsLinkMutation.isPending || obsLink.baseUrl === null}
+                        onClick={() => obsLinkMutation.mutate({ action: "set-base", baseUrl: null })}
+                      >
+                        Follow current address (auto)
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Leave this on “follows current address” unless you know why you need it: it is ONLY the address
+                      prefix of the URL above — copying it alone opens the panel login page. At home, with the panel
+                      running on the OBS machine, anchoring to <span className="font-mono">http://localhost:3000</span>{" "}
+                      makes the link permanent. OBS on another PC: the panel machine&apos;s LAN address (
+                      {"http://192.168.x.x:3000"}). The sandbox preview address rotates by nature — re-anchor after
+                      it changes; the token stays the same until you reset it.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      className="min-h-9 font-mono text-xs text-destructive hover:text-destructive"
+                      disabled={obsLinkMutation.isPending}
+                      onClick={() => setResetOpen(true)}
+                    >
+                      <RotateCcw className="size-4" aria-hidden="true" />
+                      Reset token
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="min-h-9 font-mono text-xs text-destructive hover:text-destructive"
+                      disabled={obsLinkMutation.isPending}
+                      onClick={() => setRevokeOpen(true)}
+                    >
+                      <Trash2 className="size-4" aria-hidden="true" />
+                      Revoke link
+                    </Button>
+                  </div>
+
                   <p className="text-xs text-muted-foreground">
-                    OBS setup: set Width {draft.width} / Height {draft.height}. After edits: Save here, then
-                    hit “Refresh cache” on the OBS source. The token in this URL is a credential (it renders
-                    the widget with its baked variables) — if it leaks, create a fresh one anytime.
+                    OBS setup: set Width {draft.width} / Height {draft.height}. After edits: Save
+                    here, then hit “Refresh cache” on the OBS source. The token in this URL is a
+                    credential (it renders the widget with its baked variables) — reset it if it
+                    leaks.
                   </p>
                 </>
               ) : (
                 <>
                   <p className="text-xs text-muted-foreground">
-                    OBS cannot use the panel login, so the URL carries a private ingest token. Create it
-                    once per OBS setup — it is shown only here, immediately copied.
+                    OBS cannot use the panel login, so the URL carries a private ingest token.
+                    Create the link once — it is stored encrypted in the panel DB and re-shown here
+                    after every refresh (no more new-token-per-click).
                   </p>
                   <Button
                     variant="outline"
                     className="min-h-11 w-full font-mono"
-                    disabled={createObsToken.isPending}
-                    onClick={() => createObsToken.mutate()}
+                    disabled={obsLinkMutation.isPending}
+                    onClick={() => obsLinkMutation.mutate({ action: "create" })}
                   >
                     <KeyRound className="size-4" aria-hidden="true" />
-                    {createObsToken.isPending ? "Creating token…" : "Create OBS token + URL"}
+                    {obsLinkMutation.isPending ? "Creating link…" : "Create stable OBS link"}
                   </Button>
                 </>
               )}
@@ -876,6 +1042,56 @@ function WidgetEditor({
               }}
             >
               {remove.isPending ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={resetOpen} onOpenChange={setResetOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-mono">Reset OBS token?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The current URL stops working immediately (token revoked) and a fresh one is minted.
+              Use this if the link leaked — then re-paste the new URL in OBS.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="min-h-11">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="min-h-11 bg-destructive font-mono text-destructive-foreground hover:bg-destructive/90"
+              disabled={obsLinkMutation.isPending}
+              onClick={(e) => {
+                e.preventDefault();
+                obsLinkMutation.mutate({ action: "reset" });
+              }}
+            >
+              {obsLinkMutation.isPending ? "Resetting…" : "Reset token"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={revokeOpen} onOpenChange={setRevokeOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-mono">Revoke OBS link?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The token is revoked and the stored link is deleted — the OBS Browser Source will show
+              a 401 page until you create a fresh link.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="min-h-11">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="min-h-11 bg-destructive font-mono text-destructive-foreground hover:bg-destructive/90"
+              disabled={obsLinkMutation.isPending}
+              onClick={(e) => {
+                e.preventDefault();
+                obsLinkMutation.mutate({ action: "revoke" });
+              }}
+            >
+              {obsLinkMutation.isPending ? "Revoking…" : "Revoke link"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
