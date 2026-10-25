@@ -8,6 +8,7 @@ import {
   VALID_FLAGS,
 } from "@/lib/brain/auth";
 import { clientKey, rateLimit } from "@/lib/guard";
+import { mirrorInteraction, mirrorLesson } from "@/lib/brain/mirror";
 
 /**
  * POST /api/brain/log — the pipeline catch (owner ask, v29.8).
@@ -90,7 +91,7 @@ export async function POST(req: Request) {
     const snippet = clampStr(redactSecrets(message).replace(/\s+/g, " "), 120);
     const counter = clampStr(response.replace(/\s+/g, " "), 200);
     for (const technique of uniqueFlags) {
-      await db.securityLesson
+      const lesson = await db.securityLesson
         .upsert({
           where: { technique_username: { technique, username } },
           create: {
@@ -108,9 +109,14 @@ export async function POST(req: Request) {
             counter: counter || undefined,
           },
         })
-        .catch(() => {});
+        .catch(() => null);
+      if (lesson) mirrorLesson(lesson);
     }
   }
+
+  // Supabase mirror (owner ask: local-first panel DB + cloud copy) — best-effort,
+  // fire-and-forget: a mirror outage must never slow the live pipeline.
+  mirrorInteraction(row);
 
   return NextResponse.json({ ok: true, id: row.id });
 }

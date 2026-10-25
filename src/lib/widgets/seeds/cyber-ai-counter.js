@@ -1004,6 +1004,10 @@ async function fetchEdgeModelCatalog() {
 
 const ALLOWED_IMAGINE_SIZES = new Set(['1024x1024', '1024x768', '768x1024']);
 
+// v29.10 — global cooldown for the 429→direct-Vyce bypass (one attempt / 20s),
+// so a chat spam of "!imagine" can never hammer Vyce directly.
+let lastImagineEdgeBypassAt = 0;
+
 async function callGrokImagine2API(promptText, sender = 'specimba', requestedSize = '1024x1024') {
     const cleanPrompt = String(promptText || '').trim().slice(0, 900);
     if (!cleanPrompt) return { ok: false, status: 400, error: 'Görsel komutu (imagePrompt) boş olamaz.' };
@@ -1041,14 +1045,23 @@ async function callGrokImagine2API(promptText, sender = 'specimba', requestedSiz
                     };
                 }
 
-                // Respect v4 Edge rate limits (429): do NOT bypass or retry on client
+                // v29.10 — 429 with a local vyce_api_key: the edge rate limiter
+                // runs BEFORE any generation/billing (verified in the edge
+                // source: checkRateLimit precedes the provider call), so a single
+                // direct attempt cannot double-bill. Guarded by the 20s global
+                // cooldown; otherwise the edge limit is respected as before.
                 if (edgeRes.status === 429) {
-                    return {
-                        ok: false,
-                        status: 429,
-                        retryAfterSeconds: edgeData?.retryAfterSeconds || 60,
-                        error: edgeData?.error || 'Görsel üretim hız sınırına (rate limit) ulaşıldı.'
-                    };
+                    const canBypass = Boolean(config.vyceKey) && (Date.now() - lastImagineEdgeBypassAt) > 20000;
+                    if (!canBypass) {
+                        return {
+                            ok: false,
+                            status: 429,
+                            retryAfterSeconds: edgeData?.retryAfterSeconds || 60,
+                            error: edgeData?.error || 'Görsel üretim hız sınırına (rate limit) ulaşıldı.'
+                        };
+                    }
+                    lastImagineEdgeBypassAt = Date.now();
+                    // fall through to the single-attempt direct Vyce route below
                 }
 
                 // Respect v4 fail-closed Upstash requirement (503) unless local `vyce_api_key` is explicitly provided
@@ -2107,6 +2120,21 @@ NexusSyncBus.initListener(
 updateQueueBadge();
 initBootTelemetryOnce();
 syncDirectKickTelemetry();
+// v29.10 — STATIC EXPORT GUARD: the downloaded OBS bundle runs from file:// and
+// cannot reach the panel API / kick-bridge (relative URLs are invalid offline).
+// The live HUD needs the panel URL as an OBS Browser Source — tell the operator
+// on-stream instead of failing silently (the "local file not working" report).
+if (typeof location !== 'undefined' && location.protocol === 'file:') {
+    console.warn('[NEXUS-OS v29.10] Static export detected (file://): canli Kick sohbeti, izleyici telemetrisi ve AI pipeline KAPALI. Panel OBS Browser Source URL\'ini OBS\'te URL olarak ekle (Local file degil).');
+    try {
+        const banner = document.createElement('div');
+        banner.id = 'nexus-static-export-banner';
+        banner.setAttribute('role', 'status');
+        banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;padding:6px 10px;font:11px/1.6 monospace;text-align:center;background:#0a0f0a;color:#53fc18;border-bottom:1px solid #53fc18;letter-spacing:.4px;';
+        banner.textContent = 'STATİK DIŞA AKTARIM (file://) — canlı veri yok. Canlı HUD için: panel → Widgets → OBS Browser Source URL\'ini OBS\'te “URL” olarak ekle.';
+        (document.body || document.documentElement).appendChild(banner);
+    } catch (e) {}
+}
 // Boot Hyperbrowser scrape disabled in v29.5 for instant startup readiness
 if (typeof window !== 'undefined' && window.__NEXUS_TELEMETRY_TIMER__) clearInterval(window.__NEXUS_TELEMETRY_TIMER__);
 window.__NEXUS_TELEMETRY_TIMER__ = setInterval(syncDirectKickTelemetry, 10000);

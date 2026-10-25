@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireSession } from "@/lib/auth";
 import { clampStr } from "@/lib/brain/auth";
+import { readMirrorStatus } from "@/lib/brain/mirror";
 
 /**
  * GET /api/interactions?filter=all|flagged|errors&limit=<n> — Pipeline tab feed.
@@ -54,8 +55,11 @@ export async function GET(req: Request) {
     } catch {}
   }
 
+  const mirror = await readMirrorStatus();
+
   return NextResponse.json({
     ok: true,
+    mirror,
     rows: rows.map((r) => ({
       id: r.id,
       createdAt: r.createdAt.toISOString(),

@@ -11,6 +11,7 @@ import { formatDistanceToNow } from "date-fns";
 import {
   BrainCircuit,
   ChevronDown,
+  Cloud,
   Globe,
   MemoryStick,
   ShieldAlert,
@@ -67,6 +68,14 @@ type PipelinePayload = {
     flagCounts: Array<[string, number]>;
   };
   lessons: Lesson[];
+  mirror: {
+    ok: boolean;
+    lastOkAt: string | null;
+    lastErrorAt: string | null;
+    lastError: string;
+    pushed: number;
+    failed: number;
+  };
 };
 
 const FILTERS = [
@@ -254,6 +263,30 @@ export function PipelineTab() {
           </>
         ) : null}
       </div>
+
+      {data?.mirror ? (
+        <p
+          className={cn(
+            "flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border p-2.5 font-mono text-[11px]",
+            data.mirror.ok
+              ? "border-primary/30 bg-primary/5 text-primary"
+              : "border-destructive/40 bg-destructive/10 text-destructive",
+          )}
+          role="status"
+        >
+          <Cloud className="size-3.5 shrink-0" aria-hidden="true" />
+          SUPABASE MIRROR {data.mirror.ok ? "ONLINE" : "OFFLINE"} — pushed {data.mirror.pushed} rows
+          {data.mirror.failed > 0 ? ` · ${data.mirror.failed} failed` : ""}
+          {data.mirror.lastOkAt
+            ? ` · last ok ${formatDistanceToNow(new Date(data.mirror.lastOkAt), { addSuffix: true })}`
+            : ""}
+          {!data.mirror.ok && data.mirror.lastError ? ` · ${data.mirror.lastError}` : ""}
+          <span className="text-muted-foreground">
+            (local panel DB stays the source of truth; every interaction + security lesson is appended to your
+            Supabase project — tables nexus_mirror_*)
+          </span>
+        </p>
+      ) : null}
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">

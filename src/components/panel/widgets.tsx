@@ -815,7 +815,9 @@ function WidgetEditor({
               </CardTitle>
               <CardDescription>
                 One self-contained HTML file — add it in OBS via Sources → Browser → “Local file”. Re-export
-                after changing variables or code.
+                after changing variables or code. STATIC ONLY: the file cannot reach the panel API or the Kick
+                bridge, so live chat / viewer count / the AI pipeline stay offline — the widget shows an on-stream
+                banner saying exactly that. For the LIVE overlay use the OBS Browser Source URL instead.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
@@ -848,11 +850,9 @@ function WidgetEditor({
                 OBS Browser Source URL
               </CardTitle>
               <CardDescription>
-                Stable link — the path + token are stored encrypted in the panel DB, so this URL
-                survives panel refreshes. Anchor it to the panel machine
-                ({"http://localhost:3000"}) and it never changes: no domain, no hosting, no extra
-                hop. Live Kick chat + viewer count are delivered over this URL by the kick-bridge
-                service.
+                OBS → Sources → + → Browser → paste the URL below as the URL (NOT “Local file”). It never changes on
+                panel refresh — the path + token are stored encrypted in the panel DB. If you ever see the panel
+                LOGIN page instead of the widget, you copied the address prefix instead of this full URL.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -874,11 +874,11 @@ function WidgetEditor({
                 </>
               ) : obsLink && obsUrl ? (
                 <>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
                     <Input
                       readOnly
                       aria-label="OBS Browser Source URL"
-                      className="min-h-9 flex-1 font-mono text-xs"
+                      className="min-h-9 min-w-[240px] flex-1 font-mono text-xs"
                       value={obsUrl}
                       onFocus={(e) => e.currentTarget.select()}
                     />
@@ -895,13 +895,24 @@ function WidgetEditor({
                       )}
                       {obsCopied ? "Copied" : "Copy"}
                     </Button>
+                    <Button
+                      variant="ghost"
+                      className="min-h-9 shrink-0 font-mono text-xs"
+                      onClick={() => obsUrl && window.open(obsUrl, "_blank", "noopener")}
+                      aria-label="Open the OBS URL in a new tab to test it"
+                    >
+                      <MonitorPlay className="size-4" aria-hidden="true" />
+                      Open test
+                    </Button>
                   </div>
 
                   <div className="space-y-2 rounded-md border border-border/60 p-2.5">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <Label className="text-[11px] text-muted-foreground">Host anchor</Label>
+                      <Label className="text-[11px] text-muted-foreground">
+                        Advanced — address prefix (host anchor)
+                      </Label>
                       <Badge variant="outline" className="font-mono text-[10px]">
-                        {obsLink.baseUrl ? `frozen: ${obsLink.baseUrl}` : "follows current address"}
+                        {obsLink.baseUrl ? `frozen: ${obsLink.baseUrl}` : "follows current address (recommended)"}
                       </Badge>
                     </div>
                     <div className="flex gap-2">
@@ -952,12 +963,12 @@ function WidgetEditor({
                       </Button>
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      At home (panel + OBS on the same machine) anchor to{" "}
-                      <span className="font-mono">http://localhost:3000</span> — the link is then
-                      permanent. OBS on another PC: use the panel machine&apos;s LAN address (
-                      {"http://192.168.x.x:3000"}). The sandbox preview address rotates by nature —
-                      only the host part ever needs re-anchoring; the token stays the same until
-                      you reset it.
+                      Leave this on “follows current address” unless you know why you need it: it is ONLY the address
+                      prefix of the URL above — copying it alone opens the panel login page. At home, with the panel
+                      running on the OBS machine, anchoring to <span className="font-mono">http://localhost:3000</span>{" "}
+                      makes the link permanent. OBS on another PC: the panel machine&apos;s LAN address (
+                      {"http://192.168.x.x:3000"}). The sandbox preview address rotates by nature — re-anchor after
+                      it changes; the token stays the same until you reset it.
                     </p>
                   </div>
 
