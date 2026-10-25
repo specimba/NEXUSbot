@@ -337,6 +337,41 @@ function WidgetEditor({
   const [obsUrl, setObsUrl] = useState<string | null>(null);
   const [obsCopied, setObsCopied] = useState(false);
 
+  // OBS bundle download — fetch + blob instead of window.location.href: a raw
+  // navigation CANNOT carry the Bearer token (cookie-less preview iframes), so
+  // a stale session navigated the whole panel to a raw UNAUTHORIZED JSON page
+  // — the "download crashes the system" report. Fetch goes through the auth
+  // shim (Bearer attached) and the panel stays intact.
+  const downloadBundle = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/widgets/${widget.id}/bundle`);
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
+        if (res.status === 401) {
+          toast.error("Panel sign-in required", {
+            description: "Your panel session expired — the panel will reload to the sign-in screen.",
+          });
+          setTimeout(() => window.location.reload(), 1500);
+          return;
+        }
+        throw new Error(body?.error?.message ?? `Export failed (HTTP ${res.status})`);
+      }
+      const blob = await res.blob();
+      const cd = res.headers.get("Content-Disposition") ?? "";
+      const name = cd.match(/filename="([^"]+)"/)?.[1] ?? `nexus-widget-${widget.id}.html`;
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      toast.success("OBS bundle downloaded", { description: `${name} — add in OBS as a Local-file Browser Source.` });
+    } catch (e) {
+      toast.error("Export failed", { description: e instanceof Error ? e.message : String(e) });
+    }
+  }, [widget.id]);
+
   const copyObsUrl = useCallback(() => {
     if (!obsUrl) return;
     navigator.clipboard
@@ -749,9 +784,7 @@ function WidgetEditor({
                 variant="outline"
                 className="min-h-11 w-full font-mono"
                 disabled={dirty}
-                onClick={() => {
-                  window.location.href = `/api/widgets/${widget.id}/bundle`;
-                }}
+                onClick={() => void downloadBundle()}
               >
                 <Download className="size-4" aria-hidden="true" />
                 {dirty ? "Save first, then export" : "Download OBS bundle"}
@@ -767,7 +800,8 @@ function WidgetEditor({
               </CardTitle>
               <CardDescription>
                 OBS → Sources → + → Browser → paste this as the URL (no “Local file” needed, and no
-                re-export — the URL always serves the saved state).
+                re-export — the URL always serves the saved state). Live Kick chat + viewer count are
+                delivered over this URL by the kick-bridge service.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
