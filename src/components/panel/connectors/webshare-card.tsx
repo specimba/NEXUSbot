@@ -87,7 +87,8 @@ function egressBadgeCls(side: EgressProbeSide): string {
   switch (side.classification) {
     case "OK":
       return "text-primary"; // measured success only
-    case "KEY_REJECTED": // upstream answered + rejected auth — reachable
+    case "KEY_REJECTED": // upstream answered + rejected the VAULT key — reachable
+    case "UNAUTH_PROBE": // upstream answered a KEYLESS probe with 401 — not a key verdict
     case "UNREACHABLE_WAF":
     case "NOT_FOUND":
     case "RATE_LIMITED":

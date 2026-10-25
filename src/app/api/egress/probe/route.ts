@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth";
 import { clientKey, rateLimit } from "@/lib/guard";
+import { loadVyceKey } from "@/lib/connectors/vyce";
+import { loadGroqKey } from "@/lib/ai/groq";
 import {
   EGRESS_PROBE_TARGETS,
   classifyEgress,
@@ -34,6 +36,19 @@ import {
  *
  * [MEASURED 2026-10-23] groq: direct → 403 (WAF), proxied → 401 invalid_api_key
  * — egressChanged:true proves the WAF bypass WITHOUT owning a Groq key.
+ *
+ * [FIXED 2026-10-26] The original probe sent NO Authorization header, so every
+ * auth'd gateway (vyce) answered the standard OpenAI 401 envelope and the card
+ * rendered "KEY_REJECTED" — about a KEYLESS request — on every single probe,
+ * while live calls with the vault key verifiably answered 200. Dishonest by
+ * construction. The probe now attaches the VAULT key for vyce/groq (in-process
+ * only; the response contract stays statuses/classifications ONLY — P7), so:
+ *   · 200 OK            → key + transport both work (the truth users need)
+ *   · 401 KEY_REJECTED  → the upstream genuinely rejected the vault key
+ *   · 403 direct only    → WAF/egress block, key never reached the upstream
+ *   · no key in vault    → keyless probe, and 401 then means "unauthenticated
+ *                          probe answered" — rendered as UNAUTH_PROBE, not a
+ *                          fake "key rejected" verdict.
  */
 
 const MAX_PROXY_ATTEMPTS = 3;
@@ -71,10 +86,31 @@ export async function POST(req: Request) {
   const target = targetRaw as EgressProbeTarget;
   const conf = EGRESS_PROBE_TARGETS[target];
 
+  // Vault key attachment (2026-10-26 fix): probe what the REAL calls measure.
+  // The key stays in-process — headers are transport-only, and the response
+  // contract below never carries header material or bodies (P7).
+  const headers: Record<string, string> = { Accept: "application/json" };
+  let keyless = true;
+  if (target === "vyce") {
+    const k = await loadVyceKey();
+    if (k.ok) {
+      headers.Authorization = `Bearer ${k.key}`;
+      keyless = false;
+    }
+  } else if (target === "groq") {
+    const g = await loadGroqKey();
+    if (g.ok) {
+      headers.Authorization = `Bearer ${g.key}`;
+      keyless = false;
+    }
+  }
+
   // --- direct (sandbox egress) -------------------------------------------------
-  const direct = await directFetch(conf.url, { headers: { Accept: "application/json" } }, 8_000);
+  const direct = await directFetch(conf.url, { headers }, 8_000);
   const directStatus = "status" in direct ? direct.status : null;
-  const directCls = classifyEgress(directStatus);
+  const directCls = keyless && directStatus === 401
+    ? { classification: "UNAUTH_PROBE" as const, reachable: true }
+    : classifyEgress(directStatus);
   const directCountry =
     "status" in direct && direct.status === 200 && conf.kind === "country"
       ? parseTraceCountry(direct.bodyText)
@@ -108,7 +144,7 @@ export async function POST(req: Request) {
 
     for (const proxy of candidates) {
       attempts.push(attempts.length + 1); // count-only marker — never the proxy identity (P7)
-      const res = await proxiedFetch(conf.url, { headers: { Accept: "application/json" } }, { proxy, timeoutMs: 9_000 });
+      const res = await proxiedFetch(conf.url, { headers }, { proxy, timeoutMs: 9_000 });
       if ("status" in res) {
         success = res;
         break;
@@ -117,7 +153,9 @@ export async function POST(req: Request) {
     }
 
     if (success) {
-      const cls = classifyEgress(success.status);
+      const cls = keyless && success.status === 401
+        ? { classification: "UNAUTH_PROBE" as const, reachable: true }
+        : classifyEgress(success.status);
       proxied = {
         status: success.status,
         reachable: true,

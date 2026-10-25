@@ -25,9 +25,8 @@ import { exaAnswer, getExaKey } from "@/lib/connectors/exa";
  * Model race (hard 16s budget; direct-latency sweep 2026-10-26 01:00 +03,
  *   max_tokens 12, vyceai.com DIRECT — the proxy tunnel measured 6-13s with
  *   ~70% UNREACHABLE failures at the same hour and is NOT used for vyce):
- *   deepseek-v4-flash 630ms · nemotron-3.5 1284ms · claude-sonnet-4-6 1356ms
- *   · beam-1.0 1441ms · agnes-3.0 1486ms · deepseek-v4.1 2335ms
- *   · glm-5.3-flash 2655ms · deepseek-v4-flash-lr 3543ms (the OLD "fast"
+ *   deepseek-v4-flash 630ms · claude-sonnet-4-6 1356ms · deepseek-v4.1 2335ms
+ *   · beam-1.0 1441ms · glm-5.3-flash 2655ms · deepseek-v4-flash-lr 3543ms (the OLD "fast"
  *   pick — now the slowest deepseek; catalog rotates, re-measure on degrade).
  *   gpt-6-luna 403 (dead). grok-imagine-2 still live for the image flow.
  *
@@ -36,8 +35,17 @@ import { exaAnswer, getExaKey } from "@/lib/connectors/exa";
  *   a proxy-crippled vyce):
  *   · vyce DIRECT is THE brain — banter deepseek-v4-flash, deep claude.
  *   · edge proxy races in parallel (owner's own Supabase, independent path).
- *   · z-ai is a LAZY FLOOR ONLY — it fires when vyce has FAILED or the vyce
- *     lead window expired, never at t=0. A healthy vyce always wins its race.
+ *   · on a primary miss (error or lead expiry) TWO backup vyce models on
+ *     two DIFFERENT upstream queues fire immediately — the 01:30 +03 stall
+ *     (owner paste: "ne ayaksın" → z-ai @5878ms) measured the single backup
+ *     stalling together with the primary (whole-gateway hiccup), handing
+ *     z-ai the win from an equal start.
+ *   · z-ai is a LAZY FLOOR WITH A HANDICAP — it starts 2.5s BEHIND the backup
+ *     lanes, waits for a still-running primary's own timeout window too
+ *     (measured: a live primary answered at 7868ms, 25ms after z-ai stole
+ *     the race), and skips the handicap ONLY when every vyce lane has
+ *     already errored (dead queues → floor fires instantly, no dead air).
+ *     A healthy vyce always wins its race; z-ai needs ALL lanes dead.
  */
 
 export type CortexIntent = "DRAW" | "TIME" | "STATUS" | "RESEARCH" | "CHAT";
@@ -79,6 +87,25 @@ export type CortexResult = {
 // now the slowest deepseek on the key. Catalog rotates; re-sweep on degrade.
 const VYCE_FAST = "deepseek-v4-flash"; // ~630ms measured — the banter lead
 const VYCE_FRONTIER = "claude-sonnet-4-6"; // ~1.4s measured — research lead
+// Backup lanes — DUAL, on two DIFFERENT upstream queues per tier. One lane
+// proved insufficient on 2026-10-26 01:30 +03: primary stalled 10.4s AND the
+// single backup stalled 7.6s (gateway-wide hiccup) → z-ai won at 5878ms from
+// an equal start. Two queues rarely stall together, and the ZAI_HANDICAP
+// below means z-ai must also wait 2.5s — a healthy backup (~1.3-2.7s) answers
+// before z-ai ever fires.
+const VYCE_BACKUP_BANTER = "glm-5.3-flash"; // $0 lane, ~2.7s measured
+const VYCE_BACKUP_BANTER_2 = "beam-1.0"; // ~1.7s REAL-PAYLOAD verified (nemotron-3.5 + agnes-3.0 both HTTP_400 on real chat payloads — the 12-token latency sweep was a lie)
+const VYCE_BACKUP_DEEP = "deepseek-v4.1"; // ~2.3s sweep / 4.3s real payload
+const VYCE_BACKUP_DEEP_2 = "beam-1.0"; // ~1.7s real payload
+// z-ai head-start handicap: the floor's z-ai leg starts at least this long
+// AFTER the backup lanes — and if the primary is STILL RUNNING it waits for
+// the primary's own timeout window + grace too (measured 01:42: primary
+// answered OK at 7868ms — 25ms AFTER z-ai had already stolen the race; a
+// slow-but-alive primary gets its full window before z-ai may fire).
+// Instant-fire override: if every vyce lane has already ERRORED (not merely
+// slow), z-ai fires immediately — dead queues must not buy dead air.
+const ZAI_HANDICAP_MS = 2_500;
+const ZAI_PRIMARY_GRACE_MS = 600;
 // Verified-catalog spares (exist on the key, kept here so the ids are never
 // forgotten; the parallel race no longer ladders through them serially):
 //   glm-5.3-flash ($0 vyce spare) · openai/gpt-oss-120b (Groq, WAF'd direct)
@@ -139,7 +166,7 @@ const RESEARCH_RE =
 // answering them without the VYCE persona killed the stream vibe. Guarded to
 // short prompts only: long research-y sentences still route to RESEARCH.
 const SMALLTALK_RE =
-  /(?:nasılsın|nasilsin|naber|ne\s*haber|nasıl\s*gidiyor|nasil\s*gidiyor|nasıl\s*gidiyorsun|kendini\s*nasıl|hissediyorsun|hissediyorum|keyifler\s*nasıl|iyi\s*müsün|iyimisin|iyimisiniz|kanki|kanka)/i;
+  /(?:nasılsın|nasilsin|naber|ne\s*haber|nasıl\s*gidiyor|nasil\s*gidiyor|nasıl\s*gidiyorsun|kendini\s*nasıl|hissediyorsun|hissediyorum|keyifler\s*nasıl|iyi\s*müsün|iyimisin|iyimisiniz|kanki|kanka|nasıl\s*durumlar|nasil\s*durumlar|durumlar\s*(?:nasıl|nasil|ne)|ne\s*alemde|ne\s*ayaks[ıi]n|nabıyon|nerden\s*bakıyorsun)/i;
 
 export function classifyIntent(prompt: string): CortexIntent {
   const p = String(prompt || "").trim();
@@ -430,6 +457,7 @@ async function raceModel(
   req: CortexRequest,
   deadline: number,
 ): Promise<RaceAttempt & { fallbackLine?: string }> {
+  const t0 = Date.now();
   const remaining = () => deadline - Date.now();
 
   const tryChat = async (model: string, label: string, provider: string, timeoutMs: number): Promise<RaceAttempt | null> => {
@@ -458,12 +486,33 @@ async function raceModel(
   const vyceLabel = deep ? "VYCE // CLAUDE 4.6" : "VYCE // DEEPSEEK FLASH";
   const vyceTimeout = deep ? 11_000 : 8_000;
 
-  // z-ai lazy floor — a STABLE promise; the real call is started by fireZai().
+  // z-ai lazy floor + DUAL vyce backup lanes — STABLE promises; the real
+  // calls are started by fireFloor(). When the primary misses (error or lead
+  // expiry) two backup vyce models on different upstream queues fire at once,
+  // and z-ai — the LAST resort, never the competitor — starts 2.5s behind them
+  // (ZAI_HANDICAP_MS). z-ai skips the handicap ONLY when every vyce lane has
+  // already errored: dead queues fire the floor instantly (no dead air);
+  // slow-but-alive queues keep z-ai parked and a backup answers VYCE instead.
+  let floorStarted = false;
   let zaiStarted = false;
+  let zaiTimer: ReturnType<typeof setTimeout> | null = null;
   let resolveZai!: (v: RaceAttempt | null) => void;
+  let resolveB1!: (v: RaceAttempt | null) => void;
+  let resolveB2!: (v: RaceAttempt | null) => void;
   const zaiP = new Promise<RaceAttempt | null>((res) => {
     resolveZai = res;
   });
+  const backup1P = new Promise<RaceAttempt | null>((res) => {
+    resolveB1 = res;
+  });
+  const backup2P = new Promise<RaceAttempt | null>((res) => {
+    resolveB2 = res;
+  });
+
+  // Lane liveness drives the handicap override: "settled" = answered or errored.
+  // z-ai fires early ONLY when all three lanes settled with no content — a
+  // lane that WON ends the race via phase 2 before z-ai can matter.
+  const vyceLive = { primary: true, b1: true, b2: true };
   const fireZai = () => {
     if (zaiStarted) return;
     zaiStarted = true;
@@ -472,15 +521,67 @@ async function raceModel(
       () => resolveZai(null),
     );
   };
+  const maybeFireZai = () => {
+    if (!zaiStarted && !vyceLive.primary && !vyceLive.b1 && !vyceLive.b2) fireZai();
+  };
+  const fireBackup = (model: string, label: string, resolve: (v: RaceAttempt | null) => void, lane: "b1" | "b2") => {
+    if (model === vyceModel) {
+      // never re-ask the queue that is already stalling
+      vyceLive[lane] = false;
+      resolve(null);
+      return;
+    }
+    tryChat(model, label, "vyce", 7_000).then(
+      (r) => {
+        vyceLive[lane] = false;
+        resolve(r);
+        maybeFireZai();
+      },
+      () => {
+        vyceLive[lane] = false;
+        resolve(null);
+        maybeFireZai();
+      },
+    );
+  };
+  const fireFloor = () => {
+    if (floorStarted) return;
+    floorStarted = true;
+    if (deep) {
+      fireBackup(VYCE_BACKUP_DEEP, "VYCE // DEEPSEEK 4.1", resolveB1, "b1");
+      fireBackup(VYCE_BACKUP_DEEP_2, "VYCE // BEAM 1.0", resolveB2, "b2");
+    } else {
+      fireBackup(VYCE_BACKUP_BANTER, "VYCE // GLM 5.3 FREE", resolveB1, "b1");
+      fireBackup(VYCE_BACKUP_BANTER_2, "VYCE // BEAM 1.0", resolveB2, "b2");
+    }
+    // Handicap rule: z-ai waits the handicap AND — if the primary is still
+    // running — the primary's own timeout window + grace. A primary that is
+    // slow-but-alive (7868ms, measured) must never lose to a z-ai that fired
+    // into its last milliseconds. If the primary already settled (error),
+    // the plain handicap applies from NOW.
+    const primaryWait = vyceLive.primary
+      ? Math.max(ZAI_HANDICAP_MS, t0 + vyceTimeout + ZAI_PRIMARY_GRACE_MS - Date.now())
+      : ZAI_HANDICAP_MS;
+    zaiTimer = setTimeout(fireZai, primaryWait);
+    maybeFireZai(); // every vyce lane may already be dead — no dead air
+  };
+  // Park the handicap timer on every exit — an already-won race must never
+  // let a stray z-ai call fire later and burn credits for a discarded answer.
+  const parkZai = () => {
+    if (zaiTimer) clearTimeout(zaiTimer);
+  };
 
   const vyceP = tryChat(vyceModel, vyceLabel, "vyce", vyceTimeout).then((r) => {
+    vyceLive.primary = false;
     if (r?.content) {
       vyceConsecutiveFails = 0;
     } else {
       vyceConsecutiveFails += 1;
-      // vyce already failed — the floor joins NOW, no dead-air waiting.
-      fireZai();
+      // vyce already failed — the floor (dual vyce backups + handicapped z-ai)
+      // joins NOW.
+      fireFloor();
     }
+    maybeFireZai();
     return r;
   });
   const edgeP = edgeChatAttempt(req, messages, Math.min(13_000, Math.max(4_000, remaining()))).then(
@@ -492,11 +593,15 @@ async function raceModel(
     vyceP.then((r): RaceAttempt | null => (r && r.content ? r : null)),
     new Promise<RaceAttempt | null>((res) => setTimeout(() => res(null), deep ? 8_000 : 4_500)),
   ]);
-  if (lead?.content) return lead;
+  if (lead?.content) {
+    parkZai();
+    return lead;
+  }
 
   // Lead expired without a vyce answer (vyce may still be running) — the
-  // z-ai floor joins the race. If vyce already failed, fireZai already ran.
-  fireZai();
+  // floor joins: dual vyce backups + the handicapped z-ai leg. If vyce
+  // already failed, fireFloor already ran.
+  fireFloor();
 
   // Phase 2 — first usable answer among everything still running, under the
   // overall deadline. Null-resolving candidates are dropped; the race
@@ -504,6 +609,8 @@ async function raceModel(
   type Candidate = { key: string; p: Promise<RaceAttempt | null> };
   const candidates: Candidate[] = [
     { key: "vyce", p: vyceP },
+    { key: "vyce-backup-1", p: backup1P },
+    { key: "vyce-backup-2", p: backup2P },
     { key: "zai", p: zaiP },
     { key: "edge", p: edgeP },
   ];
@@ -524,13 +631,17 @@ async function raceModel(
         );
       }
     });
-    if (result.kind === "win") return result.attempt;
+    if (result.kind === "win") {
+      parkZai();
+      return result.attempt;
+    }
     if (result.kind === "deadline") break;
     const i = candidates.findIndex((c) => c.key === result.key);
     if (i >= 0) candidates.splice(i, 1);
   }
 
   // Last resort: honest, useful, never "busy".
+  parkZai();
   return {
     provider: "static",
     modelLabel: "VYCE // TURBO HAT",

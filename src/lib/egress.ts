@@ -87,6 +87,7 @@ export type EgressHttpFailure = {
 export type EgressClassification =
   | "OK"
   | "KEY_REJECTED"
+  | "UNAUTH_PROBE"
   | "UNREACHABLE_WAF"
   | "UNREACHABLE_FROM_SANDBOX"
   | "RATE_LIMITED"
