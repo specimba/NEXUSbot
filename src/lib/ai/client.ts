@@ -514,10 +514,16 @@ async function brainEgressJsonCall(
       { model: opts.model },
     );
   }
+  // One SHARED wall-clock budget across all pool attempts — each proxy gets
+  // only what is LEFT of timeoutMs, never a fresh full slice (2 × full budget
+  // was silently doubling caller timeouts under slow tunnel handshakes).
+  const poolStarted = Date.now();
   const candidates = pickProxies(pool.pool, opts.maxProxyAttempts ?? BRAIN_MAX_PROXY_ATTEMPTS_CHAT);
   let lastCode: string | null = null;
   for (const proxy of candidates) {
-    const r = await proxiedFetch(url, init, { proxy, timeoutMs });
+    const remaining = timeoutMs - (Date.now() - poolStarted);
+    if (remaining < 1_500 && lastCode) break; // budget spent — report the last transport code
+    const r = await proxiedFetch(url, init, { proxy, timeoutMs: Math.max(1_500, remaining) });
     if ("code" in r) {
       lastCode = r.code; // proxy/transport failure — try the next pool proxy
       continue;

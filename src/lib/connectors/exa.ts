@@ -205,7 +205,11 @@ export async function bumpExaUsage(
   else if (kind === "agent") u.agentRuns += units;
   u.estCostUsd = Math.round((u.estCostUsd + (patch.estCostUsd ?? 0)) * 10000) / 10000;
   u.lastRequestAt = new Date().toISOString();
-  if (patch.error) u.lastError = clampStr(patch.error, 200);
+  // lastError mirrors the LAST request's outcome — a success clears a stale
+  // error (otherwise a pre-arm failure like "EXA_API_KEY not configured"
+  // sticks on the card all day even after arming, same class as the G1
+  // stale-failure display bug).
+  u.lastError = patch.error ? clampStr(patch.error, 200) : "";
   await saveUsage(u);
   return u;
 }

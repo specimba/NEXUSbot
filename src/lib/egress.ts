@@ -146,19 +146,28 @@ function resolveTransport(): Promise<EgressTransportName | null> {
 // CONNECT tunnel + raw HTTP/1.1 (the transport that actually runs here)
 // ---------------------------------------------------------------------------
 
-function parseChunkedBody(raw: string): string {
-  // Minimal chunked decoder: hex size lines + data; stops at 0-chunk. Best-effort.
-  let out = "";
+function dechunkBuffer(buf: Buffer): Buffer {
+  // Byte-domain chunked decoder: hex size lines + data; stops at 0-chunk.
+  // MUST run on bytes (not a decoded string) — chunk boundaries can split
+  // multi-byte UTF-8 sequences, and string-domain slicing corrupts them.
+  const parts: Buffer[] = [];
   let i = 0;
-  while (i < raw.length) {
-    const lineEnd = raw.indexOf("\r\n", i);
+  while (i < buf.length) {
+    const lineEnd = buf.indexOf("\r\n", i);
     if (lineEnd === -1) break;
-    const size = parseInt(raw.slice(i, lineEnd).split(";")[0].trim(), 16);
+    const sizeLine = buf.slice(i, lineEnd).toString("latin1"); // size line is ASCII
+    const size = parseInt(sizeLine.split(";")[0].trim(), 16);
     if (!Number.isFinite(size) || size <= 0) break;
-    out += raw.slice(lineEnd + 2, lineEnd + 2 + size);
-    i = lineEnd + 2 + size + 2; // skip data + CRLF
+    const dataStart = lineEnd + 2;
+    if (dataStart + size > buf.length) {
+      // truncated final chunk — take what actually arrived
+      parts.push(buf.slice(dataStart));
+      break;
+    }
+    parts.push(buf.slice(dataStart, dataStart + size));
+    i = dataStart + size + 2; // skip data + CRLF
   }
-  return out;
+  return Buffer.concat(parts);
 }
 
 function connectThroughProxy(
@@ -260,11 +269,19 @@ function sendRawOverSocket(socket: net.Socket, target: URL, init: EgressFetchIni
     "\r\n\r\n";
 
   return new Promise((resolve, reject) => {
-    let raw = "";
+    // BYTE-DOMAIN accumulation. The body of every JSON API here is UTF-8
+    // (Turkish chat replies, emojis). Decoding chunks as latin1 — or slicing
+    // a decoded string — corrupts multi-byte sequences ("Haklısın" →
+    // "HaklÄ±sÄ±n"). Buffers are concatenated raw; ONLY the header block is
+    // decoded as latin1 (ASCII-safe) and the body as utf8 at the very end.
+    const chunks: Buffer[] = [];
+    let totalBytes = 0;
     let done = false;
+    let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
     const finish = (fn: () => void) => {
       if (done) return;
       done = true;
+      if (deadlineTimer) clearTimeout(deadlineTimer);
       socket.setTimeout(0);
       socket.off("data", onData);
       socket.off("error", onError);
@@ -277,11 +294,12 @@ function sendRawOverSocket(socket: net.Socket, target: URL, init: EgressFetchIni
     });
     const onTimeout = () => finish(() => {
       socket.destroy();
-      reject(Object.assign(new Error("upstream timed out over tunnel"), { egressCode: "UPSTREAM_TIMEOUT" as EgressErrorCode }));
+      reject(Object.assign(new Error("upstream stalled over tunnel"), { egressCode: "UPSTREAM_TIMEOUT" as EgressErrorCode }));
     });
     const onData = (chunk: Buffer) => {
-      raw += chunk.toString("latin1");
-      if (raw.length > MAX_BODY_BYTES) finish(() => {
+      chunks.push(chunk);
+      totalBytes += chunk.length;
+      if (totalBytes > MAX_BODY_BYTES + 64 * 1024) finish(() => {
         socket.destroy();
         reject(Object.assign(new Error("upstream response exceeded body cap"), { egressCode: "UPSTREAM_BAD_RESPONSE" as EgressErrorCode }));
       });
@@ -290,14 +308,23 @@ function sendRawOverSocket(socket: net.Socket, target: URL, init: EgressFetchIni
     socket.on("data", onData);
     socket.on("error", onError);
     socket.on("timeout", onTimeout);
+    // Hard WALL-CLOCK deadline: socket.setTimeout is an INACTIVITY timer and a
+    // slow-trickling upstream could reset it forever, blowing every caller
+    // budget. This timer caps the whole response no matter what.
+    deadlineTimer = setTimeout(() => finish(() => {
+      socket.destroy();
+      reject(Object.assign(new Error("upstream timed out over tunnel (wall clock)"), { egressCode: "UPSTREAM_TIMEOUT" as EgressErrorCode }));
+    }), Math.max(1_000, timeoutMs));
     socket.once("close", () => {
       finish(() => {
+        const raw = Buffer.concat(chunks);
         const sep = raw.indexOf("\r\n\r\n");
         if (sep === -1) {
           reject(Object.assign(new Error("no HTTP response received over tunnel"), { egressCode: "UPSTREAM_BAD_RESPONSE" as EgressErrorCode }));
           return;
         }
-        const headBlock = raw.slice(0, sep);
+        // Header block: ASCII per RFC 7230 — latin1 is byte-faithful and safe.
+        const headBlock = raw.slice(0, sep).toString("latin1");
         const lines = headBlock.split("\r\n");
         const status = Number((/^HTTP\/1\.[01] (\d{3})/.exec(lines[0] ?? "") ?? [])[1] ?? 0);
         if (!status) {
@@ -309,13 +336,15 @@ function sendRawOverSocket(socket: net.Socket, target: URL, init: EgressFetchIni
           const c = line.indexOf(":");
           if (c > 0) headers[line.slice(0, c).trim().toLowerCase()] = line.slice(c + 1).trim();
         }
-        let bodyText = raw.slice(sep + 4);
-        if ((headers["transfer-encoding"] ?? "").includes("chunked")) bodyText = parseChunkedBody(bodyText);
+        let body: Buffer = raw.slice(sep + 4);
+        if ((headers["transfer-encoding"] ?? "").includes("chunked")) body = dechunkBuffer(body);
+        // THE FIX: body decoded as UTF-8 — never latin1, never char-sliced.
+        const bodyText = body.toString("utf8");
         resolve({ status, headers, bodyText });
       });
     });
 
-    socket.setTimeout(timeoutMs);
+    socket.setTimeout(Math.max(1_000, timeoutMs));
     socket.write(head + body);
   });
 }
