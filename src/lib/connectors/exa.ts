@@ -22,15 +22,26 @@ import { clampStr } from "@/lib/brain/auth";
  * P7 discipline: the key is decrypted transiently in-process for use/masking
  * only — never logged, never echoed, never embedded into an Error message.
  *
- * API ground truth (docs pasted by owner, 2026-10):
+ * API ground truth (docs pasted by owner, 2026-10 + MEASURED E1 research, 2026-10-25):
  *   POST https://api.exa.ai/search      {query, numResults, type, contents{highlights|text|summary},
  *                                        includeDomains, excludeDomains, startPublishedDate,
  *                                        category, userLocation, livecrawl}
  *   POST https://api.exa.ai/answer      {query, text, systemPrompt?} → {answer, citations[]}
  *   POST https://api.exa.ai/contents    {urls, highlights?, text?}
- *   GET  https://api.exa.ai/monitors/v1            (list monitors)
- *   POST https://api.exa.ai/monitors/v1            {search{query,numResults}, trigger{type,period},
- *                                        outputSchema?, webhook?}
+ *
+ * Monitors (scheduled searches → webhook) — docs.exa.ai/reference/monitors/*:
+ *   GET  https://api.exa.ai/monitors?limit=&status=&cursor= → 200 {data:[…],hasMore,nextCursor}
+ *   POST https://api.exa.ai/monitors
+ *        {name?, search{query, numResults?, contents?} (required),
+ *         trigger?{type:"interval", period},            // single duration, min 1h: 1h|6h|1d|7d…
+ *         webhook{url, events?} (required),             // HTTPS, no redirects
+ *         outputSchema?, metadata?}
+ *        → 201 {…, webhookSecret} (one-time signing secret — stored in the vault)
+ *   MEASURED (unauth + live-key probes, 2026-10-25):
+ *     GET  /monitors        → 200 with the stored key  ✅
+ *     GET  /monitors/v1     → 404 {"error":"Search monitor not found"} ❌ (old wrong path)
+ *     POST /search-monitors/v1 → 404 NOT_FOUND ❌ (the original create bug)
+ *     POST /v1/monitors     → 404 ❌   ·   /websets/v1 → 401 (exists, different API)
  * Pricing (dashboard): search $4.00/1k requests, contents $1.00/1k pages,
  * answer $5.00/1k answers → used for the burn-down estimate shown in the panel.
  */
@@ -249,8 +260,9 @@ export async function exaBudgetAllows(kind: "search" | "answer" | "contents"): P
 
 async function exaFetch<T>(
   path: string,
-  body: Record<string, unknown>,
+  body: Record<string, unknown> | null,
   timeoutMs = EXA_TIMEOUT_MS,
+  method: "POST" | "GET" = "POST",
 ): Promise<{ ok: true; data: T; status: number } | { ok: false; error: string; status: number }> {
   const key = await getExaKey();
   if (!key) return { ok: false, error: "EXA_API_KEY not configured", status: 0 };
@@ -258,12 +270,13 @@ async function exaFetch<T>(
   const timer = setTimeout(() => ctl.abort(), timeoutMs);
   try {
     const res = await fetch(EXA_BASE + path, {
-      method: "POST",
+      method,
       headers: {
         authorization: "Bearer " + key,
+        "x-api-key": key,
         "content-type": "application/json",
       },
-      body: JSON.stringify(body),
+      body: method === "POST" && body ? JSON.stringify(body) : undefined,
       signal: ctl.signal,
     });
     if (!res.ok) {
@@ -473,64 +486,108 @@ export async function exaContents(
 
 // ---------------------------------------------------------------------------
 // Monitors — scheduled searches with automatic dedup, pushed to our webhook
+// (docs.exa.ai/reference/monitors/*; paths MEASURED 2026-10-25 — see header)
 // ---------------------------------------------------------------------------
 
 export type ExaMonitor = {
   id: string;
-  state?: string;
+  name?: string | null;
+  status?: "active" | "paused" | "disabled" | string;
+  state?: string; // legacy field name (kept for old UI payloads)
   search?: { query?: string; numResults?: number };
-  trigger?: { type?: string; period?: string };
+  trigger?: { type?: string; period?: string } | null;
+  webhook?: { url?: string; events?: string[] };
+  nextRunAt?: string | null;
   createdAt?: string;
+  updatedAt?: string;
 };
 
 export async function exaListMonitors(): Promise<
   { ok: true; monitors: ExaMonitor[] } | { ok: false; error: string }
 > {
-  const key = await getExaKey();
-  if (!key) return { ok: false, error: "EXA_API_KEY not configured" };
-  const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), EXA_TIMEOUT_MS);
-  try {
-    const res = await fetch(EXA_BASE + "/monitors/v1", {
-      headers: { authorization: "Bearer " + key },
-      signal: ctl.signal,
-    });
-    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
-    const data = (await res.json()) as { monitors?: ExaMonitor[] } | ExaMonitor[];
-    const monitors = Array.isArray(data) ? data : (data.monitors ?? []);
-    return { ok: true, monitors: monitors.slice(0, 20) };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.name : "list failed" };
-  } finally {
-    clearTimeout(timer);
-  }
+  const res = await exaFetch<{ data?: ExaMonitor[]; monitors?: ExaMonitor[] } | ExaMonitor[]>(
+    "/monitors?limit=20",
+    null,
+    EXA_TIMEOUT_MS,
+    "GET",
+  );
+  if (!res.ok) return { ok: false, error: res.error };
+  const data = res.data;
+  const monitors = Array.isArray(data) ? data : (data.data ?? data.monitors ?? []);
+  return { ok: true, monitors: monitors.slice(0, 20) };
 }
 
 export type ExaMonitorDraft = {
   query: string;
   numResults?: number;
-  period?: "1h" | "12h" | "1d" | "1w";
+  /** Single duration, minimum 1h (docs: 1h | 6h | 1d | 7d…). "1w" maps to "7d". */
+  period?: "1h" | "6h" | "12h" | "1d" | "1w" | "7d";
   webhookUrl?: string;
   outputSchema?: Record<string, unknown>;
+  name?: string;
 };
+
+/** Vault label for the one-time webhook signing secret returned at creation. */
+export const EXA_WEBHOOK_SECRET_LABEL = "webhook-secret";
+
+/** Docs: periods are single durations ≥ 1h; a week is written "7d". */
+function normalizePeriod(period: ExaMonitorDraft["period"]): string {
+  if (period === "1w") return "7d";
+  return period ?? "1d";
+}
 
 export async function exaCreateMonitor(
   draft: ExaMonitorDraft,
 ): Promise<{ ok: true; monitor: ExaMonitor } | { ok: false; error: string }> {
   const query = clampStr(draft.query, 300).trim();
   if (!query) return { ok: false, error: "query required" };
+  // webhook.url is REQUIRED by POST /monitors (docs) — fail fast with a clear
+  // message instead of a raw 400 from Exa.
+  const webhookUrl = (draft.webhookUrl ?? "").trim();
+  if (!/^https:\/\//i.test(webhookUrl)) {
+    return { ok: false, error: "webhook url required (must be https — Exa does not follow redirects)" };
+  }
   const body: Record<string, unknown> = {
     search: { query, numResults: Math.min(50, Math.max(1, draft.numResults ?? 10)) },
-    trigger: { type: "interval", period: draft.period ?? "1d" },
+    // Subscribe to completed runs explicitly — omitting `events` also delivers
+    // lifecycle noise (monitor.created / run.created) to the panel webhook.
+    webhook: { url: webhookUrl, events: ["monitor.run.completed"] },
+    trigger: { type: "interval", period: normalizePeriod(draft.period) },
   };
-  if (draft.webhookUrl) body.webhook = { url: draft.webhookUrl };
+  if (draft.name) body.name = clampStr(draft.name, 120);
   if (draft.outputSchema) body.outputSchema = draft.outputSchema;
-  const res = await exaFetch<ExaMonitor>("/monitors/v1", body);
+  const res = await exaFetch<ExaMonitor & { webhookSecret?: string }>("/monitors", body);
   if (!res.ok) return { ok: false, error: res.error };
+  // The signing secret is returned ONCE — persist it (encrypted vault) so the
+  // webhook receiver can verify Exa-Signature later. Best-effort, never blocks.
+  if (res.data.webhookSecret) {
+    try {
+      const enc = encryptSecret(res.data.webhookSecret);
+      const existing = await db.credential.findUnique({
+        where: { service_label: { service: EXA_SERVICE, label: EXA_WEBHOOK_SECRET_LABEL } },
+      });
+      if (existing) {
+        await db.credential.update({
+          where: { id: existing.id },
+          data: { cipher: enc.cipher, keyId: enc.keyId, updatedAt: new Date() },
+        });
+      } else {
+        await db.credential.create({
+          data: {
+            service: EXA_SERVICE,
+            label: EXA_WEBHOOK_SECRET_LABEL,
+            cipher: enc.cipher,
+            keyId: enc.keyId,
+          },
+        });
+      }
+    } catch {
+      /* verification stays optional; the monitor itself is already created */
+    }
+  }
   return { ok: true, monitor: res.data };
 }
 
-/** Results pushed by Exa monitors land here (validated by monitor id ledger). */
 export const EXA_WEBHOOK_SETTING = "exa.webhook.inbox";
 export type ExaWebhookItem = {
   receivedAt: string;

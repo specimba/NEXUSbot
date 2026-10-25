@@ -13,8 +13,18 @@ FILES=$(git ls-files \
 # Double-guard: refuse to run if any forbidden path is still INDEXED (tracked).
 # R14: extended after the platform sync process gutted .gitignore and re-tracked
 # .env/.next/db/upload — the guard is what fail-closed the whole chain that day.
-if git ls-files | grep -qE '^(\.env|\.next/|db/|ops/vault/|upload/|tool-results/|agent-ctx/)|\.db$|\.tsbuildinfo$'; then
-  echo "SECRET-HIT [index-guard] forbidden path still tracked: run scripts/hygiene-untrack.sh"
+#
+# G1 fix (2026-10-25): the old `git ls-files | grep -qE` check silently failed
+# OPEN under `set -o pipefail`: once the listing outgrew the pipe buffer,
+# grep -q exited at the first hit, git died of SIGPIPE (status 141) and the
+# pipeline's exit status went non-zero for the WRONG reason — the `if` read
+# that as "nothing found" and the guard became dead code (measured: 1723
+# forbidden index paths present, guard passed). Capture the hits instead of
+# trusting the exit status.
+FORBIDDEN_INDEX_HITS=$(git ls-files | grep -E '^(\.env|\.next/|db/|ops/vault/|upload/|tool-results/|agent-ctx/)|\.db$|\.tsbuildinfo$' || true)
+if [[ -n "$FORBIDDEN_INDEX_HITS" ]]; then
+  echo "SECRET-HIT [index-guard] forbidden path still tracked ($(printf '%s\n' "$FORBIDDEN_INDEX_HITS" | wc -l) paths) — run scripts/hygiene-untrack.sh; sample:"
+  printf '%s\n' "$FORBIDDEN_INDEX_HITS" | head -5 | sed 's/^/  /'
   exit 1
 fi
 if [[ -z "$FILES" ]]; then echo "SCAN: no files"; exit 0; fi

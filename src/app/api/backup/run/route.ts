@@ -30,6 +30,14 @@ const execFileAsync = promisify(execFile);
  * divergence and refuses to push (exit 5) when remote main is not an
  * ancestor-or-equal of the local chain head — no force push, ever (§8).
  *
+ * G1 (2026-10-25): two honesty upgrades mirrored from snapshot-backup.sh.
+ * (1) A content-unchanged skip over a non-ok lastResult now probes the stored
+ * credential with `git push --dry-run` and clears the stale auth failure, so
+ * the panel no longer reads "still 401" after a successful reconnect.
+ * (2) Exit 4 carries TWO distinct GitHub rejections (dead token vs token
+ * without push scope) — the toast message is derived from the script output
+ * instead of the old blanket non-fast-forward line.
+ *
  * SECURITY (P7): the GitHub token is read by the script itself from
  * ops/vault/github.token via its git askpass helper — it is never placed in
  * argv, in env, or in any response. stdout/stderr tails are scrubbed
@@ -39,6 +47,20 @@ const execFileAsync = promisify(execFile);
 const BACKUP_STATE = ".zscripts/backup-state.json";
 const SECRET_PATTERN = /gh[pousr]_|sbp_|sk-/;
 const TIMEOUT_MS = 120_000;
+
+// G1: the two DISTINCT push rejections (mirrors snapshot-backup.sh's grep).
+const AUTH_REJECTED = /invalid username or token|authentication failed|rejected the stored token/i;
+const SCOPE_MISSING = /token lacks repo scope|write access to repository not granted|resource not accessible/i;
+
+function pushFailureMessage(output: string): string {
+  if (SCOPE_MISSING.test(output)) {
+    return "Push failed — the connected GitHub token lacks repo scope. Reconnect GitHub in Connectors (the fresh OAuth grant must include repo/public_repo), then run again.";
+  }
+  if (AUTH_REJECTED.test(output)) {
+    return "Push failed — GitHub rejected the stored token (expired/revoked). Reconnect GitHub in Connectors, then run again; the snapshot chain itself is healthy.";
+  }
+  return "Push failed (non-fast-forward). No force push per directive — resolve the remote manually.";
+}
 
 type BackupStateFile = {
   lastResult?: string;
@@ -132,7 +154,7 @@ export async function POST(req: Request) {
     0: "Snapshot pushed to specimba/NEXUSbot (fast-forward on main).",
     1: "Secret scan found hits — push aborted fail-closed. Resolve the flagged content, then run again.",
     3: "No GitHub token at ops/vault/github.token — complete the one-time GitHub device flow first.",
-    4: "Push failed (non-fast-forward). No force push per directive — resolve the remote manually.",
+    // 4 is message-derived per-rejection (pushFailureMessage) — see below.
     5: "Remote main has diverged from the local snapshot chain — push refused (fast-forward-only; no force push per directive). Resolve the remote manually, then run again.",
   };
 
@@ -149,7 +171,9 @@ export async function POST(req: Request) {
       ? "Push throttle active — the last successful push was less than 30 minutes ago, so this run was skipped honestly (no bypass from the panel). The 6h cadence timer pushes automatically; try again later."
       : skipped
         ? "Snapshot content unchanged since the last push — nothing new to push (skip)."
-        : (EXIT_MESSAGES[exitCode] ?? `snapshot-backup.sh exited with code ${exitCode}.`),
+        : exitCode === 4
+          ? pushFailureMessage(output)
+          : (EXIT_MESSAGES[exitCode] ?? `snapshot-backup.sh exited with code ${exitCode}.`),
     output: scrubbedTail(output),
   });
 }

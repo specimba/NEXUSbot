@@ -95,6 +95,7 @@ model CustomProvider {
   protocol        String // "openai" | "anthropic"
   baseUrl         String // https://… (may or may not end with /v1 — normalized at call time)
   model           String    @default("") // default model id for brain calls
+  models          String    @default("[]") // JSON array of ALL model ids (batch add); `model` is the default/first
   keyId           String    @default("") // sha256(keyMaterial) first 8 hex — "" when no key yet
   keyCipher       String    @default("") // crypto.ts envelope; "" when no key yet
   enabled         Boolean   @default(true)

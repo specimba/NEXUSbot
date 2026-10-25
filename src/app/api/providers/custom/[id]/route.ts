@@ -8,14 +8,25 @@ import {
   isPlausibleProviderKey,
   isValidCustomBaseUrl,
   normalizeCustomBaseUrl,
+  parseProviderModels,
   probeCustomProvider,
+  probeCustomProviderModel,
+  resolveDefaultModel,
+  sanitizeModelId,
+  sanitizeModelList,
+  serializeProviderModels,
   storeProviderKey,
+  MAX_PROVIDER_MODELS,
 } from "@/lib/connectors/custom-provider";
 
 /**
  * PUT    /api/providers/custom/[id] — partial update. A non-empty apiKey
  *        replaces the stored key; an absent/empty apiKey leaves it untouched.
- *        `probe: true` runs a MEASURED probe after the update.
+ *        `models` (string[]) replaces the whole batch list (task C1 chips
+ *        editor); `defaultModel` picks the default within it. A bare `model`
+ *        (legacy) still sets the default and is unioned into the stored list.
+ *        `probe: true` runs a MEASURED endpoint probe after the update plus
+ *        up to 3 per-model probes from the FINAL list.
  * DELETE — removes the provider row (key envelope goes with it). Idempotent.
  */
 
@@ -53,7 +64,24 @@ export async function PUT(req: Request, ctx: Ctx) {
   }
   if (body?.model !== undefined) {
     if (typeof body.model !== "string") return err("BAD_MODEL", "model must be a string when provided.", 400);
-    data.model = body.model.trim().slice(0, 128);
+    const legacy = sanitizeModelId(body.model);
+    if (legacy === null) return err("BAD_MODEL", "model must be 1–128 characters.", 400);
+    data.model = legacy;
+  }
+  if (body?.models !== undefined) {
+    const batch = sanitizeModelList(body.models);
+    if (batch.length === 0) {
+      return err("BAD_MODELS", "models must contain at least one valid model id (1–128 chars).", 400);
+    }
+    data.models = serializeProviderModels(batch);
+    data.model = resolveDefaultModel(batch, body?.defaultModel ?? body?.model);
+  } else if (typeof data.model === "string") {
+    // Legacy single-model update: keep the default inside the stored batch list.
+    const legacy = data.model;
+    const current = parseProviderModels(row.models);
+    if (current.length > 0 && !current.includes(legacy) && current.length < MAX_PROVIDER_MODELS) {
+      data.models = serializeProviderModels([...current, legacy]);
+    }
   }
   if (body?.enabled !== undefined) {
     if (typeof body.enabled !== "boolean") return err("BAD_ENABLED", "enabled must be a boolean.", 400);
@@ -73,11 +101,27 @@ export async function PUT(req: Request, ctx: Ctx) {
   }
 
   let probe: { ok: boolean; code: string; detail: string } | null = null;
+  let modelProbes: { model: string; ok: boolean; code: string; detail: string }[] = [];
   if (body?.probe === true) {
     probe = await probeCustomProvider(id).catch(() => ({ ok: false, code: "PROBE_ERROR", detail: "Probe failed unexpectedly." }));
+    // Per-model verdicts from the FINAL list (after this update) — up to 3, parallel.
+    const updated = await getCustomProviderRow(id);
+    const list = updated ? parseProviderModels(updated.models) : [];
+    if (list.length > 0) {
+      modelProbes = await Promise.all(
+        list.slice(0, 3).map((m) =>
+          probeCustomProviderModel(id, m).catch(() => ({
+            model: m,
+            ok: false,
+            code: "PROBE_ERROR",
+            detail: "Probe failed unexpectedly.",
+          })),
+        ),
+      );
+    }
   }
 
-  return NextResponse.json({ ok: true, probe });
+  return NextResponse.json({ ok: true, probe, modelProbes });
 }
 
 export async function DELETE(req: Request, ctx: Ctx) {

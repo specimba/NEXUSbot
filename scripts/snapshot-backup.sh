@@ -31,7 +31,10 @@
 #
 # upload/ + download/ + db/ + ops/vault/ + tests/ + agent-ctx/ + PNGs NEVER leave the sandbox.
 # Full local history (initial commit contains .env) stays private.
-# Token arrives via device-flow watcher at ops/vault/github.token; never in argv/config/remote URL.
+# Token: the GitHub connector (src/lib/connectors/github.ts) mirrors the token
+# to ops/vault/github.token (0600, atomic) on EVERY successful store — web
+# flow AND device flow — so this script always pushes with the live credential;
+# never in argv/config/remote URL.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -168,8 +171,39 @@ git add -A -- . \
 TREE=$(git write-tree)
 unset GIT_INDEX_FILE
 
-# 6) skip when content unchanged (idempotent cadence runs)
+# 6) skip when content unchanged (idempotent cadence runs).
+#    G1 fix (2026-10-25): the old bare skip kept lastResult at the PREVIOUS
+#    run's value — after the owner re-connected GitHub, the panel kept showing
+#    the stale auth-failure (the skip fired before any push could test the new
+#    token), which read as "still 401 after reconnect". Now a skip while
+#    lastResult is not "ok" probes the stored credential with
+#    `git push --dry-run` (full auth handshake; updates NOTHING on the remote):
+#      probe OK    → lastResult:"ok" — stale failure cleared, auth verified
+#                    (lastAt/head/tag/lastOkEpoch stay on the last REAL push)
+#      auth reject → exit 4 with the exact rejection reason (branch below)
+#      other error → plain skip; lastResult kept (a network hiccup is not
+#                    fresh auth data; the next real push reports honestly)
 if [[ -n "$BASE" && "$(git rev-parse "$BASE^{tree}" 2>/dev/null)" == "$TREE" ]]; then
+  if [[ "$S_RESULT" != "ok" ]]; then
+    if git push --dry-run "$REMOTE_URL" "$BRANCH:main" 2>>"$STATE_DIR/backup-log.txt"; then
+      S_RESULT="ok"
+      state_flush
+      log "SKIP: snapshot content unchanged ($TREE) — push --dry-run auth probe OK: stored token accepted, stale failure cleared"
+      exit 0
+    elif tail -n 3 "$STATE_DIR/backup-log.txt" | grep -qi "invalid username or token\|authentication failed"; then
+      S_RESULT="failed"; S_AT="$TS"; state_flush
+      log "PUSH FAILED — GitHub rejected the stored token (expired/revoked). Re-connect GitHub in Connectors, then run again; the snapshot chain itself is healthy."
+      exit 4
+    elif tail -n 3 "$STATE_DIR/backup-log.txt" | grep -qi "write access to repository not granted\|resource not accessible\|403"; then
+      S_RESULT="failed"; S_AT="$TS"; state_flush
+      log "PUSH FAILED — token lacks repo scope — reconnect GitHub in Connectors (the fresh OAuth grant must include repo/public_repo), then run again."
+      exit 4
+    else
+      log "SKIP: snapshot content unchanged ($TREE) — auth probe did not verify (non-auth failure, see log above); keeping lastResult=$S_RESULT"
+      state_flush
+      exit 0
+    fi
+  fi
   log "SKIP: snapshot content unchanged ($TREE)"
   exit 0
 fi
@@ -223,9 +257,13 @@ if git push "$REMOTE_URL" "$BRANCH:main" 2>>"$STATE_DIR/backup-log.txt"; then
 else
   # 2026-10-25 lesson: a dead GitHub token ("Invalid username or token") used to be
   # mislabeled "non-fast-forward", sending the owner chasing a divergence that
-  # did not exist. Name the auth failure honestly (22:59 incident).
-  if tail -n 3 "$STATE_DIR/backup-log.txt" | grep -qi "invalid username or token\|authentication failed\|403.*resource not accessible"; then
-    log "PUSH FAILED — GitHub rejected the stored token (expired/revoked/insufficient scope). Re-connect GitHub (Connectors → GitHub → device flow), then run again. The snapshot chain itself is healthy."
+  # did not exist. Name the auth failure honestly (22:59 incident) — and (G1)
+  # separate the TWO distinct rejections: a dead/revoked token vs a token
+  # without push scope, each with its own remedy.
+  if tail -n 3 "$STATE_DIR/backup-log.txt" | grep -qi "invalid username or token\|authentication failed"; then
+    log "PUSH FAILED — GitHub rejected the stored token (expired/revoked). Re-connect GitHub in Connectors, then run again; the snapshot chain itself is healthy."
+  elif tail -n 3 "$STATE_DIR/backup-log.txt" | grep -qi "write access to repository not granted\|resource not accessible\|403"; then
+    log "PUSH FAILED — token lacks repo scope — reconnect GitHub in Connectors (the fresh OAuth grant must include repo/public_repo), then run again."
   else
     log "PUSH FAILED — non-fast-forward (owner edited remote?) → resolve manually; no force push per directive"
   fi

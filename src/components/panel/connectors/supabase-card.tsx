@@ -27,7 +27,9 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Database, HeartPulse, KeyRound, Link2, Loader2, Plus, RefreshCw, Rocket, Trash2 } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { formatDistanceToNow } from "date-fns";
+import { Cloud, Database, HeartPulse, KeyRound, Link2, Loader2, Plus, RefreshCw, Rocket, Trash2 } from "lucide-react";
 
 type SupabaseStatus = {
   ok: boolean;
@@ -254,6 +256,9 @@ export function SupabaseCard() {
             {/* ---- DB connection string (L0 mirror unlock) ---- */}
             <DbUrlSection />
 
+            {/* ---- L0 mirror status (E1: same source of truth as the Pipeline tab) ---- */}
+            <MirrorSection />
+
             {/* ---- Health row (MEASURED) ---- */}
             <HealthSection health={health} />
 
@@ -270,6 +275,145 @@ export function SupabaseCard() {
 }
 
 const DB_URL_LABEL = "supabase-db-url";
+
+type MirrorPooler = {
+  present: boolean;
+  ok: boolean | null;
+  note: string;
+};
+
+type MirrorStatus = {
+  ok: boolean;
+  lastOkAt: string | null;
+  lastErrorAt: string | null;
+  lastError: string;
+  pushed: number;
+  failed: number;
+  configured: boolean;
+  probedAt: string | null;
+  probeNote: string;
+  pooler: MirrorPooler;
+};
+
+/**
+ * L0 mirror status (E1) — reads the SAME Setting("brain.mirror.status") the
+ * Pipeline tab shows via /api/interactions, so Connectors and Pipeline can no
+ * longer disagree ("CONNECTED here, OFFLINE there"). "Test mirror" forces a
+ * fresh probe: no-op RPC push (writes nothing) + pooler SQL diagnostic.
+ */
+function MirrorSection() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const mirror = useQuery<MirrorStatus>({
+    queryKey: ["connectors", "supabase-mirror"],
+    queryFn: async () => {
+      const res = await fetch("/api/connectors/supabase/mirror", { cache: "no-store" });
+      if (!res.ok) throw new Error("mirror status unavailable");
+      const body = (await res.json()) as { mirror: MirrorStatus };
+      return body.mirror;
+    },
+    refetchInterval: 30_000,
+  });
+
+  const testNow = useMutation({
+    mutationFn: async (): Promise<MirrorStatus> => {
+      const res = await fetch("/api/connectors/supabase/mirror", { method: "POST" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const body = (await res.json()) as { mirror: MirrorStatus };
+      return body.mirror;
+    },
+    onSuccess: (m) => {
+      void queryClient.invalidateQueries({ queryKey: ["connectors", "supabase-mirror"] });
+      toast({
+        title: m.ok ? "Mirror probe OK" : "Mirror probe FAILED",
+        description: (m.probeNote || m.lastError || "no detail").slice(0, 140),
+        variant: m.ok ? "default" : "destructive",
+      });
+    },
+    onError: (e: Error) =>
+      toast({ title: "Probe failed", description: e.message, variant: "destructive" }),
+  });
+
+  const m = mirror.data;
+  const state = !m ? null : !m.configured ? "NOT CONFIGURED" : m.ok ? "ONLINE" : "OFFLINE";
+
+  return (
+    <section className="space-y-2" aria-label="L0 Supabase mirror status">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="flex items-center gap-1.5 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+          <Cloud className="size-3.5" aria-hidden="true" />
+          L0 mirror · nexus_mirror_*
+        </h3>
+        {mirror.isLoading ? (
+          <Skeleton className="h-6 w-24" />
+        ) : m ? (
+          <Badge
+            variant="outline"
+            className={cn(
+              "font-mono",
+              !m.configured
+                ? "text-muted-foreground"
+                : m.ok
+                  ? "border-primary/40 text-primary"
+                  : "border-destructive/50 text-destructive",
+            )}
+          >
+            {state}
+          </Badge>
+        ) : (
+          <Badge variant="outline" className="text-destructive font-mono">
+            STATUS ERROR
+          </Badge>
+        )}
+      </div>
+
+      {mirror.isError ? (
+        <p className="text-xs text-destructive" role="alert">
+          Mirror status unavailable — is the API up?
+        </p>
+      ) : m ? (
+        <div className="space-y-1 rounded-md border border-border/60 bg-muted/30 p-3 font-mono text-[11px] leading-relaxed">
+          <p>
+            pushed {m.pushed} rows
+            {m.failed > 0 ? ` · ${m.failed} failed` : ""}
+            {m.lastOkAt
+              ? ` · last ok ${formatDistanceToNow(new Date(m.lastOkAt), { addSuffix: true })}`
+              : ""}
+          </p>
+          {m.probeNote ? <p className="text-muted-foreground">probe: {m.probeNote}</p> : null}
+          {!m.ok && m.configured && m.lastError ? (
+            <p className="break-words text-destructive">last error: {m.lastError}</p>
+          ) : null}
+          {m.pooler.present && m.pooler.ok === false && m.pooler.note ? (
+            <p className="break-words text-muted-foreground">{m.pooler.note}</p>
+          ) : null}
+          {!m.configured ? (
+            <p className="text-muted-foreground">
+              widget variables supabase_url / supabase_anon_key missing — the push transport is the anon-key RPC
+              (nexus_mirror_push), not the pooler URI.
+            </p>
+          ) : null}
+          <p className="text-muted-foreground">
+            Same source of truth as the Pipeline tab (Setting brain.mirror.status).
+          </p>
+        </div>
+      ) : null}
+
+      <Button
+        size="sm"
+        variant="secondary"
+        className="h-8 font-mono"
+        disabled={testNow.isPending || mirror.isLoading}
+        onClick={() => testNow.mutate()}
+        aria-label="Test the Supabase mirror push path now"
+      >
+        {testNow.isPending ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : <RefreshCw className="size-3.5" aria-hidden />}
+        Test mirror
+      </Button>
+    </section>
+  );
+}
 
 type CredsResp = {
   ok: boolean;

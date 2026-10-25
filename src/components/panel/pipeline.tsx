@@ -51,6 +51,25 @@ type Lesson = {
   lastSeenAt: string;
 };
 
+type MirrorPooler = {
+  present: boolean;
+  ok: boolean | null;
+  note: string;
+};
+
+type MirrorStatus = {
+  ok: boolean;
+  lastOkAt: string | null;
+  lastErrorAt: string | null;
+  lastError: string;
+  pushed: number;
+  failed: number;
+  configured: boolean;
+  probedAt: string | null;
+  probeNote: string;
+  pooler: MirrorPooler;
+};
+
 type PipelinePayload = {
   ok: boolean;
   rows: InteractionRow[];
@@ -68,14 +87,7 @@ type PipelinePayload = {
     flagCounts: Array<[string, number]>;
   };
   lessons: Lesson[];
-  mirror: {
-    ok: boolean;
-    lastOkAt: string | null;
-    lastErrorAt: string | null;
-    lastError: string;
-    pushed: number;
-    failed: number;
-  };
+  mirror: MirrorStatus;
 };
 
 const FILTERS = [
@@ -109,6 +121,57 @@ function flagBadgeClass(technique: string): string {
     default:
       return "border-border text-muted-foreground";
   }
+}
+
+/**
+ * Mirror status line (E1) — same Setting("brain.mirror.status") source of
+ * truth the Connectors → Supabase card reads via /api/connectors/supabase/mirror.
+ * Honest states: ONLINE (push path probed/working), NOT CONFIGURED (widget
+ * supabase_url/anon_key missing), OFFLINE (probed and failing — with the REAL
+ * error, never a bare label).
+ */
+function MirrorLine({ mirror }: { mirror: MirrorStatus }) {
+  const state = !mirror.configured ? "NOT CONFIGURED" : mirror.ok ? "ONLINE" : "OFFLINE";
+  const toneClass = mirror.configured && mirror.ok
+    ? "border-primary/30 bg-primary/5 text-primary"
+    : mirror.configured
+      ? "border-destructive/40 bg-destructive/10 text-destructive"
+      : "border-border bg-muted/30 text-muted-foreground";
+  return (
+    <div
+      className={cn("rounded-md border p-2.5 font-mono text-[11px] leading-relaxed", toneClass)}
+      role="status"
+    >
+      <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <Cloud className="size-3.5 shrink-0" aria-hidden="true" />
+        <span className="font-semibold">SUPABASE MIRROR {state}</span>
+        <span>
+          — pushed {mirror.pushed} rows
+          {mirror.failed > 0 ? ` · ${mirror.failed} failed` : ""}
+          {mirror.lastOkAt
+            ? ` · last ok ${formatDistanceToNow(new Date(mirror.lastOkAt), { addSuffix: true })}`
+            : ""}
+        </span>
+        {mirror.probeNote ? <span className="text-muted-foreground">· {mirror.probeNote}</span> : null}
+      </p>
+      {!mirror.ok && mirror.configured && mirror.lastError ? (
+        <p className="mt-1 break-words text-destructive">last error: {mirror.lastError}</p>
+      ) : null}
+      {!mirror.configured ? (
+        <p className="mt-1 text-muted-foreground">
+          arm the widget variables supabase_url + supabase_anon_key (Connectors → Widgets → variables) to enable the
+          push.
+        </p>
+      ) : null}
+      {mirror.pooler.present && mirror.pooler.ok === false && mirror.pooler.note ? (
+        <p className="mt-1 break-words text-muted-foreground">{mirror.pooler.note}</p>
+      ) : null}
+      <p className="mt-1 text-muted-foreground">
+        (local panel DB stays the source of truth; every interaction + security lesson is appended to your
+        Supabase project — tables nexus_mirror_*)
+      </p>
+    </div>
+  );
 }
 
 function Stat({
@@ -265,27 +328,7 @@ export function PipelineTab() {
       </div>
 
       {data?.mirror ? (
-        <p
-          className={cn(
-            "flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border p-2.5 font-mono text-[11px]",
-            data.mirror.ok
-              ? "border-primary/30 bg-primary/5 text-primary"
-              : "border-destructive/40 bg-destructive/10 text-destructive",
-          )}
-          role="status"
-        >
-          <Cloud className="size-3.5 shrink-0" aria-hidden="true" />
-          SUPABASE MIRROR {data.mirror.ok ? "ONLINE" : "OFFLINE"} — pushed {data.mirror.pushed} rows
-          {data.mirror.failed > 0 ? ` · ${data.mirror.failed} failed` : ""}
-          {data.mirror.lastOkAt
-            ? ` · last ok ${formatDistanceToNow(new Date(data.mirror.lastOkAt), { addSuffix: true })}`
-            : ""}
-          {!data.mirror.ok && data.mirror.lastError ? ` · ${data.mirror.lastError}` : ""}
-          <span className="text-muted-foreground">
-            (local panel DB stays the source of truth; every interaction + security lesson is appended to your
-            Supabase project — tables nexus_mirror_*)
-          </span>
-        </p>
+        <MirrorLine mirror={data.mirror} />
       ) : null}
 
       <NewsDigestCard />

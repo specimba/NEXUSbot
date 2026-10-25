@@ -49,12 +49,15 @@ fi
 
 # 2) untrack forbidden categories (index only; --cached; ignore misses)
 UNTRACKED=()
+# G1 fix (2026-10-25): the old `git ls-files "$path" | grep -q .` check failed
+# OPEN under `set -o pipefail` for LARGE listings — grep -q exits at the first
+# match, git dies of SIGPIPE (141), the pipeline reads non-zero and the path is
+# skipped un-untracked (measured: .next/ with 1626 tracked files survived a
+# run). Capture the listing instead of trusting the exit status.
 for path in .env .next db ops/vault upload download tool-results agent-ctx directives; do
-  if git ls-files --error-unmatch "$path" >/dev/null 2>&1 || git ls-files "$path" | grep -q .; then
-    if git ls-files "$path" | grep -q .; then
-      git rm -r -q --cached "$path" >/dev/null 2>&1 || true
-      UNTRACKED+=("$path")
-    fi
+  if [[ -n "$(git ls-files -- "$path")" ]]; then
+    git rm -r -q --cached "$path" >/dev/null 2>&1 || true
+    UNTRACKED+=("$path")
   fi
 done
 # glob categories
@@ -68,7 +71,7 @@ for pat in '*.tsbuildinfo' '*.pid' '*.log' 'db/*.db' '*.db' '*.sqlite' '*.tar'; 
 done
 # snapshot state files
 for f in .zscripts/backup-state.json .zscripts/backup-log.txt; do
-  if git ls-files -- "$f" | grep -q .; then
+  if [[ -n "$(git ls-files -- "$f")" ]]; then
     git rm -q --cached "$f" >/dev/null 2>&1 || true
     UNTRACKED+=("$f")
   fi

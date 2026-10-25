@@ -10,6 +10,10 @@ import {
   listCustomProviders,
   normalizeCustomBaseUrl,
   probeCustomProvider,
+  probeCustomProviderModel,
+  resolveDefaultModel,
+  sanitizeModelList,
+  serializeProviderModels,
   storeProviderKey,
 } from "@/lib/connectors/custom-provider";
 
@@ -17,9 +21,12 @@ import {
  * Custom brain providers (owner-defined, beyond Vyce/Groq).
  *
  * GET   → list with masked key previews only (P7 — cipher never leaves).
- * POST  → create { name, protocol, baseUrl, model?, apiKey? } with an optional
- *         immediate live probe. A failing probe does NOT block creation — the
- *         row stores the honest verdict and the card surfaces it.
+ * POST  → create { name, protocol, baseUrl, models?: string[], defaultModel?,
+ *         model?, apiKey? } — BATCH model add (task C1): the whole selected
+ *         model list is stored on the row (`models` JSON, `model` = default),
+ *         then an endpoint probe + up to 3 per-model chat probes run and come
+ *         back as honest verdicts. A failing probe does NOT block creation —
+ *         the row stores the honest verdict and the card surfaces it.
  */
 
 function err(code: string, message: string, status: number) {
@@ -56,7 +63,14 @@ export async function POST(req: Request) {
     return err("BAD_BASE_URL", "baseUrl must be a valid https:// URL without credentials.", 400);
   }
   const baseUrl = normalizeCustomBaseUrl(body?.baseUrl as string);
-  const model = typeof body?.model === "string" ? body.model.trim().slice(0, 128) : "";
+  const legacyModel = typeof body?.model === "string" ? body.model.trim().slice(0, 128) : "";
+  const batchModels = sanitizeModelList(body?.models);
+  // Batch list wins; a bare `model` (legacy single-model callers) becomes a 1-item list.
+  const models = batchModels.length > 0 ? batchModels : legacyModel ? [legacyModel] : [];
+  if (models.length === 0) {
+    return err("BAD_MODELS", "Add at least one model — discover them from the gateway or paste the ids.", 400);
+  }
+  const model = batchModels.length > 0 ? resolveDefaultModel(batchModels, body?.defaultModel) : legacyModel;
   const apiKey = typeof body?.apiKey === "string" ? body.apiKey.trim() : "";
   if (apiKey.length > 0 && !isPlausibleProviderKey(apiKey)) {
     return err("BAD_KEY", "apiKey must be 8–4096 characters when provided.", 400);
@@ -68,6 +82,7 @@ export async function POST(req: Request) {
       protocol,
       baseUrl,
       model,
+      models: serializeProviderModels(models),
     },
   });
 
@@ -82,5 +97,17 @@ export async function POST(req: Request) {
     detail: "Probe failed unexpectedly.",
   }));
 
-  return NextResponse.json({ ok: true, id: created.id, probe }, { status: 201 });
+  // Per-model verdicts for up to the first 3 selected models (parallel, 8s each).
+  const modelProbes = await Promise.all(
+    models.slice(0, 3).map((m) =>
+      probeCustomProviderModel(created.id, m).catch(() => ({
+        model: m,
+        ok: false,
+        code: "PROBE_ERROR",
+        detail: "Probe failed unexpectedly.",
+      })),
+    ),
+  );
+
+  return NextResponse.json({ ok: true, id: created.id, probe, modelProbes }, { status: 201 });
 }

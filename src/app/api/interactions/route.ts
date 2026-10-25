@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireSession } from "@/lib/auth";
 import { clampStr } from "@/lib/brain/auth";
-import { readMirrorStatus } from "@/lib/brain/mirror";
+import { readMirrorStatus, ensureMirrorProbe } from "@/lib/brain/mirror";
 
 /**
  * GET /api/interactions?filter=all|flagged|errors&limit=<n> — Pipeline tab feed.
@@ -55,6 +55,9 @@ export async function GET(req: Request) {
     } catch {}
   }
 
+  // Kick a throttled liveness probe in the background so the status line below
+  // reflects reality even when no interaction was pushed since boot (E1).
+  void ensureMirrorProbe();
   const mirror = await readMirrorStatus();
 
   return NextResponse.json({
