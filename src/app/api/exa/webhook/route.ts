@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { pushWebhookItem } from "@/lib/connectors/exa";
+import { createHmac, timingSafeEqual } from "node:crypto";
+import { pushWebhookItem, getExaWebhookSecret } from "@/lib/connectors/exa";
 import { db } from "@/lib/db";
 import { clampStr } from "@/lib/brain/auth";
 
@@ -36,16 +37,45 @@ export async function POST(req: Request) {
     return new Response(null, { status: 400 });
   }
 
+  const parsedBody = JSON.stringify(parsed);
+  // Optional integrity flag (E1): when a one-time webhookSecret from monitor
+  // creation is stored in the vault, verify Exa-Signature
+  // (t=<ts>,v1=HMAC-SHA256(secret, "<ts>.<rawBody>")). A mismatch or missing
+  // header ARCHIVES the delivery flagged "unverified" — it never rejects,
+  // so a verification construction mistake cannot silently drop pushes.
+  let sigNote = "";
+  const secret = await getExaWebhookSecret();
+  if (secret) {
+    const header = req.headers.get("exa-signature") ?? "";
+    const parts = Object.fromEntries(
+      header.split(",").map((p) => p.split("=", 2)).filter((p) => p.length === 2),
+    ) as Record<string, string>;
+    if (parts.t && parts.v1) {
+      const expected = createHmac("sha256", secret).update(`${parts.t}.`).update(raw).digest("hex");
+      const a = Buffer.from(parts.v1, "hex");
+      const b = Buffer.from(expected, "hex");
+      const ok = a.length === b.length && timingSafeEqual(a, b);
+      sigNote = ok ? "" : "unverified";
+    } else {
+      sigNote = "unsigned";
+    }
+  }
+
   const monitorId = clampStr(
-    (parsed.monitorId as string) ?? (parsed.monitor_id as string) ?? (parsed.id as string) ?? "",
+    // Real envelope: {id: event_…, type: "monitor.run.completed", data:{monitorId, …}}
+    ((parsed.data as Record<string, unknown> | undefined)?.monitorId as string) ??
+      (parsed.monitorId as string) ??
+      (parsed.monitor_id as string) ??
+      (parsed.id as string) ??
+      "",
     80,
   );
-  const eventType = clampStr((parsed.event as string) ?? (parsed.type as string) ?? "monitor.result", 40);
+  const eventType = clampStr((parsed.type as string) ?? (parsed.event as string) ?? "monitor.result", 40);
 
   await pushWebhookItem({
     receivedAt: new Date().toISOString(),
     monitorId: monitorId || "unknown",
-    kind: eventType,
+    kind: sigNote ? `${eventType} (${sigNote})` : eventType,
     payload: parsed,
   });
 

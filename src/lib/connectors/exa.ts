@@ -588,6 +588,20 @@ export async function exaCreateMonitor(
   return { ok: true, monitor: res.data };
 }
 
+/** One-time Exa webhook signing secret (vault, decrypted transiently). */
+export async function getExaWebhookSecret(): Promise<string | null> {
+  try {
+    const row = await db.credential.findUnique({
+      where: { service_label: { service: EXA_SERVICE, label: EXA_WEBHOOK_SECRET_LABEL } },
+    });
+    if (!row) return null;
+    const plain = decryptSecret(row.cipher).trim();
+    return plain || null;
+  } catch {
+    return null;
+  }
+}
+
 export const EXA_WEBHOOK_SETTING = "exa.webhook.inbox";
 export type ExaWebhookItem = {
   receivedAt: string;
