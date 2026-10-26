@@ -1170,7 +1170,12 @@ async function generateImage(prompt: string, size: string) {
           size,
         }),
       },
-      25000,
+      // v29.17 — 25s → 40s: measured grok-imagine-2 generations run 18-33s
+      // (2026-10-26 03:48 +03: "ciz mimar" SUCCEEDED but the edge aborted its
+      // provider fetch at 25s for the duplicate run; the viewer saw the image
+      // AND a "tamamlanamadı + iade" failure text in the same minute). The
+      // widget-side edge fetch budget moved 26s → 42s in step.
+      40000,
     );
     const elapsedMs = Date.now() - t0;
     logProviderAttempt({
@@ -1221,7 +1226,7 @@ Deno.serve(async (req: Request) => {
   if (req.method === "GET")
     return json({
       ok: true,
-      service: "nexus-cortex-v29.14",
+      service: "nexus-cortex-v29.17",
       supportedActions: [...ACTIONS],
       imageModel: IMAGE_MODEL.id,
       defaultVyceModel: resolveEffectivePreferredModel("auto"),
