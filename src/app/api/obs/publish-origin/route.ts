@@ -56,6 +56,30 @@ function normalizeOrigin(raw: unknown): { value: string | null; error?: string }
   if (u.origin !== s) {
     return { value: null, error: "origin must be scheme://host[:port] only — no path or query." };
   }
+  // 2026-10-26 incident: an authenticated panel session opened via
+  // http://localhost:3000 auto-published THAT origin and silently broke the
+  // GitHub-hosted bridge for every remote OBS browser. A loopback/private
+  // target can never serve the public bridge — refuse it and keep the last
+  // good origin instead of publishing a trap.
+  const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  const loopback =
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host === "127.0.0.1" ||
+    host === "::1" ||
+    host === "0.0.0.0";
+  const privateIp =
+    /^10\./.test(host) ||
+    /^192\.168\./.test(host) ||
+    /^169\.254\./.test(host) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(host);
+  if (loopback || privateIp) {
+    return {
+      value: null,
+      error:
+        "refusing to publish a local/private origin — the GitHub-hosted OBS bridge must point at the panel's PUBLIC address. Open the panel via its preview URL and it will auto-publish the right origin.",
+    };
+  }
   return { value: u.origin };
 }
 
