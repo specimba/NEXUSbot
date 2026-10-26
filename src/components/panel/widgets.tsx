@@ -996,9 +996,9 @@ function WidgetEditor({
                       <p className="text-xs text-muted-foreground">
                         A GitHub-hosted page that redirects OBS to the panel&apos;s current address — it keeps working
                         across sandbox restarts and address rotations. The panel auto-publishes its address every
-                        time it is opened. One-time setup: enable GitHub Pages on the NEXUSbot repo (Settings →
-                        Pages → Deploy from branch: <span className="font-mono">main</span> /{" "}
-                        <span className="font-mono">/ (root)</span>) — until then this URL answers 404.
+                        time it is opened (local/private addresses are refused so the bridge never points at a
+                        machine OBS cannot reach). GitHub Pages is enabled and serving this URL — paste it into an
+                        OBS Browser Source once and never touch it again.
                       </p>
                       <Button
                         variant="ghost"

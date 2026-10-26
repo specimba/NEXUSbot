@@ -14,8 +14,15 @@
 
 export const OBS_BRIDGE_REPO = "specimba/NEXUSbot";
 
-/** GitHub Pages host of the bridge page (owner enables Pages once). */
-export const OBS_BRIDGE_PAGE = `https://specimba.github.io/${OBS_BRIDGE_REPO}/obs.html`;
+/**
+ * GitHub Pages host of the bridge page. CORRECTED 2026-10-26: the old value
+ * was `https://specimba.github.io/specimba/NEXUSbot/obs.html` — the owner
+ * name was DOUBLE-pATHED (the github.io subdomain already carries it), so
+ * every URL the Widgets card displayed hit GitHub's "There isn't a GitHub
+ * Pages site here" 404 page EVEN AFTER Pages was enabled. The real Pages URL
+ * shape is https://<owner>.github.io/<repo>/… — verified live (HTTP 200).
+ */
+export const OBS_BRIDGE_PAGE = `https://specimba.github.io/NEXUSbot/obs.html`;
 
 /** Live origin file (raw GitHub: CORS *, ~5-min cache) the bridge page reads. */
 export const OBS_TARGET_RAW_URL = `https://raw.githubusercontent.com/${OBS_BRIDGE_REPO}/main/obs-target.json`;
