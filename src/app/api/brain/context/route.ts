@@ -12,6 +12,15 @@ import { clientKey, rateLimit } from "@/lib/guard";
  * prompt can carry the learned caveats. A streamer/mod `!ai reset` moves the
  * memory cutoff forward (Setting key), so logs stay intact for evaluation
  * while the live context starts fresh.
+ *
+ * v29.14 — the ladder is USER-SCOPED. The old channel-wide ladder served the
+ * most-active viewer's turns to EVERYONE (measured 02:31 +03: @Robotic_Darkelf_Jedi
+ * asked "benim hakkimda bilgi ver" and the model answered him as
+ * "@yavuzerdem99" — cross-viewer identity confusion, plus internal lesson
+ * strings like "MİMAR KİMLİK KİLİDİ" got echoed verbatim). Room context
+ * still reaches the brain through the widget's separate roomTranscript
+ * field, so nothing is lost. Own-turn matching is case-insensitive in JS
+ * (SQLite `=` is case-sensitive and Kick handles carry mixed case).
  */
 export async function GET(req: Request) {
   if (!rateLimit(`brain-context:${clientKey(req)}`, 120, 60_000)) {
@@ -38,45 +47,26 @@ export async function GET(req: Request) {
       status: { in: ["ok", "refused", "direct"] },
     },
     orderBy: { createdAt: "desc" },
-    take: 60,
+    take: 200,
   });
 
-  // Oldest → newest, then keep only the last `turns` exchanges.
-  const ordered = rows.slice().reverse();
-  const ladder: Array<{ role: "user" | "assistant"; content: string; name?: string; ts: string }> = [];
-  for (const row of ordered) {
-    const msg = row.message.trim();
-    const reply = row.response.trim();
-    if (!msg && !reply) continue;
-    const handle = row.displayHandle || row.username;
-    if (msg) {
-      ladder.push({ role: "user", content: `@${handle}: ${msg.slice(0, 320)}`, name: handle, ts: row.createdAt.toISOString() });
-    }
-    if (reply) {
-      ladder.push({ role: "assistant", content: reply.slice(0, 600), ts: row.createdAt.toISOString() });
-    }
-  }
-  const trimmedLadder = ladder.slice(-turns * 2);
-
-  // The requesting user's own last exchanges lead the ladder when present.
-  let userLadder: typeof trimmedLadder = [];
+  // Oldest → newest. The ladder now serves ONLY the requesting user's own
+  // exchanges (v29.14 fix); a viewer with no history gets an empty ladder and
+  // the widget falls back to its own sender-scoped local dossier — a fresh
+  // viewer is never mistaken for the channel's loudest voice again.
+  const userTurns: Array<{ role: "user" | "assistant"; content: string; name?: string; ts: string }> = [];
   if (user) {
-    const own = await db.interactionLog.findMany({
-      where: { channel, username: user, status: { in: ["ok", "refused", "direct"] } },
-      orderBy: { createdAt: "desc" },
-      take: 8,
-    });
-    const ownOrdered = own.slice().reverse();
-    for (const row of ownOrdered) {
+    const own = rows.filter((r) => String(r.username || "").toLowerCase() === user).slice(0, 8).reverse();
+    for (const row of own) {
       if (row.message.trim()) {
-        userLadder.push({ role: "user", content: `@${row.displayHandle || row.username}: ${row.message.slice(0, 320)}`, name: row.displayHandle || row.username, ts: row.createdAt.toISOString() });
+        userTurns.push({ role: "user", content: `@${row.displayHandle || row.username}: ${row.message.slice(0, 320)}`, name: row.displayHandle || row.username, ts: row.createdAt.toISOString() });
       }
       if (row.response.trim()) {
-        userLadder.push({ role: "assistant", content: row.response.slice(0, 600), ts: row.createdAt.toISOString() });
+        userTurns.push({ role: "assistant", content: row.response.slice(0, 600), ts: row.createdAt.toISOString() });
       }
     }
-    userLadder = userLadder.slice(-6);
   }
+  const trimmedLadder = userTurns.slice(-turns * 2);
 
   const lessons = await db.securityLesson.findMany({
     orderBy: { lastSeenAt: "desc" },
@@ -88,7 +78,7 @@ export async function GET(req: Request) {
     channel,
     cutoff: cutoffValid ? cutoffValid.toISOString() : null,
     turns: trimmedLadder,
-    userTurns: userLadder,
+    userTurns: trimmedLadder,
     lessons: lessons.map((l) => ({
       technique: l.technique,
       username: l.username,

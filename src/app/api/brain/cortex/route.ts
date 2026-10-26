@@ -13,8 +13,8 @@ export const maxDuration = 30;
  * "Modeller meşgul" dead-air era is over by construction: the model race
  * inside runCortex has a guaranteed final tier.
  *
- * Body: { sender, prompt, streamerName?, memoryTurns?[], roomTranscript?,
- *         isResearchHint? }
+ * Body: { sender, prompt, streamerName?, channel?, memoryTurns?[],
+ *         roomTranscript?, isResearchHint? }
  * Reply: { ok, intent, reply, modelLabel, provider, route, drawSubject?,
  *          sources?, telemetry }
  */
@@ -72,6 +72,7 @@ export async function POST(req: Request) {
     sender,
     prompt,
     streamerName: clampStr(body.streamerName, 60) || "specimba",
+    channel: clampStr(body.channel, 40).toLowerCase() || "specimba",
     memoryTurns,
     roomTranscript: clampStr(body.roomTranscript, 1_200),
     isResearchHint: body.isResearchHint === true,

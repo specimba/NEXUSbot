@@ -22,6 +22,12 @@ import { clampStr } from "@/lib/brain/auth";
 
 export const EXA_DIGEST_SETTING = "exa.news.digest";
 export const DIGEST_TTL_MS = 30 * 60_000;
+/** General (Türkiye) news pool — "haberleri derle" must NEVER be answered from
+ *  model priors (owner complaint 02:31 +03: hallucinated headlines like
+ *  "Merkel'in Sakıp Çalışkan Kitabı"). Deterministic compile from real
+ *  search results, cached so chat spam can't burn the budget. */
+export const GENERAL_DIGEST_SETTING = "exa.news.general";
+export const GENERAL_TTL_MS = 15 * 60_000;
 
 export type DigestItem = {
   title: string;
@@ -44,6 +50,8 @@ type StoredDigest = NewsDigest & { seenUrls: string[] };
 
 const DIGEST_QUERY =
   "latest artificial intelligence news today: OpenAI, Anthropic, Google DeepMind, Meta AI, open-source LLM releases, AI agents";
+const GENERAL_QUERY = "Türkiye bugün son dakika haberleri gündem özeti";
+const GENERAL_FALLBACK_QUERY = "son dakika haberleri Türkiye bugün gündem";
 
 function digestHost(url: string): string {
   try {
@@ -53,8 +61,8 @@ function digestHost(url: string): string {
   }
 }
 
-async function readStored(): Promise<StoredDigest | null> {
-  const row = await db.setting.findUnique({ where: { key: EXA_DIGEST_SETTING } }).catch(() => null);
+async function readStored(settingKey: string): Promise<StoredDigest | null> {
+  const row = await db.setting.findUnique({ where: { key: settingKey } }).catch(() => null);
   if (!row?.value) return null;
   try {
     return JSON.parse(row.value) as StoredDigest;
@@ -63,11 +71,11 @@ async function readStored(): Promise<StoredDigest | null> {
   }
 }
 
-async function writeStored(d: StoredDigest): Promise<void> {
+async function writeStored(settingKey: string, d: StoredDigest): Promise<void> {
   await db.setting
     .upsert({
-      where: { key: EXA_DIGEST_SETTING },
-      create: { key: EXA_DIGEST_SETTING, value: JSON.stringify(d) },
+      where: { key: settingKey },
+      create: { key: settingKey, value: JSON.stringify(d) },
       update: { value: JSON.stringify(d) },
     })
     .catch(() => {});
@@ -76,10 +84,24 @@ async function writeStored(d: StoredDigest): Promise<void> {
 /**
  * Build (or serve cached) the digest. `force` bypasses the TTL but still
  * merges the seen-URL ledger so fresh items are ordered first.
+ *
+ * v29.14: generic core — the AI digest and the general (Türkiye) digest share
+ * the cache/dedup/fallback machinery; only query + TTL differ.
  */
-export async function buildNewsDigest(force = false): Promise<NewsDigest> {
-  const stored = await readStored();
-  const fresh = stored ? Date.now() - Date.parse(stored.builtAt || "") < DIGEST_TTL_MS : false;
+async function buildDigest(
+  opts: {
+    settingKey: string;
+    ttlMs: number;
+    query: string;
+    fallbackQuery: string;
+    numResults: number;
+    recencyDays: number;
+    force: boolean;
+  },
+): Promise<NewsDigest> {
+  const { settingKey, ttlMs, query, fallbackQuery, numResults, recencyDays, force } = opts;
+  const stored = await readStored(settingKey);
+  const fresh = stored ? Date.now() - Date.parse(stored.builtAt || "") < ttlMs : false;
   if (!force && stored && fresh && stored.ok) {
     return {
       ok: true,
@@ -97,12 +119,7 @@ export async function buildNewsDigest(force = false): Promise<NewsDigest> {
   let error = "";
 
   // 1) Exa-first (aggressive-by-design; budgets gate this internally).
-  const exa = await exaSearch({
-    query: DIGEST_QUERY,
-    numResults: 8,
-    recencyDays: 2,
-    type: "auto",
-  });
+  const exa = await exaSearch({ query, numResults, recencyDays, type: "auto" });
   if (exa.ok) {
     provider = "exa";
     items = exa.results.map((r) => ({
@@ -118,7 +135,7 @@ export async function buildNewsDigest(force = false): Promise<NewsDigest> {
 
   // 2) z-ai fallback — never leave the digest empty while a key is missing.
   if (!items.length) {
-    const fb = await runWebSearch("bugün yapay zeka haberleri AI news today", { num: 6, recencyDays: 2 });
+    const fb = await runWebSearch(fallbackQuery, { num: 6, recencyDays });
     if (fb.ok) {
       provider = "z-ai";
       items = fb.snippets.map((s) => ({
@@ -152,8 +169,34 @@ export async function buildNewsDigest(force = false): Promise<NewsDigest> {
     error,
     seenUrls: Array.from(new Set([...seenUrls, ...items.map((i) => i.url).filter(Boolean)])).slice(-200),
   };
-  await writeStored(digest);
+  await writeStored(settingKey, digest);
   return digest;
+}
+
+export async function buildNewsDigest(force = false): Promise<NewsDigest> {
+  return buildDigest({
+    settingKey: EXA_DIGEST_SETTING,
+    ttlMs: DIGEST_TTL_MS,
+    query: DIGEST_QUERY,
+    fallbackQuery: "bugün yapay zeka haberleri AI news today",
+    numResults: 8,
+    recencyDays: 2,
+    force,
+  });
+}
+
+/** General Türkiye headlines — the "haberleri derle / günün haberleri"
+ *  answer pool (15-min cache, same dedup ledger discipline). */
+export async function buildGeneralDigest(force = false): Promise<NewsDigest> {
+  return buildDigest({
+    settingKey: GENERAL_DIGEST_SETTING,
+    ttlMs: GENERAL_TTL_MS,
+    query: GENERAL_QUERY,
+    fallbackQuery: GENERAL_FALLBACK_QUERY,
+    numResults: 6,
+    recencyDays: 1,
+    force,
+  });
 }
 
 /** Compact text form for the edge brain / VYCE context injection. */
