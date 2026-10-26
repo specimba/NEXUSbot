@@ -102,7 +102,7 @@ const IMAGE_MODEL = { id: "grok-imagine-2", label: "GROK IMAGINE 2.0" };
 // EVERY response that carries a service id must use THIS constant; the deploy
 // route regexes it out of the source so the panel card can never hardcode a
 // stale version again.
-const SERVICE_VERSION = "nexus-cortex-v29.17";
+const SERVICE_VERSION = "nexus-cortex-v29.18";
 
 const SAFE_HOSTS = new Set([
   "open.spotify.com",
@@ -464,6 +464,11 @@ function classify(text: string) {
     )
   )
     return "DEEP_RESEARCH";
+  // v29.18 — capability questions ("tablete kali kurunca neler yapabilirim",
+  // "chatgpt ile ne yapabilirim"): matched NO gate before, fell to
+  // FAST_BANTER, and the no-source honesty rule refused them with "elimde
+  // bilgi kaynağı yok" (2026-10-27 02:xx +03 refusal rows). Research-worthy.
+  if (CAPABILITY_Q_RE.test(t)) return "DEEP_RESEARCH";
   return "FAST_BANTER";
 }
 
@@ -472,6 +477,10 @@ function classify(text: string) {
 // Every webSearch() call site routes through budgetedWebSearch(); nothing else
 // spends Hyperbrowser credits.
 // ---------------------------------------------------------------------------
+
+/** v29.18 — capability questions: install/use + "neler yapabilirim". */
+const CAPABILITY_Q_RE =
+  /(\b(?:kur|kullan|indir|yükle)\w*|\b\w+\s+ile\b)[^.?!]{0,60}\b(?:neler|ne)\s*(?:yapabil|yapılır)/i;
 
 /** Explicit research intent — must appear in the SEARCH TARGET itself. */
 const RESEARCH_INTENT_RE =
@@ -490,7 +499,12 @@ function wantsWebSearch(text: string): boolean {
   const t = clip(text, 400);
   if (t.trim().length < 4) return false; // too short → noise
   if (!/[a-zçğıöşü0-9]/i.test(t)) return false; // no letters/digits → noise
-  return RESEARCH_INTENT_RE.test(t) || MUSIC_QUESTION_RE.test(t) || FACTUAL_HOWTO_RE.test(t);
+  return (
+    RESEARCH_INTENT_RE.test(t) ||
+    MUSIC_QUESTION_RE.test(t) ||
+    FACTUAL_HOWTO_RE.test(t) ||
+    CAPABILITY_Q_RE.test(t)
+  );
 }
 
 /** Strips bot triggers and research prefixes so queries stay efficient. */
@@ -973,7 +987,15 @@ async function modelCall(
   const bases = resolveVyceBaseUrls();
   const primaryBase = bases[0] ?? "https://vyceai.com/v1";
 
-  type Win = { reply: string; label: string; activeModelId: string };
+  // v29.18 — real token accounting (tokens: —/— era over): vyce/groq both
+  // return OpenAI-shaped usage; the winner's numbers ride the payload to the
+  // panel race + widget interaction log.
+  type Win = {
+    reply: string;
+    label: string;
+    activeModelId: string;
+    usage: { prompt: number | null; completion: number | null } | null;
+  };
   const wins: Win[] = [];
   let vyceAuthRejected = false;
 
@@ -1011,11 +1033,21 @@ async function modelCall(
         attempts.push(attempt);
         logProviderAttempt(attempt);
         if (r.ok) {
-          const reply = sanitize(
-            (await r.json())?.choices?.[0]?.message?.content ?? "",
-          );
+          const j = (await r.json()) as {
+            choices?: Array<{ message?: { content?: string } }>;
+            usage?: { prompt_tokens?: number; completion_tokens?: number };
+          };
+          const reply = sanitize(j?.choices?.[0]?.message?.content ?? "");
+          const u = j?.usage;
+          const usage: Win["usage"] =
+            u && (typeof u.prompt_tokens === "number" || typeof u.completion_tokens === "number")
+              ? {
+                  prompt: typeof u.prompt_tokens === "number" ? u.prompt_tokens : null,
+                  completion: typeof u.completion_tokens === "number" ? u.completion_tokens : null,
+                }
+              : null;
           if (reply)
-            return { reply, label: "VYCE // " + model, activeModelId: model };
+            return { reply, label: "VYCE // " + model, activeModelId: model, usage };
           return null;
         }
         if (r.status === 401 || r.status === 403) vyceAuthRejected = true;
@@ -1069,11 +1101,21 @@ async function modelCall(
         attempts.push(attempt);
         logProviderAttempt(attempt);
         if (r.ok) {
-          const reply = sanitize(
-            (await r.json())?.choices?.[0]?.message?.content ?? "",
-          );
+          const j = (await r.json()) as {
+            choices?: Array<{ message?: { content?: string } }>;
+            usage?: { prompt_tokens?: number; completion_tokens?: number };
+          };
+          const reply = sanitize(j?.choices?.[0]?.message?.content ?? "");
+          const u = j?.usage;
+          const usage: Win["usage"] =
+            u && (typeof u.prompt_tokens === "number" || typeof u.completion_tokens === "number")
+              ? {
+                  prompt: typeof u.prompt_tokens === "number" ? u.prompt_tokens : null,
+                  completion: typeof u.completion_tokens === "number" ? u.completion_tokens : null,
+                }
+              : null;
           if (reply)
-            return { reply, label: "GROQ // " + model, activeModelId: model };
+            return { reply, label: "GROQ // " + model, activeModelId: model, usage };
         }
         return null;
       } catch (err) {
@@ -1142,6 +1184,7 @@ async function modelCall(
       "Çekirdek çevrimiçi; VYCE_API_KEY veya GROQ_API_KEY Edge Secret olarak tanımlanmalı.",
     label: "EDGE // CORTEX FALLBACK",
     activeModelId: "fallback",
+    usage: null,
     attempts,
   };
 }
@@ -1546,7 +1589,7 @@ Deno.serve(async (req: Request) => {
       total = (dossier?.total_interactions ?? 0) + 1;
     const system =
       "Sen NEXUS-OS v29.14 yayın asistanısın. Kısa ve doğal Türkçe yanıt ver. Yayında oyun oynanmıyor; boss/taktik/silah/rota konularına girme. " +
-      "Kaynak bölümünde gerçek, güncel bilgi varsa SADECE ona dayan yanıtı kur; kaynak yoksa bilmediğini açıkça söyle, asla uydurma. Yasaklılar: " +
+      "Kaynak bölümünde gerçek bilgi varsa ona dayan. Kaynak yoksa genel ve stabil bilgiyle KISACA yanıtlayabilirsin; fiyat, tarih, sürüm veya koşul gibi güncel/spesifik detay isteniyorsa bilmediğini dürüstçe söyle — asla uydurma. Yasaklılar: " +
       banned.join(", ") +
       ". Tek Baş Mimar @" +
       streamer +
@@ -1614,6 +1657,8 @@ Deno.serve(async (req: Request) => {
       reply,
       modelLabel: result.label,
       activeModelId: result.activeModelId,
+      // v29.18 — winner's real token usage for the panel + widget log.
+      usage: result.usage,
       intent,
       persistedDossier: auth.authorized,
       dossier: { handle: sender, role, total_interactions: total },

@@ -1764,7 +1764,7 @@ async function callSupabaseEdgeCortex(edgePayload) {
         preferredModel: safePreferred
     };
 
-    setToolBadge(true, 'EDGE // NEXUS_CORTEX_V29.14');
+    setToolBadge(true, 'EDGE // NEXUS-CORTEX');
     try {
         const res = await fetchWithTimeout(edgeUrl, {
             method: 'POST',
@@ -1791,7 +1791,13 @@ async function callSupabaseEdgeCortex(edgePayload) {
                             if (srcParts.length) reply = (reply + ' — kaynak: ' + srcParts.join(' + ')).slice(0, 460);
                         } catch (e) {}
                     }
-                    return { reply, modelLabel: label };
+                    // v29.18 — usage + web-search truth from the edge payload
+                    // (the edge fn returns usage + telemetry since v29.18).
+                    const eu = data.usage || {};
+                    const promptTok = (typeof eu.prompt === 'number' ? eu.prompt : (typeof eu.prompt_tokens === 'number' ? eu.prompt_tokens : null));
+                    const completionTok = (typeof eu.completion === 'number' ? eu.completion : (typeof eu.completion_tokens === 'number' ? eu.completion_tokens : null));
+                    const edgeWebUsed = !!(data.telemetry && data.telemetry.webSearch === 'used');
+                    return { reply, modelLabel: label, provider: 'edge', route: 'edge', promptTokens: promptTok, completionTokens: completionTok, webUsed: edgeWebUsed };
                 }
             }
         } else if (res.status === 401 && config.supabaseAnonKey && !isThreePartJwt(config.supabaseAnonKey)) {
@@ -2051,7 +2057,20 @@ async function executeNexusCycle(sender, prompt) {
                         if (srcParts.length) pcReply = (pcReply + ' — kaynak: ' + srcParts.join(' + ')).slice(0, 460);
                     } catch (e) {}
                 }
-                brainResult = { reply: pcReply, modelLabel: panelCortex.modelLabel, modelId: '', provider: 'panel-cortex', route: 'panel-cortex' };
+                // v29.18 — carry the brain's real tokens + web truth up to the
+                // interaction log; provider/route columns now show the winning
+                // LANE (vyce/groq/edge/exa/tool), not a blanket "panel-cortex".
+                const pcUsage = panelCortex.telemetry && panelCortex.telemetry.webSearch;
+                brainResult = {
+                    reply: pcReply,
+                    modelLabel: panelCortex.modelLabel,
+                    modelId: '',
+                    provider: panelCortex.provider || 'panel-cortex',
+                    route: 'panel-cortex/' + (panelCortex.route || 'chat'),
+                    promptTokens: (typeof panelCortex.promptTokens === 'number' ? panelCortex.promptTokens : null),
+                    completionTokens: (typeof panelCortex.completionTokens === 'number' ? panelCortex.completionTokens : null),
+                    webUsed: ['exa-answer', 'web-fallback', 'page-read'].includes(pcUsage)
+                };
                 routeInfo = 'panel-cortex';
             }
         }
@@ -2085,9 +2104,11 @@ async function executeNexusCycle(sender, prompt) {
         logNexusInteraction({
             username: sender, command: 'ai', message: prompt, response: finalReply,
             model: modelLabel || '', modelId: modelId || '', provider: provider || (routeInfo === 'edge' ? 'edge' : ''),
-            route: routeInfo, status: guardFlags.length ? 'refused' : 'ok',
+            route: route || routeInfo, status: guardFlags.length ? 'refused' : 'ok',
             latencyMs: Date.now() - cycleStartedAt, promptTokens, completionTokens,
-            webUsed: Boolean(snippetText && snippetText.length > 0), memoryUsed,
+            // v29.18 — the brain's own web tier (Exa via panel or edge) counts
+            // too; the widget's own snippet stays in the union.
+            webUsed: Boolean(brainResult && brainResult.webUsed) || Boolean(snippetText && snippetText.length > 0), memoryUsed,
             flags: guardFlags
         });
         await renderDialogue(sender, finalReply);

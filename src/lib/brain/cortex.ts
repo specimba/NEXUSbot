@@ -181,6 +181,11 @@ export type CortexResult = {
   modelLabel: string;
   provider: string; // tool | vyce | groq | zai | static
   route: string;
+  // v29.18 — the winner's real token usage for the interaction log's token
+  // columns. null/undefined = no chat model involved (tool / Exa-answer /
+  // digest rows stay honestly —/—).
+  promptTokens?: number | null;
+  completionTokens?: number | null;
   drawSubject?: string;
   sources?: CortexSource[];
   telemetry: {
@@ -305,6 +310,12 @@ const STATUS_RE =
   /(yoğun\s*mu|yogun\s*mu|meşgul\s*mü|mesgul\s*mü|meşgul|busy|hatlar\s*açık|bağlantılar|baglantilar|durum\s*(?:ne|nedir|napıyorsun)|status|çalışıyor\s*musun|calisiyor\s*musun|ne\s*yapıyorsun|ai\s*durumu)/i;
 const RESEARCH_RE =
   /(araştır|arastir|gündem|gundem|son\s*dakika|en\s*son|yeni\s*çıkan|yeni\s*cikan|\bhaber\b|\bkimdir\b|kim\s*bu|\bkim\b|\bnedir\b|\bnasıl\b|\bnasil\b|\bniçin\b|\bneden\b|\bne\s*oldu\b|hakk[ıi]nda|kaç\s*tl|kac\s*tl|\bfiyat\b|\bskor\b|maç|\bbitcoin\b|\bdolar\b|\beuro\b|\baltın\b|hava\s*durumu|\bwhen\b|\bwho\s*is\b|\bwhat\s*is\b|\bhow\s*(?:to|do)\b|\bnews\b|\blatest\b|\bprice\b|\bscore\b)/i;
+// v29.18 — capability questions: install/use verb or "X ile" + "neler
+// yapabilirim". ("tablete kali lunix kurunca neler yapabiliyorum" matched NO
+// gate in either brain → refusal "elimde bilgi kaynağı bulunmadığı".)
+const CAPABILITY_Q_RE =
+  /(\b(?:kur|kullan|indir|yükle)\w*|\b\w+\s+ile\b)[^.?!]{0,60}\b(?:neler|ne)\s*(?:yapabil|yapılır)/i;
+
 // Any prompt containing a URL forces the fetch path — the viewer pointed at a
 // SPECIFIC page; answering from model priors (web:no) is exactly the
 // hallucination class the owner banned (g1.globo.com election numbers).
@@ -336,6 +347,9 @@ export function classifyIntent(prompt: string): CortexIntent {
   if (NEWS_RE.test(p)) return "RESEARCH";
   if (p.length <= 80 && SMALLTALK_RE.test(p)) return "CHAT";
   if (RESEARCH_RE.test(p)) return "RESEARCH";
+  // v29.18 — capability questions (Kali-on-tablet class): research-worthy,
+  // grounded — never a blind lane that ends in a refusal.
+  if (CAPABILITY_Q_RE.test(p)) return "RESEARCH";
   return "CHAT";
 }
 
@@ -698,7 +712,11 @@ async function edgeChatAttempt(
   req: CortexRequest,
   messages: BrainMessage[],
   budgetMs: number,
-): Promise<string | null> {
+): Promise<{
+  reply: string;
+  usage: { prompt: number | null; completion: number | null } | null;
+  edgeWebSearch: "exa-answer" | "web-fallback" | null;
+} | null> {
   const vars = await loadEdgeVars();
   if (!vars) return null;
   const started = Date.now();
@@ -729,7 +747,12 @@ async function edgeChatAttempt(
       noteHealth("edge", false, Date.now() - started);
       return null;
     }
-    const data = (await res.json()) as { ok?: boolean; reply?: string };
+    const data = (await res.json()) as {
+      ok?: boolean;
+      reply?: string;
+      usage?: { prompt?: number; completion?: number; prompt_tokens?: number; completion_tokens?: number } | null;
+      telemetry?: { webSearch?: string; webSearchProvider?: string };
+    };
     const reply = typeof data.reply === "string" ? data.reply.trim() : "";
     const usable =
       Boolean(data.ok) &&
@@ -738,7 +761,24 @@ async function edgeChatAttempt(
       !/Edge Secret olarak tanımlanmalı/i.test(reply) &&
       reply !== "EDGE // CORTEX FALLBACK";
     noteHealth("edge", usable, Date.now() - started);
-    return usable ? cleanReply(reply) : null;
+    // v29.18 — carry the edge's own usage + web-search truth up: the
+    // interaction log's tokens/web columns must show what the EDGE actually
+    // did, not what the panel guessed.
+    const eu = data.usage;
+    const usage =
+      eu && (typeof eu.prompt === "number" || typeof eu.prompt_tokens === "number" || typeof eu.completion === "number" || typeof eu.completion_tokens === "number")
+        ? {
+            prompt: typeof eu.prompt === "number" ? eu.prompt : typeof eu.prompt_tokens === "number" ? eu.prompt_tokens : null,
+            completion: typeof eu.completion === "number" ? eu.completion : typeof eu.completion_tokens === "number" ? eu.completion_tokens : null,
+          }
+        : null;
+    const edgeWebSearch: "exa-answer" | "web-fallback" | null =
+      data.telemetry?.webSearch === "used"
+        ? data.telemetry?.webSearchProvider === "exa-answer"
+          ? "exa-answer"
+          : "web-fallback"
+        : null;
+    return usable ? { reply: cleanReply(reply), usage, edgeWebSearch } : null;
   } catch {
     noteHealth("edge", false, Date.now() - started);
     return null;
@@ -758,7 +798,10 @@ async function edgeChatAttempt(
  *  label "NEXUS // Z-AI CORE" can no longer appear in the stream by
  *  construction. When this lane is unavailable (pool IP burned at Groq's
  *  WAF, measured 403 tonight), the race falls to the static honest line. */
-async function groqChat(messages: BrainMessage[], budgetMs: number): Promise<string | null> {
+async function groqChat(
+  messages: BrainMessage[],
+  budgetMs: number,
+): Promise<{ content: string; usage: { prompt: number | null; completion: number | null } | null } | null> {
   const started = Date.now();
   try {
     const r = await chatComplete("openai/gpt-oss-120b", messages, {
@@ -770,14 +813,24 @@ async function groqChat(messages: BrainMessage[], budgetMs: number): Promise<str
     const content = (r.content || "").trim();
     const usable = content.length >= 2 && !replyLintFail(content);
     noteHealth("groq", usable, Date.now() - started);
-    return usable ? content : null;
+    return usable
+      ? { content, usage: r.usage ? { prompt: r.usage.prompt, completion: r.usage.completion } : null }
+      : null;
   } catch {
     noteHealth("groq", false, Date.now() - started);
     return null;
   }
 }
 
-type RaceAttempt = { provider: string; modelLabel: string; content: string | null; latencyMs: number };
+type RaceAttempt = {
+  provider: string;
+  modelLabel: string;
+  content: string | null;
+  latencyMs: number;
+  // v29.18 — winner's usage (token columns) + the edge lane's web truth.
+  usage?: { prompt: number | null; completion: number | null } | null;
+  edgeWebSearch?: "exa-answer" | "web-fallback" | null;
+};
 
 async function raceModel(
   messages: BrainMessage[],
@@ -800,7 +853,15 @@ async function raceModel(
       // on the other lanes. Quality is a race criterion now.
       const usable = content.length >= 2 && !replyLintFail(content);
       noteHealth(provider, usable, r.latencyMs);
-      return usable ? { provider, modelLabel: label, content: cleanReply(content), latencyMs: Date.now() - started } : null;
+      return usable
+        ? {
+            provider,
+            modelLabel: label,
+            content: cleanReply(content),
+            latencyMs: Date.now() - started,
+            usage: r.usage ? { prompt: r.usage.prompt, completion: r.usage.completion } : null,
+          }
+        : null;
     } catch {
       noteHealth(provider, false, Date.now() - started);
       return null;
@@ -863,7 +924,12 @@ async function raceModel(
     if (groqStarted) return;
     groqStarted = true;
     groqChat(messages, Math.min(10_000, Math.max(3_000, remaining()))).then(
-      (c) => resolveGroq(c ? { provider: "groq", modelLabel: "VYCE // GROQ OSS", content: cleanReply(c), latencyMs: 0 } : null),
+      (c) =>
+        resolveGroq(
+          c
+            ? { provider: "groq", modelLabel: "VYCE // GROQ OSS", content: cleanReply(c.content), latencyMs: 0, usage: c.usage }
+            : null,
+        ),
       () => resolveGroq(null),
     );
   };
@@ -936,7 +1002,10 @@ async function raceModel(
   // (E2E: STATIC at 13.0s while the same prompt got a real edge reply at
   // 12.9s on the direct probe). The 16s deadline still bounds the race.
   const edgeP = edgeChatAttempt(req, messages, Math.min(15_000, Math.max(4_000, remaining()))).then(
-    (reply): RaceAttempt | null => (reply ? { provider: "edge", modelLabel: "EDGE // NEXUS-CORTEX", content: reply, latencyMs: 0 } : null),
+    (e): RaceAttempt | null =>
+      e
+        ? { provider: "edge", modelLabel: "EDGE // NEXUS-CORTEX", content: e.reply, latencyMs: 0, usage: e.usage, edgeWebSearch: e.edgeWebSearch }
+        : null,
   );
 
   // Phase 1 — vyce lead window (banter 4.5s / deep 8s). Vyce IS the voice.
@@ -1040,7 +1109,7 @@ async function urlAnswer(
   url: string,
   deadline: number,
   selfRecap: SelfRecap | null = null,
-): Promise<{ reply: string; sources: CortexSource[]; webSearch: CortexResult["telemetry"]["webSearch"]; provider: string; modelLabel: string } | null> {
+): Promise<{ reply: string; sources: CortexSource[]; webSearch: CortexResult["telemetry"]["webSearch"]; provider: string; modelLabel: string; usage?: { prompt: number | null; completion: number | null } | null } | null> {
   const question = clampStr(req.prompt.replace(URL_RE, "").replace(/\s{2,}/g, " ").trim(), 300) || "Bu sayfada ne var, kısaca özetle";
 
   // BOTH readers in parallel — first usable page wins. MEASURED 02:10 +03:
@@ -1095,6 +1164,7 @@ async function urlAnswer(
     webSearch: "page-read",
     provider: r.content ? r.provider : "exa",
     modelLabel: r.content ? r.modelLabel : "VYCE // PAGE READ",
+    usage: r.usage ?? null,
   };
 }
 
@@ -1130,7 +1200,7 @@ async function answerNewsDigest(req: CortexRequest): Promise<{ reply: string; so
 async function researchAnswer(
   req: CortexRequest,
   deadline: number,
-): Promise<{ reply: string; sources: CortexSource[]; webSearch: CortexResult["telemetry"]["webSearch"]; provider: string; modelLabel: string }> {
+): Promise<{ reply: string; sources: CortexSource[]; webSearch: CortexResult["telemetry"]["webSearch"]; provider: string; modelLabel: string; usage?: { prompt: number | null; completion: number | null } | null }> {
   // URL prompts get the fetch-first path — never a blind prior answer.
   const selfRecap = await buildSelfRecap(req.channel || "specimba");
   const urlHit = req.prompt.match(URL_RE);
@@ -1140,7 +1210,15 @@ async function researchAnswer(
     // Page unreadable → fall through: Exa answers from the wider web instead.
   }
 
-  const query = clampStr(req.prompt, 400);
+  // v29.18 — the query sent to Exa must not carry the raw URL: a bare
+  // youtube link as /answer query produced marketing slop about video
+  // summarizer tools with irrelevant citations (lynote.ai + alici.ai row,
+  // 02:29 +03). The page itself was unreadable (JS shell) — research the
+  // QUESTION, not the link.
+  const query = clampStr(
+    req.prompt.replace(URL_RE, " ").replace(/\s{2,}/g, " ").trim() || req.prompt,
+    400,
+  );
   const exaArmed = await getExaKey();
   if (exaArmed) {
     const started = Date.now();
@@ -1151,7 +1229,7 @@ async function researchAnswer(
     if (ans.ok && ans.answer) {
       noteHealth("exa", true, Date.now() - started);
       const sources = (ans.citations ?? []).slice(0, 3).map((c) => ({ title: c.title ?? "", url: c.url ?? "" }));
-      return { reply: cleanReply(ans.answer), sources, webSearch: "exa-answer", provider: "exa", modelLabel: "EXA / ANSWER" };
+      return { reply: cleanReply(ans.answer), sources, webSearch: "exa-answer", provider: "exa", modelLabel: "EXA / ANSWER", usage: null };
     }
     noteHealth("exa", false, Date.now() - started);
   }
@@ -1175,6 +1253,7 @@ async function researchAnswer(
       webSearch: "web-fallback",
       provider: r.provider,
       modelLabel: r.content ? r.modelLabel : "VYCE // EXA RESEARCH",
+      usage: r.usage ?? null,
     };
   }
   noteHealth("zai", false, Date.now() - started);
@@ -1185,7 +1264,7 @@ async function researchAnswer(
     { role: "user", content: `${query}\n\n(Not: şu an canlı web doğrulaması yapamıyorsun — bildiğin kadarıyla net cevap ver, emin değilsen bunu açıkça söyle.)` },
   ];
   const r = await raceModel(messages, true, req, Math.min(deadline, Date.now() + CORTEX_DEADLINE_MS));
-  return { reply: r.content || r.fallbackLine || "Bu soruda canlı kaynak şu an kapalı — bildiğim kadarıyla cevap veremem ama birkaç dakika sonra tekrar dene.", sources: [], webSearch: "skipped", provider: r.provider, modelLabel: r.content ? r.modelLabel : STATIC_FLOOR_LABEL };
+  return { reply: r.content || r.fallbackLine || "Bu soruda canlı kaynak şu an kapalı — bildiğim kadarıyla cevap veremem ama birkaç dakika sonra tekrar dene.", sources: [], webSearch: "skipped", provider: r.provider, modelLabel: r.content ? r.modelLabel : STATIC_FLOOR_LABEL, usage: r.usage ?? null };
 }
 
 // ---------------------------------------------------------------------------
@@ -1282,6 +1361,8 @@ export async function runCortex(req: CortexRequest): Promise<CortexResult> {
       modelLabel: exaUsed ? "VYCE // EXA ANSWER" : r.modelLabel,
       provider: exaUsed ? "exa" : r.provider,
       route: "cortex-research", sources: r.sources,
+      promptTokens: r.usage?.prompt ?? null,
+      completionTokens: r.usage?.completion ?? null,
       telemetry: { latencyMs: Date.now() - started, webSearch: r.webSearch, intentMs },
     };
   }
@@ -1320,7 +1401,16 @@ export async function runCortex(req: CortexRequest): Promise<CortexResult> {
   return {
     ok: true, intent, reply: r.content || r.fallbackLine || "Hat bir an karıştı — tekrar at, toparlıyorum. 🎧",
     modelLabel: r.modelLabel, provider: r.provider, route: "cortex-chat",
-    telemetry: { latencyMs: Date.now() - started, webSearch: "none", intentMs },
+    promptTokens: r.usage?.prompt ?? null,
+    completionTokens: r.usage?.completion ?? null,
+    telemetry: {
+      latencyMs: Date.now() - started,
+      // v29.18 — when the panel's edge lane wins and the edge used its own
+      // Exa tier, the interaction log must say web: yes (the old log said
+      // web: no because only the WIDGET's snippet decided the column).
+      webSearch: r.edgeWebSearch ?? "none",
+      intentMs,
+    },
   };
 }
 
