@@ -132,6 +132,29 @@ if ! bash scripts/secret-scan.sh; then
   exit 1
 fi
 
+# 2.5) GitHub Pages bridge hygiene (2026-10-26: first Pages enablement build
+#      ERRORED with "Page build failed"). Root causes, all fixed here:
+#      a) Jekyll: Pages (legacy build) runs Jekyll over the whole tree and the
+#         snapshot carries worklog.md/docs with liquid-shaped {{ }} text —
+#         Jekyll parse failure = failed build. .nojekyll (workspace root,
+#         tracked) disables Jekyll: files are served exactly as pushed, which
+#         is all a static snapshot repo needs.
+#      b) Paths: the bridge promises /obs.html and fetches obs-target.json at
+#         the repo ROOT, but the snapshot mirrors the workspace layout
+#         (public/obs.html, public/obs-target.json) — both fetched URLs 404'd
+#         by construction. Root-level copies are synced from public/ before
+#         the tree build so
+#         https://specimba.github.io/NEXUSbot/obs.html and its
+#         raw.githubusercontent .../main/obs-target.json both resolve.
+for BRIDGE_FILE in obs.html obs-target.json; do
+  if [[ -f "public/$BRIDGE_FILE" ]]; then
+    cmp -s "public/$BRIDGE_FILE" "$BRIDGE_FILE" || cp "public/$BRIDGE_FILE" "$BRIDGE_FILE"
+  else
+    rm -f "$BRIDGE_FILE"
+  fi
+done
+touch .nojekyll
+
 # 3) commit dirty tracked work (local history; P8 commit cadence)
 if ! git diff --quiet || ! git diff --cached --quiet; then
   git add -A

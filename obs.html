@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>NEXUS OBS bridge</title>
+<meta name="robots" content="noindex" />
+<!--
+  NEXUS OS — stable OBS bridge page (task 26-d).
+
+  WHY THIS EXISTS: the panel lives at a rotating preview address; OBS Browser
+  Sources hate that. This page is hosted OUTSIDE the sandbox (GitHub Pages on
+  specimba/NEXUSbot, served from the sanitized snapshot chain) at a URL that
+  NEVER changes. It reads the panel's CURRENT address from obs-target.json
+  (raw.githubusercontent.com, 5-min cache, CORS *) and redirects the OBS
+  browser to the live widget stream. The ingest token travels as a ?t= query
+  param — it lives in the OBS source config on the streamer's machine, never
+  in this public file. obs-target.json holds the origin ONLY — not a secret.
+
+  Usage (from the panel: Widgets → OBS Browser Source URL → Stable bridge URL):
+    https://specimba.github.io/NEXUSbot/obs.html?t=<ingest-token>&w=<widget-id>
+-->
+<style>
+  html, body { margin: 0; padding: 0; background: transparent; }
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    color: rgba(161, 161, 170, 0.85);
+  }
+  #s { text-align: center; max-width: 90%; }
+  #s::before {
+    content: "";
+    display: inline-block;
+    width: 8px; height: 8px;
+    margin-right: 8px;
+    border-radius: 9999px;
+    background: #22c55e;
+    animation: nb 1.4s ease-in-out infinite;
+  }
+  @keyframes nb { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+</style>
+</head>
+<body>
+<div id="s">NEXUS OBS bridge · loading…</div>
+<script>
+(function () {
+  "use strict";
+  var q = new URLSearchParams(window.location.search);
+  var t = q.get("t") || "";
+  var w = q.get("w") || "";
+  var S = document.getElementById("s");
+  function say(msg, retryMs) {
+    S.textContent = "NEXUS OBS bridge · " + msg;
+    if (retryMs) { window.setTimeout(load, retryMs); }
+  }
+  if (!/^[A-Za-z0-9_-]{16,}$/.test(t) || !/^[a-z0-9]{16,}$/i.test(w)) {
+    S.textContent = "NEXUS OBS bridge · missing or invalid ?t= / ?w= parameters — copy the full Stable bridge URL from the panel (Widgets → OBS Browser Source URL).";
+    return;
+  }
+  function goodOrigin(o) {
+    if (typeof o !== "string" || o.length < 8 || o.length > 200) { return false; }
+    try {
+      var u = new URL(o);
+      return (u.protocol === "https:" || u.protocol === "http:") && u.origin === o;
+    } catch (e) { return false; }
+  }
+  function load() {
+    say("resolving current panel address…", 0);
+    // 1) raw.githubusercontent.com — live source of truth (5-min cache, CORS *).
+    fetch("https://raw.githubusercontent.com/specimba/NEXUSbot/main/obs-target.json?ts=" + Date.now())
+      .then(function (r) { if (!r.ok) { throw 0; } return r.json(); })
+      .then(function (j) { if (j && goodOrigin(j.origin)) { go(j.origin); } else { fallback(); } })
+      .catch(fallback);
+  }
+  // 2) same-origin obs-target.json — the GitHub Pages copy (or panel copy).
+  function fallback() {
+    fetch("obs-target.json?ts=" + Date.now())
+      .then(function (r) { if (!r.ok) { throw 0; } return r.json(); })
+      .then(function (j) { if (j && goodOrigin(j.origin)) { go(j.origin); } else { retry(); } })
+      .catch(retry);
+  }
+  function retry() {
+    say("panel address not published yet — open the panel once (it auto-publishes), retrying in 30s…", 30000);
+  }
+  var lastOrigin = null;
+  function go(origin) {
+    if (origin === lastOrigin) {
+      // We came back here after a redirect — the panel is not answering at
+      // that address right now. Keep retrying quietly.
+      say("panel not reachable at " + origin + " yet — retrying in 15s…", 15000);
+      return;
+    }
+    lastOrigin = origin;
+    say("redirecting to panel…", 0);
+    window.location.replace(
+      origin + "/api/widgets/" + encodeURIComponent(w) + "/stream?token=" + encodeURIComponent(t)
+    );
+  }
+  load();
+})();
+</script>
+</body>
+</html>
