@@ -86,9 +86,16 @@ state_flush() {
 S_ATTEMPT="$TS"; S_ATTEMPT_EPOCH="$NOW_EPOCH"
 
 # 0.1) push throttle (12-d): skip honestly when the last successful push is
-# younger than MIN_PUSH_GAP_S. Panel button + service /run land here; only the
-# cadence service's 6h timer (NEXUS_BACKUP_FORCE=1) may bypass it.
-if [[ "${NEXUS_BACKUP_FORCE:-0}" != "1" && -n "$S_OK_EPOCH" && "$S_OK_EPOCH" =~ ^[0-9]+$ ]]; then
+# younger than MIN_PUSH_GAP_S. Panel button + service /run land here; two
+# documented bypasses exist (TIME-THROTTLE ONLY — dedupe, the fail-closed
+# scan, the fast-forward push and the divergence pre-check ALWAYS apply):
+#   NEXUS_BACKUP_FORCE=1        — reserved for the cadence service's 6h timer.
+#   NEXUS_BACKUP_ORIGIN_PUSH=1 — /api/obs/publish-origin after a preview-origin
+#                                rotation: the stable OBS bridge (obs.html on
+#                                GitHub Pages) stays dead until the new origin
+#                                reaches obs-target.json on main, so an origin
+#                                publish may not sit out the 30-min window.
+if [[ "${NEXUS_BACKUP_FORCE:-0}" != "1" && "${NEXUS_BACKUP_ORIGIN_PUSH:-0}" != "1" && -n "$S_OK_EPOCH" && "$S_OK_EPOCH" =~ ^[0-9]+$ ]]; then
   ELAPSED=$((NOW_EPOCH - S_OK_EPOCH))
   if [[ $ELAPSED -ge 0 && $ELAPSED -lt $MIN_PUSH_GAP_S ]]; then
     log "SKIP: throttled — last successful push ${ELAPSED}s ago (< ${MIN_PUSH_GAP_S}s min-gap); NEXUS_BACKUP_FORCE=1 is reserved for the 6h cadence timer"

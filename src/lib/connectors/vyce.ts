@@ -23,7 +23,15 @@ export const VYCE_KEY_LABEL = "api";
 export const VYCE_BASEURL_LABEL = "base-url";
 
 export const DEFAULT_VYCE_BASE_URL = "https://vyceai.com/v1";
-export const VYCE_TIMEOUT_MS = 8_000;
+/**
+ * Probe-only timeout (v29.18): the CORTEX race passes its own lane budgets —
+ * this constant is exclusively the Connectors probe window. 8s reported false
+ * UNREACHABLE while the platform was alive-but-slow (measured 13.92s once);
+ * 15s covers the slow-but-alive class without hanging the panel for long.
+ * When the upstream truly black-holes (2026-10-26 incident: TCP+TLS 11ms then
+ * 0 bytes), an honest 15s timeout is the correct verdict anyway.
+ */
+export const VYCE_TIMEOUT_MS = 15_000;
 
 /** Role → model registry (R11 proposal; runtime /models list is the truth). */
 export const VYCE_ROLE_MODELS = {

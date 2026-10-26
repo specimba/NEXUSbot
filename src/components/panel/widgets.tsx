@@ -60,6 +60,7 @@ import {
   type WidgetVariable,
   type WidgetVariableType,
 } from "@/lib/widgets/runtime";
+import { buildObsBridgeUrl, parseObsLinkPath } from "@/lib/obs-bridge";
 
 /**
  * WIDGETS tab — the self-hosted successor of the Kickbot widget builder.
@@ -411,6 +412,58 @@ function WidgetEditor({
         /* clipboard unavailable — the readonly input below is the manual fallback */
       });
   }, [obsUrl]);
+
+  // Stable bridge URL (task 26-d): a GitHub Pages-hosted page that redirects
+  // OBS to the panel's CURRENT address — it survives preview-address rotation.
+  // Built from the SAME stored path + token; the token lives in the OBS source
+  // config, never in the public bridge file.
+  const bridgeParts = obsLink ? parseObsLinkPath(obsLink.path) : null;
+  const bridgeUrl = bridgeParts ? buildObsBridgeUrl(bridgeParts.widgetId, bridgeParts.token) : null;
+  const [bridgeCopied, setBridgeCopied] = useState(false);
+  const copyBridgeUrl = useCallback(() => {
+    if (!bridgeUrl) return;
+    navigator.clipboard
+      ?.writeText(bridgeUrl)
+      .then(() => {
+        setBridgeCopied(true);
+        setTimeout(() => setBridgeCopied(false), 2000);
+      })
+      .catch(() => undefined);
+  }, [bridgeUrl]);
+
+  const bridgeStatus = useQuery<{ ok: boolean; origin: string | null; updatedAt: string | null }>({
+    queryKey: ["obs-bridge-status"],
+    queryFn: async () => {
+      const res = await fetch("/api/obs/publish-origin", { cache: "no-store" });
+      if (!res.ok) throw new Error("bridge status failed");
+      return (await res.json()) as { ok: boolean; origin: string | null; updatedAt: string | null };
+    },
+    staleTime: 30_000,
+  });
+
+  const publishOrigin = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/obs/publish-origin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ origin: window.location.origin }),
+      });
+      const body = (await res.json().catch(() => null)) as
+        | { ok?: boolean; published?: boolean; error?: { message?: string } }
+        | null;
+      if (!res.ok) throw new Error(body?.error?.message ?? `Publish failed (HTTP ${res.status})`);
+      return body;
+    },
+    onSuccess: (body) => {
+      void queryClient.invalidateQueries({ queryKey: ["obs-bridge-status"] });
+      toast.success(body?.published ? "Panel address published" : "Address unchanged", {
+        description: body?.published
+          ? "Snapshot push scheduled — the stable bridge picks it up in moments."
+          : "The current address is already the published one.",
+      });
+    },
+    onError: (e: Error) => toast.error("Publish failed", { description: e.message }),
+  });
 
   // All stable-link operations (create / reset / set-base / revoke) hit ONE
   // route on the same server — no extra hop, no external service, no domain.
@@ -905,6 +958,59 @@ function WidgetEditor({
                       Open test
                     </Button>
                   </div>
+
+                  {bridgeUrl ? (
+                    <div className="space-y-2 rounded-md border border-primary/30 bg-primary/5 p-2.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <Label className="text-[11px] text-muted-foreground">
+                          Stable bridge URL — never changes, survives preview rotation (GitHub-hosted)
+                        </Label>
+                        <Badge variant="outline" className="max-w-full truncate font-mono text-[10px]">
+                          {bridgeStatus.data?.origin
+                            ? `published: ${bridgeStatus.data.origin}`
+                            : "address not published yet"}
+                        </Badge>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Input
+                          readOnly
+                          aria-label="Stable OBS bridge URL"
+                          className="min-h-9 min-w-[240px] flex-1 font-mono text-xs"
+                          value={bridgeUrl}
+                          onFocus={(e) => e.currentTarget.select()}
+                        />
+                        <Button
+                          variant="outline"
+                          className="min-h-9 shrink-0 font-mono"
+                          onClick={copyBridgeUrl}
+                          aria-label={bridgeCopied ? "Copied" : "Copy stable bridge URL"}
+                        >
+                          {bridgeCopied ? (
+                            <Check className="size-4 text-primary" aria-hidden="true" />
+                          ) : (
+                            <Copy className="size-4" aria-hidden="true" />
+                          )}
+                          {bridgeCopied ? "Copied" : "Copy"}
+                        </Button>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        A GitHub-hosted page that redirects OBS to the panel&apos;s current address — it keeps working
+                        across sandbox restarts and address rotations. The panel auto-publishes its address every
+                        time it is opened. One-time setup: enable GitHub Pages on the NEXUSbot repo (Settings →
+                        Pages → Deploy from branch: <span className="font-mono">main</span> /{" "}
+                        <span className="font-mono">/ (root)</span>) — until then this URL answers 404.
+                      </p>
+                      <Button
+                        variant="ghost"
+                        className="min-h-9 font-mono text-xs"
+                        disabled={publishOrigin.isPending}
+                        onClick={() => publishOrigin.mutate()}
+                      >
+                        <Anchor className="size-3.5" aria-hidden="true" />
+                        {publishOrigin.isPending ? "Publishing…" : "Publish current address now"}
+                      </Button>
+                    </div>
+                  ) : null}
 
                   <div className="space-y-2 rounded-md border border-border/60 p-2.5">
                     <div className="flex flex-wrap items-center justify-between gap-2">

@@ -47,6 +47,17 @@ export function keyIdFor(key: Buffer): string {
 const keyCache = new Map<string, Buffer>();
 let keysLoaded = false;
 
+/**
+ * Re-derive the key cache from the CURRENT process.env (v29.18 seal restore).
+ * restoreSeal() hot-swaps ENCRYPTION_KEY/ENCRYPTION_KEYS_PREV in process.env;
+ * without this reset the memoized cache would keep decrypting under the old
+ * boot key and every restored vault envelope would read as tampered.
+ */
+export function reloadVaultKeys(): void {
+  keyCache.clear();
+  keysLoaded = false;
+}
+
 function loadKeys(): Map<string, Buffer> {
   if (keysLoaded) return keyCache;
   const primary = parseKey(process.env.ENCRYPTION_KEY, "ENCRYPTION_KEY");

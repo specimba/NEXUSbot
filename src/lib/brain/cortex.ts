@@ -7,7 +7,27 @@ import { runPageRead } from "./search";
 import { buildNewsDigest, buildGeneralDigest } from "./exa-news";
 
 /**
- * NEXUS OS — Panel Cortex Engine (v29.16).
+ * NEXUS OS — Panel Cortex Engine (v29.17).
+ *
+ * v29.17 (owner 20:5x +03: "what is this turbo hat bullshit and why everything
+ * look vyce routed even they are not" — live p50 14.1s, every row
+ * panel-cortex, one canned sentence repeated 4x under a VYCE badge):
+ *   1. LABEL TRUTH — the static floor wore a hardcoded "VYCE // TURBO HAT"
+ *      badge while vyceai.com was black-holing HTTP (measured: TCP+TLS 11ms,
+ *      then 0 bytes for 10s). The floor now speaks as STATIC // NEXUS-CORTEX,
+ *      from a rotating honest-line bank with no-immediate-repeat (no more 4x
+ *      the same sentence, no more fake "10 saniye sonra aynı soruyu at").
+ *      The research-path fallback ("VYCE // EXA RESEARCH" on a canned line)
+ *      and the cortex-empty greeting got the same honesty fix.
+ *   2. VYCE BREAKER — after 2 consecutive dead primary races the 4.5s banter
+ *      lead window is skipped (floor fires at t=0; the primary still probes
+ *      in phase 2 and a recovered vyce still WINS + resets the breaker).
+ *      Root cause of the uniform ~14s: every message paid the 4.5s lead +
+ *      8s/7s backup hangs against a black-holed upstream before the edge
+ *      lane could answer.
+ *   NOTE: the ~12-13s EDGE answers are the edge function itself (still
+ *   v29.14, whose own internal race also waits on dead vyce). Deploy v29.17
+ *   to nexus-cortex via Connectors → Deploy to fix the edge side too.
  *
  * v29.16 (owner directive 03:47 +03: "how we cannot even achieve more capable
  * bot while using much complex and high parameter models rather than old
@@ -189,6 +209,30 @@ const ZAI_PRIMARY_GRACE_MS = 600;
 
 /** Overall budget: the widget gives the cortex 19s; answer well inside it. */
 const CORTEX_DEADLINE_MS = 16_000;
+
+// ---------------------------------------------------------------------------
+// STATIC FLOOR (v29.17) — the honest last resort. These lines are spoken by
+// the PANEL itself, not by any model, so they must NEVER wear a VYCE badge.
+// The "VYCE // TURBO HAT" incident (2026-10-26 live): the floor line carried
+// a hardcoded VYCE label while vyceai.com was black-holing requests — viewers
+// saw "VYCE routed" on answers that never left the machine, and the SAME
+// sentence repeated four times in a row. Rotating bank + no-immediate-repeat.
+// ---------------------------------------------------------------------------
+const STATIC_FLOOR_LABEL = "STATIC // NEXUS-CORTEX";
+const STATIC_FLOOR_LINES = [
+  "Cevap hatları şu an kesik — uydurmak bana yakışmaz, gerçek cevabı birazdan veririm. 🎧",
+  "Beynim bu soruya sağlıklı cevap üretemiyor şu an — boş konuşmak istemem. Az sonra tekrar at. 🎯",
+  "Hat değil, hatlar KAPALI — bu soruya şimdilik dürüst cevabım: bilmiyorum, sonra dene. 🛠",
+  "Şu an tek cereyanla çalışıyorum ve bu soruya yeterli gücüm yok — birazdan toparlarız. 🎧",
+  "Dürüst mod: bu soruya şu an cevap üretemiyorum. Soruyu bırakma, hatlar dönünce buradayım. 🎯",
+];
+let lastStaticFloorIdx = -1;
+function pickStaticFloorLine(): string {
+  let i = Math.floor(Math.random() * STATIC_FLOOR_LINES.length);
+  if (i === lastStaticFloorIdx) i = (i + 1) % STATIC_FLOOR_LINES.length;
+  lastStaticFloorIdx = i;
+  return STATIC_FLOOR_LINES[i];
+}
 
 // ---------------------------------------------------------------------------
 // Health tracker (feeds the STATUS intent with real numbers)
@@ -754,6 +798,15 @@ async function raceModel(
   const vyceModel = deep ? VYCE_FRONTIER : VYCE_FAST;
   const vyceLabel = deep ? "VYCE // CLAUDE 4.6" : "VYCE // BEAM 1.0";
   const vyceTimeout = deep ? 11_000 : 8_000;
+  // v29.17 — VYCE BREAKER: after 2 consecutive dead primary races, the 4.5s
+  // lead window stops being paid on every message. The primary still probes
+  // (its promise stays in phase 2 — a recovery answer still WINS and resets
+  // the breaker), but the floor (dual backups + handicapped Groq) joins at
+  // t=0 instead of after the lead. Measured 2026-10-26 20:5x +03: vyceai.com
+  // accepts TCP+TLS in 11ms then black-holes HTTP (0 bytes in 10s) — every
+  // banter answer burned the 4.5s lead for nothing while the panel p50 sat
+  // at 14.1s.
+  const vyceBreakerHot = vyceConsecutiveFails >= 2;
 
   // Groq floor lane + DUAL vyce backup lanes — STABLE promises; the real
   // calls are started by fireFloor(). When the primary misses (error or lead
@@ -859,10 +912,14 @@ async function raceModel(
   );
 
   // Phase 1 — vyce lead window (banter 4.5s / deep 8s). Vyce IS the voice.
-  const lead = await Promise.race([
-    vyceP.then((r): RaceAttempt | null => (r && r.content ? r : null)),
-    new Promise<RaceAttempt | null>((res) => setTimeout(() => res(null), deep ? 8_000 : 4_500)),
-  ]);
+  // Breaker hot (v29.17): skip the window entirely — dead queues must not
+  // buy dead air; the floor fires at t=0 below.
+  const lead = vyceBreakerHot
+    ? null
+    : await Promise.race([
+        vyceP.then((r): RaceAttempt | null => (r && r.content ? r : null)),
+        new Promise<RaceAttempt | null>((res) => setTimeout(() => res(null), deep ? 8_000 : 4_500)),
+      ]);
   if (lead?.content) {
     parkFloor();
     return lead;
@@ -910,14 +967,15 @@ async function raceModel(
     if (i >= 0) candidates.splice(i, 1);
   }
 
-  // Last resort: honest, useful, never "busy".
+  // Last resort: honest, useful, never "busy" — and NEVER a borrowed VYCE
+  // badge. The panel itself is speaking here (v29.17 label-truth fix).
   parkFloor();
   return {
     provider: "static",
-    modelLabel: "VYCE // TURBO HAT",
+    modelLabel: STATIC_FLOOR_LABEL,
     content: null,
     latencyMs: 0,
-    fallbackLine: "Kafamda şimşekler çaktı ama cevabın tam düşmedi — 10 saniye sonra aynı soruyu at, bu sefer tam isabet gelir. 🎯",
+    fallbackLine: pickStaticFloorLine(),
   };
 }
 
@@ -1099,7 +1157,7 @@ async function researchAnswer(
     { role: "user", content: `${query}\n\n(Not: şu an canlı web doğrulaması yapamıyorsun — bildiğin kadarıyla net cevap ver, emin değilsen bunu açıkça söyle.)` },
   ];
   const r = await raceModel(messages, true, req, Math.min(deadline, Date.now() + CORTEX_DEADLINE_MS));
-  return { reply: r.content || r.fallbackLine || "Bu soruda canlı kaynak şu an kapalı — bildiğim kadarıyla cevap veremem ama birkaç dakika sonra tekrar dene.", sources: [], webSearch: "skipped", provider: r.provider, modelLabel: r.content ? r.modelLabel : "VYCE // EXA RESEARCH" };
+  return { reply: r.content || r.fallbackLine || "Bu soruda canlı kaynak şu an kapalı — bildiğim kadarıyla cevap veremem ama birkaç dakika sonra tekrar dene.", sources: [], webSearch: "skipped", provider: r.provider, modelLabel: r.content ? r.modelLabel : STATIC_FLOOR_LABEL };
 }
 
 // ---------------------------------------------------------------------------
@@ -1118,7 +1176,7 @@ export async function runCortex(req: CortexRequest): Promise<CortexResult> {
       ok: true,
       intent: "CHAT",
       reply: "Buradayım çete, hatlar açık — sorunu net yaz, hemen bakıyorum. 🎙",
-      modelLabel: "VYCE // TURBO HAT",
+      modelLabel: STATIC_FLOOR_LABEL,
       provider: "tool",
       route: "cortex-empty",
       telemetry: { latencyMs: Date.now() - started, webSearch: "none", intentMs: 0 },

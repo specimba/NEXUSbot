@@ -101,9 +101,15 @@ export const EGRESS_ROUTING_KEY = "egress.routing";
 
 /** Probe targets (task contract whitelist). `kind:"country"` parses Cloudflare trace loc= ONLY. */
 export const EGRESS_PROBE_TARGETS = {
-  groq: { url: "https://api.groq.com/openai/v1/models", kind: "status" as const },
-  vyce: { url: "https://vyceai.com/v1/models", kind: "status" as const },
-  "generic-echo": { url: "https://www.cloudflare.com/cdn-cgi/trace", kind: "country" as const },
+  // probeTimeoutMs (2026-10-26 "egress not worked on vyce" fix): the probe must
+  // measure what the RUNTIME lane sees. Vyce's platform has measured latencies
+  // in the ~14s class (alive-but-slow); the old blanket 8s/9s probe budgets
+  // reported UNREACHABLE for a live upstream and made honest proxy tests
+  // impossible ("couple minutes trying on vyce" = 3 proxy attempts × 9s all
+  // timing out). Fast targets keep the 8s budget.
+  groq: { url: "https://api.groq.com/openai/v1/models", kind: "status" as const, probeTimeoutMs: 8_000 },
+  vyce: { url: "https://vyceai.com/v1/models", kind: "status" as const, probeTimeoutMs: 15_000 },
+  "generic-echo": { url: "https://www.cloudflare.com/cdn-cgi/trace", kind: "country" as const, probeTimeoutMs: 8_000 },
 } as const;
 
 export type EgressProbeTarget = keyof typeof EGRESS_PROBE_TARGETS;

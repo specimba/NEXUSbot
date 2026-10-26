@@ -115,6 +115,7 @@ export function SettingsTab() {
       </Card>
 
       <PanelAccessCard />
+      <SealCard />
     </div>
   );
 }
@@ -226,6 +227,192 @@ function PanelAccessCard() {
             {rotate.isPending ? "Updating…" : "Update password"}
           </Button>
         </form>
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * Sandbox seal (v29.18, Task 25) — the cold-boot durability feature. The seal
+ * is a passphrase-encrypted snapshot of the durability-critical state (.env
+ * keys, vault credentials, widgets + variables, settings, ingest-token
+ * hashes) written to .seal/nexus-seal.v1.json — a GIT-TRACKED file, so the
+ * GitHub snapshot chain carries it through any sandbox reset. After a cold
+ * boot wiped .env + the DB, one passphrase restores the running panel in
+ * place (hot-applied env, upserted rows) instead of re-filling ten secrets.
+ *
+ * Honest threat model: the file rides a PUBLIC repo — its strength is exactly
+ * the passphrase. Use a long one. Re-seal after every credential/widget
+ * change; a stale seal restores stale state.
+ */
+type SealState = {
+  ok: boolean;
+  path: string;
+  exists: boolean;
+  meta: { sealedAt: string; counts: Record<string, number> } | null;
+  error: string | null;
+};
+
+function SealCard() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [pass, setPass] = useState("");
+  const [confirmRestore, setConfirmRestore] = useState(false);
+
+  const state = useQuery<SealState>({
+    queryKey: ["seal-state"],
+    queryFn: async () => {
+      const res = await fetch("/api/backup/seal", { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    },
+  });
+
+  const seal = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/backup/seal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ passphrase: pass }),
+      });
+      const body = (await res.json().catch(() => null)) as
+        | { ok: boolean; error?: { message?: string } }
+        | null;
+      if (!res.ok || !body?.ok) throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
+      return body;
+    },
+    onSuccess: () => {
+      setPass("");
+      setConfirmRestore(false);
+      void queryClient.invalidateQueries({ queryKey: ["seal-state"] });
+      toast({
+        title: "Seal created",
+        description: "Encrypted state is ready for the snapshot chain. Re-seal after every credential or widget change.",
+      });
+    },
+    onError: (e: Error) =>
+      toast({ title: "Seal failed", description: e.message, variant: "destructive" }),
+  });
+
+  const unseal = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/backup/unseal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ passphrase: pass }),
+      });
+      const body = (await res.json().catch(() => null)) as
+        | { ok: boolean; error?: { message?: string } }
+        | null;
+      if (!res.ok || !body?.ok) throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
+      return body;
+    },
+    onSuccess: () => {
+      setPass("");
+      setConfirmRestore(false);
+      // Env keys + vault + widgets + settings may ALL have changed — drop the
+      // entire query cache so every card refetches under the restored state.
+      void queryClient.invalidateQueries();
+      toast({
+        title: "Restored from seal",
+        description: "Env keys hot-applied, rows upserted. The next snapshot push carries the seal file.",
+      });
+    },
+    onError: (e: Error) =>
+      toast({ title: "Restore failed", description: e.message, variant: "destructive" }),
+  });
+
+  const meta = state.data?.meta ?? null;
+  const counts = meta?.counts ?? null;
+  const passReady = pass.length >= 12;
+  const busy = seal.isPending || unseal.isPending;
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+          Sandbox seal (cold-boot durability)
+        </CardTitle>
+        <CardDescription>
+          A cold boot regenerates <code className="font-mono text-[11px]">.env</code> and wipes the
+          DB — that is how today&apos;s password change + ten re-entered credentials happened. The
+          seal is an AES-256-GCM file (git-tracked, rides the GitHub snapshot chain) holding the
+          four critical env keys, the vault, widgets + variables, settings, and token hashes. Its
+          strength IS the passphrase — use a long one. Re-seal after every change.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="rounded-md border bg-muted/40 px-3 py-2 text-xs font-mono" role="status">
+          {state.isLoading ? (
+            <Skeleton className="h-4 w-64" />
+          ) : state.isError ? (
+            <span className="text-destructive">Seal state unavailable.</span>
+          ) : state.data?.exists && meta ? (
+            <span>
+              sealed {new Date(meta.sealedAt).toLocaleString()}
+              {counts ? (
+                <> · {counts.credentials} credentials · {counts.widgets} widgets · {counts.settings} settings · {counts.ingestTokens} tokens</>
+              ) : null}
+            </span>
+          ) : (
+            <span className="text-amber-600 dark:text-amber-500">
+              No seal yet — the next cold boot wipes everything re-entered today.
+            </span>
+          )}
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="seal-passphrase">Seal passphrase (min 12 chars)</Label>
+          <Input
+            id="seal-passphrase"
+            type="password"
+            autoComplete="off"
+            className="h-11 max-w-sm font-mono"
+            value={pass}
+            onChange={(e) => {
+              setPass(e.target.value);
+              setConfirmRestore(false);
+            }}
+            aria-label="Seal passphrase"
+          />
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            className="min-h-11 font-mono"
+            disabled={!passReady || busy}
+            onClick={() => seal.mutate()}
+          >
+            {seal.isPending ? "Sealing…" : "Seal now"}
+          </Button>
+          {state.data?.exists ? (
+            confirmRestore ? (
+              <Button
+                type="button"
+                variant="destructive"
+                className="min-h-11 font-mono"
+                disabled={!passReady || busy}
+                onClick={() => unseal.mutate()}
+              >
+                {unseal.isPending ? "Restoring…" : "Confirm restore"}
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="outline"
+                className="min-h-11 font-mono"
+                disabled={!passReady || busy}
+                onClick={() => setConfirmRestore(true)}
+              >
+                Restore from seal…
+              </Button>
+            )
+          ) : null}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Restore hot-applies the sealed env keys to the running panel (no restart), re-derives the
+          vault key cache, and upserts settings → credentials → tokens → widgets. Rows created
+          after the seal survive (upsert merge).
+        </p>
       </CardContent>
     </Card>
   );

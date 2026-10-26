@@ -49,6 +49,13 @@ import {
  *   · no key in vault    → keyless probe, and 401 then means "unauthenticated
  *                          probe answered" — rendered as UNAUTH_PROBE, not a
  *                          fake "key rejected" verdict.
+ *
+ * [FIXED 2026-10-26 #2] Per-target probe budgets (EGRESS_PROBE_TARGETS
+ * .probeTimeoutMs): the old blanket 8s direct / 9s per-proxy timeouts
+ * declared vyce UNREACHABLE while the platform answers in the ~14s class —
+ * "egress routing not worked on vyce" was a measurement artifact, not a
+ * routing failure. Vyce now probes with 15s budgets and 2 pool attempts
+ * (30s worst case); fast targets keep 8s/3.
  */
 
 const MAX_PROXY_ATTEMPTS = 3;
@@ -106,7 +113,7 @@ export async function POST(req: Request) {
   }
 
   // --- direct (sandbox egress) -------------------------------------------------
-  const direct = await directFetch(conf.url, { headers }, 8_000);
+  const direct = await directFetch(conf.url, { headers }, conf.probeTimeoutMs);
   const directStatus = "status" in direct ? direct.status : null;
   const directCls = keyless && directStatus === 401
     ? { classification: "UNAUTH_PROBE" as const, reachable: true }
@@ -138,13 +145,16 @@ export async function POST(req: Request) {
       error: { code: poolLoad.code, message: poolLoad.message },
     };
   } else {
-    const candidates = pickProxies(poolLoad.pool, MAX_PROXY_ATTEMPTS);
+    // Slow-but-alive upstreams (vyce ~14s) get 2 attempts so an honest 15s
+    // budget per attempt still answers inside a reasonable window.
+    const maxAttempts = target === "vyce" ? 2 : MAX_PROXY_ATTEMPTS;
+    const candidates = pickProxies(poolLoad.pool, maxAttempts);
     let success: EgressHttpResponse | null = null;
     let lastFailure: { code: string; message: string } | null = null;
 
     for (const proxy of candidates) {
       attempts.push(attempts.length + 1); // count-only marker — never the proxy identity (P7)
-      const res = await proxiedFetch(conf.url, { headers }, { proxy, timeoutMs: 9_000 });
+      const res = await proxiedFetch(conf.url, { headers }, { proxy, timeoutMs: conf.probeTimeoutMs });
       if ("status" in res) {
         success = res;
         break;

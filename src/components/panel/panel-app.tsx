@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { LoginGate } from "./login-gate";
 import { PanelShell } from "./panel-shell";
@@ -19,6 +20,20 @@ export function PanelApp() {
       return (await res.json()) as SessionInfo;
     },
   });
+
+  // Auto-publish the CURRENT panel origin so the GitHub-hosted OBS bridge
+  // (obs.html) always points at the live panel after every address rotation.
+  // Fire-and-forget: the server compares + skips when unchanged; a 401 (dead
+  // session) is silently ignored — the next authenticated load publishes.
+  useEffect(() => {
+    if (!data?.authenticated) return;
+    const origin = window.location.origin;
+    void fetch("/api/obs/publish-origin", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ origin }),
+    }).catch(() => undefined);
+  }, [data?.authenticated]);
 
   if (isLoading) {
     return (
