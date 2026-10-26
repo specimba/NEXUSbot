@@ -1,5 +1,12 @@
 import { db } from "@/lib/db";
 import { decryptSecret, encryptSecret, maskSecret } from "@/lib/crypto";
+import {
+  loadEgressPool,
+  pickProxies,
+  proxiedFetch,
+  readRoutingMap,
+  routeFor,
+} from "@/lib/egress";
 
 /**
  * NEXUS OS — Vyce connector (T-207): the brain's LLM gateway.
@@ -233,25 +240,42 @@ export async function probeVyce(apiKey: string, baseUrl: string): Promise<VycePr
     };
   }
 
-  const scrub = (text: string): string => (text.includes(apiKey) ? "[filtered]" : text.slice(0, 200));
-
-  if (res.status === 401) {
-    return { ok: false, code: "UNAUTHORIZED", httpStatus: 401, message: "Vyce rejected the key (HTTP 401 invalid_api_key)" };
-  }
-  if (res.status === 403) {
-    return { ok: false, code: "FORBIDDEN", httpStatus: 403, message: "Vyce refused access (HTTP 403) — key lacks access or a WAF is in the way" };
-  }
-  if (res.status === 429) {
-    return { ok: false, code: "RATE_LIMITED", httpStatus: 429, message: "Vyce rate-limited the probe (HTTP 429)" };
-  }
-
   const text = await res.text().catch(() => "");
-  if (!res.ok) {
+  return classifyVyceAnswer(res.status, text, apiKey, baseUrl, "direct");
+}
+
+/**
+ * Shared HTTP-answer classification for both transports — identical verdicts
+ * whether the answer arrived direct or through the egress proxy (honesty:
+ * a 401 through a working proxy IS a key rejection; a proxy transport failure
+ * is NEVER a key problem).
+ */
+function classifyVyceAnswer(
+  status: number,
+  text: string,
+  apiKey: string,
+  baseUrl: string,
+  via: "direct" | "proxy",
+): VyceProbe {
+  const viaPart = via === "proxy" ? " (via the egress proxy)" : "";
+  if (status === 401) {
+    return { ok: false, code: "UNAUTHORIZED", httpStatus: 401, message: `Vyce rejected the key (HTTP 401 invalid_api_key)${viaPart}` };
+  }
+  if (status === 403) {
+    return { ok: false, code: "FORBIDDEN", httpStatus: 403, message: `Vyce refused access (HTTP 403)${viaPart} — key lacks access or a WAF is in the way` };
+  }
+  if (status === 429) {
+    return { ok: false, code: "RATE_LIMITED", httpStatus: 429, message: `Vyce rate-limited the probe (HTTP 429)${viaPart}` };
+  }
+
+  const scrub = (t: string): string => (t.includes(apiKey) ? "[filtered]" : t.slice(0, 200));
+
+  if (status < 200 || status >= 300) {
     return {
       ok: false,
       code: "BAD_RESPONSE",
-      httpStatus: res.status,
-      message: `Vyce answered HTTP ${res.status}${text ? `: ${scrub(text)}` : ""}`,
+      httpStatus: status,
+      message: `Vyce answered HTTP ${status}${viaPart}${text ? `: ${scrub(text)}` : ""}`,
     };
   }
 
@@ -259,7 +283,7 @@ export async function probeVyce(apiKey: string, baseUrl: string): Promise<VycePr
   try {
     data = JSON.parse(text);
   } catch {
-    return { ok: false, code: "BAD_RESPONSE", httpStatus: res.status, message: "Vyce returned a non-JSON body for /models" };
+    return { ok: false, code: "BAD_RESPONSE", httpStatus: status, message: `Vyce returned a non-JSON body for /models${viaPart}` };
   }
 
   const list = Array.isArray(data)
@@ -268,7 +292,7 @@ export async function probeVyce(apiKey: string, baseUrl: string): Promise<VycePr
       ? ((data as { data: unknown[] }).data as unknown[])
       : null;
   if (!list) {
-    return { ok: false, code: "BAD_RESPONSE", httpStatus: res.status, message: "Vyce /models payload shape unrecognized" };
+    return { ok: false, code: "BAD_RESPONSE", httpStatus: status, message: `Vyce /models payload shape unrecognized${viaPart}` };
   }
 
   const models = list
@@ -278,7 +302,75 @@ export async function probeVyce(apiKey: string, baseUrl: string): Promise<VycePr
     })
     .filter((id): id is string => id !== null);
 
-  return { ok: true, httpStatus: res.status, models };
+  return { ok: true, httpStatus: status, models };
+}
+
+// ---------------------------------------------------------------------------
+// Egress-routed probe (2026-10-26 incident: the card said UNREACHABLE while the
+// runtime — routed through the owner's proxy pool — was answering 200)
+// ---------------------------------------------------------------------------
+
+export type VyceRoutedProbe = VyceProbe & { route: "direct" | "proxy"; routeNote: string | null };
+
+/**
+ * Probe Vyce through the SAME transport the runtime brain calls use:
+ * Settings KV "egress.routing" → routeFor("vyce", map). direct → the plain
+ * probe; proxy → the Webshare pool with a SHARED wall-clock budget (up to 2
+ * pool proxies), exactly like the brain's own proxied calls. The payload
+ * reports which route answered so the panel can never again show a direct
+ * verdict about a proxied runtime.
+ */
+export async function probeVyceRouted(apiKey: string, baseUrl: string): Promise<VyceRoutedProbe> {
+  let route: "direct" | "proxy" = "direct";
+  try {
+    route = routeFor("vyce", await readRoutingMap());
+  } catch {
+    route = "direct"; // a routing read failure must never break the probe
+  }
+
+  if (route === "direct") {
+    const r = await probeVyce(apiKey, baseUrl);
+    return { ...r, route: "direct", routeNote: null };
+  }
+
+  const url = `${normalizeVyceBaseUrl(baseUrl)}/models`;
+  const headers = { Authorization: `Bearer ${apiKey}`, Accept: "application/json" };
+
+  const pool = await loadEgressPool();
+  if (!pool.ok) {
+    return {
+      ok: false,
+      code: "NETWORK_ERROR",
+      httpStatus: null,
+      route: "proxy",
+      routeNote: pool.code,
+      message: `The egress proxy pool is unavailable (${pool.code}) while Egress routing sends Vyce through the pool — fix the Webshare pool or set the Vyce route back to direct.`,
+    };
+  }
+
+  // Shared budget across pool attempts (never a fresh full slice per proxy).
+  const poolStarted = Date.now();
+  let lastCode: string | null = null;
+  for (const proxy of pickProxies(pool.pool, 2)) {
+    const remaining = VYCE_TIMEOUT_MS - (Date.now() - poolStarted);
+    if (remaining < 1_500 && lastCode) break;
+    const r = await proxiedFetch(url, { headers }, { proxy, timeoutMs: Math.max(1_500, remaining) });
+    if ("code" in r) {
+      lastCode = r.code; // proxy/transport failure — try the next pool proxy
+      continue;
+    }
+    // An HTTP answer through a working proxy — classify identically to direct.
+    return { ...classifyVyceAnswer(r.status, r.bodyText, apiKey, baseUrl, "proxy"), route: "proxy", routeNote: null };
+  }
+
+  return {
+    ok: false,
+    code: "NETWORK_ERROR",
+    httpStatus: null,
+    route: "proxy",
+    routeNote: lastCode ?? "PROXY_FAILED",
+    message: `Vyce did not answer through the egress proxy (${lastCode ?? "PROXY_FAILED"}) within ${VYCE_TIMEOUT_MS / 1000}s — a transport failure, never a key problem.`,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -294,6 +386,8 @@ export type VyceStatusPayload = {
   maskedKey: string | null;
   probeTarget: string;
   probedAt: string | null;
+  /** Which transport the probe used — MUST match the runtime brain's route. */
+  route: "direct" | "proxy" | null;
   error: { code: string; message: string } | null;
   /** Supabase Edge-Function secret fallback state (owner stored VYCE_API_KEY there). */
   fallback: { available: boolean; reason: string | null } | null;

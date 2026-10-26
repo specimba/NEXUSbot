@@ -378,7 +378,7 @@ export function VyceCard() {
                 <p id="vyce-key-note" className="text-xs text-muted-foreground">
                   Stored AES-256-GCM in the local vault — never displayed again, never sent to
                   the chat surface. Probe target:{" "}
-                  <span className="font-mono">{s.probeTarget} · GET /v1/models · 8s timeout</span>
+                  <span className="font-mono">{s.probeTarget} · GET /v1/models · 15s timeout</span>
                 </p>
                 {s.configured && (
                   <Button type="button" variant="ghost" className="min-h-9 self-start text-xs" onClick={closeForm}>
@@ -410,6 +410,7 @@ export function VyceCard() {
               <p className="flex flex-wrap items-center gap-1.5 font-mono text-[11px] [overflow-wrap:anywhere] text-muted-foreground">
                 <PlugZap className="size-3" aria-hidden="true" />
                 probe {s.probeTarget} · GET /v1/models
+                {s.route ? ` · via ${s.route} route` : ""}
                 {s.probedAt ? (
                   <>
                     {" · "}

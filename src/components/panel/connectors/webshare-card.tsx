@@ -63,6 +63,11 @@ type EgressProbeResponse = {
   ok: true;
   target: string;
   checkedAt: string;
+  /** Which key the probe sent ("keyless" when none could be resolved). */
+  keyState?: "vault" | "edge-secret" | "keyless";
+  /** Honest reason no key could be attached (e.g. the Groq edge secret is a
+   *  SHA-256 hash) — never key material. */
+  keyNote?: string | null;
   direct: EgressProbeSide;
   proxied: EgressProbeSide & { attempts: number };
   egressChanged: boolean;
@@ -529,6 +534,8 @@ function EgressRoutingSection() {
             const probing = runProbe.isPending && runProbe.variables === key;
             const notes: string[] = [];
             if (result) {
+              if (result.keyNote) notes.push(`key: ${result.keyNote}`);
+              else if (result.keyState && result.keyState !== "keyless") notes.push(`probed with the ${result.keyState} key`);
               if (result.proxied.error?.message) notes.push(result.proxied.error.message);
               else {
                 if (result.direct.country) notes.push(`direct egress: ${result.direct.country}`);

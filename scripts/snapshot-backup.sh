@@ -122,7 +122,10 @@ AP
 chmod 700 ops/vault/askpass.sh
 export GIT_ASKPASS="$PWD/ops/vault/askpass.sh" GIT_TERMINAL_PROMPT=0
 
-# 2) fail-closed secret scan (R11: literal-only env pattern, tests/ out of set)
+# 2) fail-closed secret scan — EARLY pass on the repository index (R11:
+# literal-only env pattern, tests/ out of set; index-guard catches platform
+# re-tracking before any work is done). The AUTHORITATIVE pass runs in step 5.5
+# against the exact push-set temp index — see the note there.
 if ! bash scripts/secret-scan.sh; then
   log "ABORT: secret scan found hits — resolve before any push"
   S_RESULT="scan-failed"; S_AT="$TS"; state_flush
@@ -176,6 +179,21 @@ git add -A -- . \
   ':(exclude,glob)**/*.log' \
   ':(exclude,glob)**/*.tsbuildinfo'
 TREE=$(git write-tree)
+# 5.5) AUTHORITATIVE fail-closed scan of the EXACT push set (2026-10-26 22:49
+#      +03 incident root fix). The step-2 scan reads the repository index — but
+#      step 5 builds the tree from the WORKING TREE, so a brand-new file (the
+#      owner's 21:08 seal) could ride the 21:42 push having never been
+#      content-scanned: it entered the index only via step 3's `git add -A`,
+#      AFTER the scan had already run. Scanning the temp index closes that hole
+#      by construction — the scan set IS the push set, file for file. The
+#      script's index-guard still pins to the real index (env -u), so this pass
+#      cannot mask a platform-sync re-tracking regression.
+if ! GIT_INDEX_FILE="$TMPIDX" bash scripts/secret-scan.sh; then
+  unset GIT_INDEX_FILE
+  log "ABORT: push-set secret scan found hits — resolve before any push"
+  S_RESULT="scan-failed"; S_AT="$TS"; state_flush
+  exit 1
+fi
 unset GIT_INDEX_FILE
 
 # 6) skip when content unchanged (idempotent cadence runs).

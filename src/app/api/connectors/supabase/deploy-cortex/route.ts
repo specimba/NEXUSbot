@@ -143,9 +143,15 @@ export async function POST(req: Request) {
   }
 
   const allOk = deploys.every((d) => d.status >= 200 && d.status < 300);
+  // The version THIS source ships — parsed from the SERVICE_VERSION constant so
+  // the panel never again displays a stale hardcoded number (v29.14 card vs
+  // v29.17 probe, 2026-10-26). If the constant is ever renamed/removed, the
+  // card falls back to the live probe line only — no fabricated version.
+  const versionMatch = source.match(/^const SERVICE_VERSION = "(nexus-cortex-v[\w.-]+)";/m);
   return NextResponse.json({
     ok: allOk,
     secretsStatus,
+    shipsVersion: versionMatch ? versionMatch[1] : null,
     deploys,
     probes,
     note: "verify_jwt=true — the widget's 3-part anon JWT remains the auth (sb_publishable_ keys are rejected).",

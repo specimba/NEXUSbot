@@ -245,14 +245,20 @@ export async function resolveVyceKeyFallback(): Promise<VyceFallback> {
       if (found === null) continue; // project unreachable — try the next
       const key = found.get("VYCE_API_KEY");
       if (key && key.trim().length >= 8) {
-        // Owner's live issue: the secret itself may be a SHA-256 fingerprint
-        // (64 hex) — that can never authenticate, so treat it as absent and
-        // say exactly why instead of probing with it forever.
+        // MEASURED 2026-10-26 23:4x +03: the Supabase Mgmt API GET /secrets
+        // returns a SHA-256 DIGEST of every value, never the raw value
+        // (NEXUS_SEARCH_GLOBAL_MAX_PER_HOUR="12" reads back as exactly
+        // sha256("12")). A 64-hex "value" therefore does NOT mean the owner
+        // stored a hash — it means the API is digest-blinded by design and the
+        // raw key CANNOT be read back here. The RUNNING edge function uses its
+        // own env copy; the panel's own lane needs a vault key. The fingerprint
+        // guard stays (a digest can never authenticate) — only the explanation
+        // was wrong before.
         if (looksLikeVyceFingerprint(key)) {
           return {
             ok: false,
             reason:
-              "the VYCE_API_KEY secret on the Supabase harness project is itself a 64-hex SHA-256 hash, not the raw key — re-store the RAW key there (or paste it below to make a vault key primary)",
+              "VYCE_API_KEY exists as a Supabase edge secret, but the Mgmt API only returns a SHA-256 digest of it — the panel cannot read the raw value back (the running edge function uses its own env copy). Paste the raw key below to arm the panel's own Vyce lane from the vault.",
           };
         }
         const baseUrlRaw = found.get("VYCE_BASE_URL")?.trim();
@@ -353,13 +359,17 @@ export async function resolveGroqKeyFallback(): Promise<GroqFallback> {
       if (found === null) continue; // project unreachable — try the next
       const key = found.get("GROQ_API_KEY");
       if (key && key.trim().length >= 8) {
-        // Same live issue as Vyce: the harness project's secrets were stored
-        // as SHA-256 hashes — a 64-hex value can never authenticate at Groq.
+        // MEASURED 2026-10-26: the Mgmt API returns SHA-256 digests, not raw
+        // values (see the Vyce fallback above for the proof). The EDGE
+        // function's own GROQ lane verifiably works with its env copy (groq
+        // 200 in 664ms while this resolver read a "hash") — the panel simply
+        // cannot borrow the value through this API. Honest outcome: the
+        // fallback is digest-blinded, the panel's Groq floor needs a vault key.
         if (looksLikeVyceFingerprint(key)) {
           return {
             ok: false,
             reason:
-              "the GROQ_API_KEY secret on the Supabase harness project is a 64-hex SHA-256 hash, not the raw key — re-store the RAW key there (or save it in the Groq vault slot)",
+              "GROQ_API_KEY exists as a Supabase edge secret, but the Mgmt API only returns a SHA-256 digest of it — the panel cannot read the raw value back (the edge function's own Groq lane uses its env copy and works). Save the raw Groq key in the panel's Groq vault slot to arm the panel-side floor lane.",
           };
         }
         return { ok: true, key: key.trim() };
@@ -1432,7 +1442,8 @@ export async function getGroqSlotStatus(): Promise<GroqSlotStatus> {
       probedAt: null,
       error: {
         code: "NO_KEY",
-        message: "no Groq key available — vault empty and Supabase edge-secret fallback unavailable",
+        message:
+          "no Groq key in the vault, and the Supabase edge-secret cannot be read back (the Mgmt API returns only SHA-256 digests). Save the raw Groq key in the Groq vault slot to arm the panel-side floor lane — the edge function's own Groq lane keeps working either way.",
       },
     };
   }

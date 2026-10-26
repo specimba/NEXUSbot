@@ -6,7 +6,7 @@ import {
   computeTierAvailability,
   emptyTierMap,
   loadVyceKey,
-  probeVyce,
+  probeVyceRouted,
   resolveVyceBaseUrl,
   vyceProbeTarget,
   type VyceStatusPayload,
@@ -69,6 +69,7 @@ export async function GET(req: Request) {
       maskedKey: null,
       probeTarget,
       probedAt: null,
+      route: null,
       error: { code: "VAULT_UNREADABLE", message: "Stored Vyce key could not be decrypted — re-save it." },
       fallback: null,
     };
@@ -77,7 +78,7 @@ export async function GET(req: Request) {
 
   // --- Vault key present → probe with it.
   if (vault.ok) {
-    const probe = await probeVyce(vault.key, baseUrl);
+    const probe = await probeVyceRouted(vault.key, baseUrl);
 
     // Fingerprint-shaped vault value: it can never authenticate — do NOT stop
     // at the 401. Probe the Supabase edge-secret fallback too and report the
@@ -95,6 +96,7 @@ export async function GET(req: Request) {
         maskedKey: vault.masked,
         probeTarget,
         probedAt,
+        route: null,
         error: { code: "STORED_KEY_IS_FINGERPRINT", message: ignoredMsg },
         fallback: { available: false, reason: null },
         vaultIgnored: ignoredMsg,
@@ -102,7 +104,7 @@ export async function GET(req: Request) {
       try {
         const f = await resolveVyceKeyFallback();
         if (f.ok) {
-          const fp = await probeVyce(f.key, f.baseUrl ?? baseUrl);
+          const fp = await probeVyceRouted(f.key, f.baseUrl ?? baseUrl);
           fb = {
             configured: true,
             connected: fp.ok,
@@ -112,6 +114,7 @@ export async function GET(req: Request) {
             maskedKey: vault.masked,
             probeTarget,
             probedAt,
+            route: fp.route,
             error: fp.ok ? null : { code: fp.code, message: fp.message },
             fallback: { available: true, reason: null },
             vaultIgnored: ignoredMsg,
@@ -134,6 +137,7 @@ export async function GET(req: Request) {
       maskedKey: vault.masked,
       probeTarget,
       probedAt,
+      route: probe.route,
       error: probe.ok
         ? null
         : { code: probe.code, message: probe.message },
@@ -147,7 +151,7 @@ export async function GET(req: Request) {
   try {
     const fb = await resolveVyceKeyFallback();
     if (fb.ok) {
-      const probe = await probeVyce(fb.key, fb.baseUrl ?? baseUrl);
+      const probe = await probeVyceRouted(fb.key, fb.baseUrl ?? baseUrl);
       const payload: VyceStatusPayload = {
         configured: false, // no vault key — fallback is a usable but secondary source
         connected: probe.ok,
@@ -157,6 +161,7 @@ export async function GET(req: Request) {
         maskedKey: null, // fallback key material is never even masked-displayed
         probeTarget,
         probedAt,
+        route: probe.route,
         error: probe.ok ? null : { code: probe.code, message: probe.message },
         fallback: { available: true, reason: null },
       };
@@ -176,6 +181,7 @@ export async function GET(req: Request) {
     maskedKey: null,
     probeTarget,
     probedAt: null,
+    route: null,
     error: null,
     fallback,
   };

@@ -1142,3 +1142,52 @@ Stage Summary:
 - OUR CURRENT INGESTION (read-only inspection): mini-services/kick-bridge/index.ts (port 3010) is the sole chat pipe — UNOFFICIAL: resolves channel via public https://kick.com/api/v2/channels/{slug} (no creds), discovers Kick's internal Centrifuge gateway via POST web.kick.com/api/v1/realtime/channels/{channel_id}/chat/connection, fetches a ~45-min GUEST JWT via POST web.kick.com/api/v1/realtime/auth/connection, opens wss://realtime.{region}.platform.kick.com/connection/websocket, subscribes chatrooms.{chatroom_id}.v2, consumes App\Events\ChatMessageEvent (legacy-Pusher inner schema), keepalive+backoff, 40-min proactive token refresh, 45s viewer poll; fans out chatMessageEvent/viewerCountUpdatedEvent/bridgeStatusEvent to widgets. Consumer: src/lib/widgets/runtime.ts §6 (LIVE KICK FEED — ws://<panel-host>/?XTransformPort=3010&ch=<slug> → widgetEvent DOM events, real http(s) hosts only). Additional unofficial poll: seeds/cyber-ai-counter.js syncDirectKickTelemetry → kick.com/api/v2/channels/{slug} every 10s (viewer count). No Kick OAuth/credentials exist anywhere in src (remaining "kick" matches = Kickbot-contract parity, persona strings, comments).
 - What official OAuth would add/replace: replace the fragile undocumented guest-websocket feed with signed chat.message.sent webhooks (identity badges/emotes in payload, delivery guaranteed, no token-refresh juggling); the webhook's public-HTTPS constraint is already solvable with our existing public Supabase edge functions (nexus-cortex) or a docs-endorsed Cloudflare Tunnel; chat:write would let the bot answer in REAL Kick chat (today it only renders inside the OBS overlay); livestream.status.updated could replace the 10s/45s viewer polls; vault gains a "kick" Credential service for access/refresh tokens.
 - Could NOT verify live (honest): exact access-token lifetime; multiple-redirect-URI support; official HTTP rate-limit numbers; consent-screen visuals; help.kick.com Developers & API collection's article list (JS-loaded); OIDC discovery document (id.kick.com/.well-known/openid-configuration → 404).
+
+---
+Task ID: 26-b
+Agent: Z.ai Code (main)
+Task: Diagnose + fix "egress routing not worked after couple minutes trying on vyce" (user report with probe dump: groq proxy 401 UNAUTH_PROBE, generic 200 HK/US)
+
+Work Log:
+- Read dev.log probe trace: user's vyce probe = POST /api/egress/probe 38.9s (8s direct timeout + 3 proxy attempts × 9s, all dead) → "not worked" was the PROBE's blanket 8s/9s budgets, not the routing layer.
+- Confirmed runtime egress IS wired: src/lib/ai/client.ts resolveBrainRoute() → routeFor(provider, readRoutingMap()) for vyce/groq/custom/default; streaming stays direct-only by design.
+- FIXED: EGRESS_PROBE_TARGETS gains per-target probeTimeoutMs (src/lib/egress.ts); probe route uses conf.probeTimeoutMs for direct + per-attempt budgets, vyce attempts capped at 2 (30s worst case) — src/app/api/egress/probe/route.ts.
+- MEASURED (scripts/temp-vyce-egress.ts, vault key attached, 15s honest budgets, then deleted): DIRECT → UNREACHABLE_FROM_SANDBOX after full 15s (black hole); PROXY ×2 (US pool) → PROXY_CONNECT_REFUSED after full 15s each — vyceai.com edge will not complete CONNECT tunnels from the pool region either. Verdict: real vyceai.com platform outage from EVERY route; egress routing itself is healthy (generic 200/200 HK·US, groq proxy 401 = WAF bypassed at auth layer).
+- Interpreted for the owner: groq "proxy 401 · UNAUTH_PROBE" is SUCCESS (keyless probe reached the upstream auth layer = WAF bypass); "egress changed" toast = setting applied.
+
+Stage Summary:
+- Egress routing works; vyceai.com is down platform-side from both direct (HK) and proxy (US) routes. VYCE BREAKER already contains it (no lead tax). Probe now measures honestly (15s vyce budgets, 2 pool attempts) — retry the Vyce probe from the panel later; when the platform recovers it will answer 200 via whichever route.
+- Files: src/lib/egress.ts, src/app/api/egress/probe/route.ts. Lint clean.
+
+---
+Task ID: 26-c
+Agent: Z.ai Code (main)
+Task: Fix the GitHub snapshot failure ("secret scan failed — push aborted" at 21:15 +03, right after the owner sealed at 21:08)
+
+Work Log:
+- Reproduced: bash scripts/secret-scan.sh → SECRET-HIT [index-guard] "forbidden path still tracked (1372 paths)" — the R14 platform-sync strike AGAIN: the sandbox platform's sync process replaced .gitignore with the 2-line template and re-tracked .env, .next/, db/, ops/vault/, upload/ into the index. The seal file was NEVER the cause (fail-closed guard did exactly its job).
+- Ran the designed idempotent remedy: bash scripts/hygiene-untrack.sh → restored hardened .gitignore from HEAD~4, untracked all forbidden categories, committed locally, scan gate green: "SCAN OK: no secret-shaped hits in 229 files".
+- Ran bash scripts/snapshot-backup.sh → PUSH OK → specimba/NEXUSbot main @ a3612bd368b0 (files-changed 19, divergence pre-check OK). The owner's 21:08 seal (.seal/nexus-seal.v1.json) + all Task 25-b work + today's fixes are now durable on GitHub; verified inside the pushed tree AND the codeload archive.
+- Verified repo is public (raw README 200, codeload archive 200, blob page 200); raw.githubusercontent lags materializing the BRAND-NEW blobs (obs.html) — same-commit README serves; resolves in minutes, by design irrelevant to the Pages path.
+
+Stage Summary:
+- Snapshot chain unblocked and pushed; scan gate green; seal durable. Tag snapshot-20261026 left untouched at the earlier commit (immutable daily tags, by design). If the platform sync guts .gitignore again, the guard will fail closed and scripts/hygiene-untrack.sh is the standing remedy.
+
+---
+Task ID: 26-d
+Agent: Z.ai Code (main)
+Task: Stable always-on OBS browser-source URL within our own capabilities (owner: "browser url revoked and created new still on preview z.ai … what we need to make this thing work on stable and always on url")
+
+Work Log:
+- Tested hosting options: jsDelivr serves HTML as text/plain (unusable as a page host); GitHub Pages not yet enabled for specimba/NEXUSbot (404); raw.githubusercontent = CORS * + 5-min cache (chosen as the live origin file source); repo confirmed public.
+- BUILT the bridge: public/obs.html — static page that rides the sanitized snapshot chain (GitHub main), reads the panel's CURRENT origin from obs-target.json (raw GitHub primary, same-origin fallback), validates shape (no open redirect), redirects OBS to origin + /api/widgets/<w>/stream?token=<t>; token travels in the OBS-side URL only, never in any public file; auto-retry while panel unpublished/unreachable.
+- BUILT the publish path: src/app/api/obs/publish-origin/route.ts (GET status / POST publish; session-gated; origin-only validation; writes public/obs-target.json + Settings obs.published-origin[-at]; spawns snapshot-backup.sh with NEXUS_BACKUP_ORIGIN_PUSH=1 — a documented TIME-THROTTLE bypass in scripts/snapshot-backup.sh (scan/dedupe/fast-forward/divergence gates all still apply)).
+- BUILT auto-publish: src/components/panel/panel-app.tsx fires the publish POST on every authenticated panel load (fire-and-forget; 401 harmless) — after each session rotation, merely opening the panel repoints the bridge.
+- BUILT the UI: widgets.tsx OBS card gains the "Stable bridge URL" block (readonly URL + Copy + publish status badge + "Publish current address now"), built from the SAME encrypted-path token via src/lib/obs-bridge.ts helpers.
+- VERIFIED end-to-end in a real browser (agent-browser): panel root renders (login gate); /obs.html?t=<live token>&w=<widget id> → resolved origin → redirected to https://preview-chat-<chat>.space-z.ai/api/widgets/<id>/stream?token=… → "Specimba Cyber AI Counter" widget rendered ("QUEUE: 0"), zero page errors; stream route 200; publish route compiles + gates 401 unauth. dev.log shows one benign 404 race (auto-publish fired during the route's first compile — next reload publishes) and one dev-only cross-origin warning from the 127.0.0.1 test context.
+- Pushed everything (with 26-c's push @ a3612bd368b0); files confirmed in the codeload archive of main.
+
+Stage Summary:
+- STABLE OBS URL (after owner one-time click): https://specimba.github.io/NEXUSbot/obs.html?t=<ingest-token>&w=<widget-id> — shown + copyable in Widgets → OBS Browser Source URL. It never changes across preview rotations; the panel auto-republishes its address on every panel open.
+- OWNER ACTION (one-time): enable GitHub Pages on specimba/NEXUSbot → Settings → Pages → Deploy from branch main / (root). Until then that URL 404s; the direct (rotating) link keeps working as before.
+- The same stable-URL architecture also solves the future Kick OAuth redirect-uri problem (register the Pages URL as the app's redirect).

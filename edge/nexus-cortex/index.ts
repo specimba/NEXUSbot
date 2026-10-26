@@ -96,6 +96,14 @@ const MODEL_CATALOG = [
 const MODEL_IDS = new Set(MODEL_CATALOG.map((x) => x.id));
 const IMAGE_MODEL = { id: "grok-imagine-2", label: "GROK IMAGINE 2.0" };
 
+// Single source of truth for the service identity (2026-10-26 incident: the
+// GET handler reported v29.17 while models/diagnostics still said v29.14 and
+// the panel card hardcoded v29.14 — three drifting labels for one deploy).
+// EVERY response that carries a service id must use THIS constant; the deploy
+// route regexes it out of the source so the panel card can never hardcode a
+// stale version again.
+const SERVICE_VERSION = "nexus-cortex-v29.17";
+
 const SAFE_HOSTS = new Set([
   "open.spotify.com",
   "music.apple.com",
@@ -1226,7 +1234,7 @@ Deno.serve(async (req: Request) => {
   if (req.method === "GET")
     return json({
       ok: true,
-      service: "nexus-cortex-v29.17",
+      service: SERVICE_VERSION,
       supportedActions: [...ACTIONS],
       imageModel: IMAGE_MODEL.id,
       defaultVyceModel: resolveEffectivePreferredModel("auto"),
@@ -1295,7 +1303,7 @@ Deno.serve(async (req: Request) => {
     if (action === "models")
       return json({
         ok: true,
-        service: "nexus-cortex-v29.14",
+        service: SERVICE_VERSION,
         catalogOnly: true,
         pricingAndLatencyAreUnverifiedMetadata: true,
         defaultVyceModel: resolveEffectivePreferredModel("auto"),
@@ -1313,7 +1321,7 @@ Deno.serve(async (req: Request) => {
         return json({ ok: false, error: "Database diagnostic failed" }, 500);
       return json({
         ok: true,
-        service: "nexus-cortex-v29.14",
+        service: SERVICE_VERSION,
         knowledgeRows: k.count ?? 0,
         dossierRows: d.count ?? 0,
         defaultVyceModel: resolveEffectivePreferredModel("auto"),

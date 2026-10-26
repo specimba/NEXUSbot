@@ -7,7 +7,30 @@ import { runPageRead } from "./search";
 import { buildNewsDigest, buildGeneralDigest } from "./exa-news";
 
 /**
- * NEXUS OS — Panel Cortex Engine (v29.17).
+ * NEXUS OS — Panel Cortex Engine (v29.19).
+ *
+ * v29.19 (owner directive 2026-10-26 ~23:00 +03: "these are all we catch
+ * bullshits, fix them calm and steady rather than making surface sweeping
+ * progression theatre anymore" — four measured fixes, no theatre):
+ *   1. ECHO GUARD (route-level): every !ai message produced TWO interaction
+ *      rows — one real race answer + one "VYCE // RATE_GUARD" rejection ~1s
+ *      later. Root cause: the widget mounts per browser origin (OBS overlay +
+ *      panel preview); the per-page localStorage claim lock cannot dedupe
+ *      across mounts. The route now returns the FIRST mount's answer for an
+ *      identical (sender, prompt) within 45s (route "cortex-echo") — same
+ *      reply, same label, no rate-limit line, no second model spend. The rate
+ *      guard label also stopped lying ("PANEL // RATE_GUARD" — the panel
+ *      speaks, not Vyce).
+ *   2. EDGE LANE BUDGET 13s → 15s (measured): during the vyce supplier flap
+ *      the edge is the ONLY answering lane and answers in the 12.3-12.9s
+ *      class; the 13s cap raced real answers into the STATIC floor.
+ *   3. GROQ FALLBACK TRUTH (client.ts): the Supabase Mgmt API GET /secrets
+ *      returns SHA-256 DIGESTS, never raw values (proven: budget secret "12"
+ *      reads back as sha256("12")); the old "you stored a hash, re-store the
+ *      raw key" advice was FALSE — the edge's own Groq lane works (groq 200 in
+ *      664ms measured) with its env copy. The resolvers now say exactly that.
+ *   4. No lane-budget changes to vyce itself: direct measured 200/1.0s and
+ *      proxy 200/1.4-5.3s while healthy — current budgets cover both routes.
  *
  * v29.17 (owner 20:5x +03: "what is this turbo hat bullshit and why everything
  * look vyce routed even they are not" — live p50 14.1s, every row
@@ -907,7 +930,12 @@ async function raceModel(
     maybeFireGroq();
     return r;
   });
-  const edgeP = edgeChatAttempt(req, messages, Math.min(13_000, Math.max(4_000, remaining()))).then(
+  // Edge budget 13s → 15s (measured 2026-10-26 23:4x +03): during the vyce
+  // supplier flap the edge lane is the ONLY answering path and its answers
+  // measure 12.3-12.9s — the old 13s cap raced them into the STATIC floor
+  // (E2E: STATIC at 13.0s while the same prompt got a real edge reply at
+  // 12.9s on the direct probe). The 16s deadline still bounds the race.
+  const edgeP = edgeChatAttempt(req, messages, Math.min(15_000, Math.max(4_000, remaining()))).then(
     (reply): RaceAttempt | null => (reply ? { provider: "edge", modelLabel: "EDGE // NEXUS-CORTEX", content: reply, latencyMs: 0 } : null),
   );
 
@@ -1294,6 +1322,50 @@ export async function runCortex(req: CortexRequest): Promise<CortexResult> {
     modelLabel: r.modelLabel, provider: r.provider, route: "cortex-chat",
     telemetry: { latencyMs: Date.now() - started, webSearch: "none", intentMs },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Echo guard (2026-10-26 22:2x +03 incident: every !ai message produced TWO
+// rows in the interaction log — one real race answer, one "VYCE // RATE_GUARD"
+// rejection). Root cause: the widget mounts independently per browser origin
+// (OBS overlay + panel preview), the per-page localStorage claim lock cannot
+// dedupe ACROSS mounts, so both mounts POST the same Kick message ~1s apart
+// and the second hit the 8s per-sender rate gap. A duplicate is NOT abuse —
+// it is the same viewer's same message. The echo guard returns the FIRST
+// mount's actual answer (same reply, same model label) so both overlays render
+// the identical truth instead of one answer + one bogus rate-limit line, and
+// the duplicate never consumes rate budget.
+// ---------------------------------------------------------------------------
+
+const ECHO_TTL_MS = 45_000;
+const echoCache = new Map<string, { at: number; result: CortexResult }>();
+
+function echoKey(sender: string, prompt: string): string {
+  return `${sender.toLowerCase()}::${prompt.trim().toLowerCase().slice(0, 200)}`;
+}
+
+/** The cached answer for an identical (sender, prompt) within the TTL, with the
+ *  route marked cortex-echo so the interaction log stays honest about which
+ *  row is the original and which is the duplicate mount's replay. */
+export function cortexEchoLookup(sender: string, prompt: string): CortexResult | null {
+  const hit = echoCache.get(echoKey(sender, prompt));
+  if (!hit) return null;
+  if (Date.now() - hit.at > ECHO_TTL_MS) {
+    echoCache.delete(echoKey(sender, prompt));
+    return null;
+  }
+  return { ...hit.result, route: "cortex-echo", telemetry: { ...hit.result.telemetry, latencyMs: 0 } };
+}
+
+export function cortexEchoRemember(sender: string, prompt: string, result: CortexResult): void {
+  if (!result?.reply || result.route === "cortex-rate") return;
+  if (echoCache.size > 200) {
+    const now = Date.now();
+    for (const [k, v] of echoCache) {
+      if (now - v.at > ECHO_TTL_MS) echoCache.delete(k);
+    }
+  }
+  echoCache.set(echoKey(sender, prompt), { at: Date.now(), result });
 }
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { hasBrainAccess, clampStr, isRosterAdmin } from "@/lib/brain/auth";
-import { runCortex, cortexRateAllows } from "@/lib/brain/cortex";
+import {
+  cortexEchoLookup,
+  cortexEchoRemember,
+  cortexRateAllows,
+  runCortex,
+} from "@/lib/brain/cortex";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -46,13 +51,26 @@ export async function POST(req: Request) {
   }
 
   const rosterAdmin = isRosterAdmin(sender);
+
+  // Echo guard FIRST (2026-10-26 double-fire incident): the same Kick message
+  // can arrive from two independent widget mounts (OBS overlay + panel
+  // preview — per-page localStorage locks cannot dedupe across origins).
+  // A duplicate is the same viewer's same message — it must get the SAME
+  // answer, never a rate-limit rejection and never a second model spend.
+  const echo = cortexEchoLookup(sender, prompt);
+  if (echo) {
+    return NextResponse.json(echo, { status: 200 });
+  }
+
   if (!cortexRateAllows(sender, rosterAdmin)) {
     return NextResponse.json(
       {
         ok: true,
         intent: "CHAT",
         reply: "Hız limiti — birkaç saniye nefes al, sıra sende. 🎛",
-        modelLabel: "VYCE // RATE_GUARD",
+        // v29.19 label truth: this line is spoken by the PANEL's rate guard,
+        // not by Vyce — same principle as the v29.17 STATIC floor fix.
+        modelLabel: "PANEL // RATE_GUARD",
         provider: "tool",
         route: "cortex-rate",
         telemetry: { latencyMs: 0, webSearch: "none" as const, intentMs: 0 },
@@ -77,6 +95,7 @@ export async function POST(req: Request) {
     roomTranscript: clampStr(body.roomTranscript, 1_200),
     isResearchHint: body.isResearchHint === true,
   });
+  cortexEchoRemember(sender, prompt, result);
 
   return NextResponse.json(result, { status: 200 });
 }

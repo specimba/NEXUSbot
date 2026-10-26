@@ -3,6 +3,7 @@ import { requireSession } from "@/lib/auth";
 import { clientKey, rateLimit } from "@/lib/guard";
 import { loadVyceKey } from "@/lib/connectors/vyce";
 import { loadGroqKey } from "@/lib/ai/groq";
+import { resolveGroqKeyFallback } from "@/lib/ai/client";
 import {
   EGRESS_PROBE_TARGETS,
   classifyEgress,
@@ -96,19 +97,39 @@ export async function POST(req: Request) {
   // Vault key attachment (2026-10-26 fix): probe what the REAL calls measure.
   // The key stays in-process — headers are transport-only, and the response
   // contract below never carries header material or bodies (P7).
+  // 2026-10-26 #3: Groq probes now use the FULL runtime key chain
+  // (vault → Supabase edge-secret). Before, an empty Groq vault made every
+  // probe keyless — the card read "401 · UNAUTH_PROBE" (a transport fact)
+  // while the actual runtime problem was the edge secret being a SHA-256
+  // hash. keyState/keyNote now say which key probed and WHY none could.
   const headers: Record<string, string> = { Accept: "application/json" };
   let keyless = true;
+  let keyState: "vault" | "edge-secret" | "keyless" = "keyless";
+  let keyNote: string | null = null;
   if (target === "vyce") {
     const k = await loadVyceKey();
     if (k.ok) {
       headers.Authorization = `Bearer ${k.key}`;
       keyless = false;
+      keyState = "vault";
     }
   } else if (target === "groq") {
     const g = await loadGroqKey();
     if (g.ok) {
       headers.Authorization = `Bearer ${g.key}`;
       keyless = false;
+      keyState = "vault";
+    } else {
+      // Same chain the brain's Groq lane resolves (client.ts) — the probe
+      // must measure the key the runtime would actually send.
+      const fb = await resolveGroqKeyFallback();
+      if (fb.ok) {
+        headers.Authorization = `Bearer ${fb.key}`;
+        keyless = false;
+        keyState = "edge-secret";
+      } else {
+        keyNote = fb.reason;
+      }
     }
   }
 
@@ -201,6 +222,8 @@ export async function POST(req: Request) {
     ok: true,
     target,
     checkedAt: new Date().toISOString(),
+    keyState,
+    keyNote,
     direct: {
       status: directStatus,
       reachable: directCls.reachable,

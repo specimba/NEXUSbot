@@ -892,6 +892,9 @@ function SecretsSection(props: { health: ReturnType<typeof useQuery<SupabaseHeal
 type DeployResult = {
   ok: boolean;
   secretsStatus: number;
+  /** Version parsed from the SERVICE_VERSION constant in the shipped source —
+   *  the card must never hardcode a version again (v29.14/v29.17 drift). */
+  shipsVersion: string | null;
   deploys: Array<{ slug: string; status: number; detail: string }>;
   probes: Array<{ slug: string; status: number; service: string; exaArmed?: boolean }>;
   note?: string;
@@ -936,10 +939,16 @@ function DeployCortexSection() {
     <section aria-label="Deploy cortex" className="space-y-2 rounded-md border border-border/60 p-3">
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
-          <p className="text-sm font-medium">Edge cortex deploy — v29.14</p>
+          <p className="text-sm font-medium">
+            Edge cortex deploy
+            {result?.shipsVersion ? (
+              <span className="font-mono text-muted-foreground"> — ships {result.shipsVersion}</span>
+            ) : null}
+          </p>
           <p className="text-xs text-muted-foreground">
             Hedged provider race (no more dead-air) + Exa research tier. Ships to nexus-cortex +
-            nexus-cortex-harness and upserts the budget secrets.
+            nexus-cortex-harness and upserts the budget secrets. The version above is parsed from
+            the source being shipped; the probe line below shows what is actually running.
           </p>
         </div>
         <Button

@@ -11,7 +11,7 @@ import {
   looksLikeVyceFingerprint,
   maskVyceKey,
   normalizeVyceBaseUrl,
-  probeVyce,
+  probeVyceRouted,
   resolveVyceBaseUrl,
   storeVyceBaseUrl,
   storeVyceKey,
@@ -79,16 +79,19 @@ export async function PUT(req: Request) {
   }
   if (clearBaseUrl) await clearVyceBaseUrlOverride();
 
-  // MEASURED probe with the just-stored credential (values never logged).
-  let probe: { ok: boolean; httpStatus: number | null; code: string | null; modelCount: number | null };
+  // MEASURED probe with the just-stored credential, through the SAME egress
+  // route the runtime uses (a key stored while routing sends Vyce through the
+  // pool must be validated through the pool — a direct probe would report a
+  // transport verdict about a proxied runtime).
+  let probe: { ok: boolean; httpStatus: number | null; code: string | null; modelCount: number | null; route: "direct" | "proxy" | null };
   try {
     const effectiveBase = await resolveVyceBaseUrl();
-    const r = await probeVyce(key, effectiveBase);
+    const r = await probeVyceRouted(key, effectiveBase);
     probe = r.ok
-      ? { ok: true, httpStatus: r.httpStatus, code: null, modelCount: r.models.length }
-      : { ok: false, httpStatus: r.httpStatus, code: r.code, modelCount: null };
+      ? { ok: true, httpStatus: r.httpStatus, code: null, modelCount: r.models.length, route: r.route }
+      : { ok: false, httpStatus: r.httpStatus, code: r.code, modelCount: null, route: r.route };
   } catch {
-    probe = { ok: false, httpStatus: null, code: "NETWORK_ERROR", modelCount: null };
+    probe = { ok: false, httpStatus: null, code: "NETWORK_ERROR", modelCount: null, route: null };
   }
 
   return NextResponse.json(
