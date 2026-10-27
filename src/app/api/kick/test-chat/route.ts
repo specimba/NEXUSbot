@@ -46,5 +46,5 @@ export async function POST(req: Request) {
       { status: 502 },
     );
   }
-  return NextResponse.json({ ok: true, sent: true, messageId: res.messageId ?? null });
+  return NextResponse.json({ ok: true, sent: true, messageId: res.messageId ?? null, identity: res.identity ?? null });
 }

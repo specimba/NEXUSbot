@@ -640,7 +640,11 @@ const EMOJI_RE = /[\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F\u200D\u
  * Serialized with a 1.5s floor so bursts stay polite. Returns the REAL Kick
  * error text on rejection.
  */
-export async function kickSendBotMessage(content: string): Promise<{ ok: boolean; code?: string; messageId?: string }> {
+export type KickSendIdentity = "bot" | "bot+chatroom" | "user";
+
+export async function kickSendBotMessage(
+  content: string,
+): Promise<{ ok: boolean; code?: string; messageId?: string; identity?: KickSendIdentity }> {
   const oauth = await loadKickOAuth();
   if (!oauth) return { ok: false, code: "NOT_CONNECTED" };
   const broadcasterUserId = oauth.account?.userId;
@@ -662,32 +666,49 @@ export async function kickSendBotMessage(content: string): Promise<{ ok: boolean
     const wait = rt.lastChatSentAt + CHAT_SEND_GAP_MS - Date.now();
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
     rt.lastChatSentAt = Date.now();
-    try {
-      const res = await kickApiFetch("/public/v1/chat", {
-        method: "POST",
-        // Measured contract (probe matrix, 2026-10-27): chatroom_id ALONE →
-        // 400 "Invalid request"; type "bot" → 404; the ACCEPTED body carries
-        // chatroom_id + broadcaster_user_id + type "user" → 200 is_sent.
-        body: JSON.stringify({
-          chatroom_id: chatroomId,
-          broadcaster_user_id: broadcasterUserId,
-          content: text,
-          type: "user",
-        }),
-      });
-      const body = (await res.json().catch(() => ({}))) as {
-        data?: { is_sent?: boolean; message_id?: string };
-        message?: string;
-      };
-      if (!res.ok) {
-        const detail = (body.message ?? "").slice(0, 160);
-        return { ok: false, code: detail ? `HTTP_${res.status}: ${detail}` : `HTTP_${res.status}` };
+    // IDENTITY LADDER — docs.kick.com/apis/chat.md (pulled 2026-10-27):
+    //   "You can send a message as a Bot account or your User account… when
+    //   sending as a bot, the broadcaster_user_id is not required and is
+    //   ignored. As a bot, the message will always be sent to the channel
+    //   attached to your token." The official schema is {content, type} with
+    //   NO chatroom_id — the morning probe matrix predated the app's bot and
+    //   measured only legacy shapes (type bot → 404 back then). Owner ask:
+    //   replies must come from the BOT account, never the streamer identity,
+    //   so bot-first with the measured user contract as the last resort.
+    const attempts: Array<{ identity: KickSendIdentity; body: Record<string, unknown> }> = [
+      { identity: "bot", body: { content: text, type: "bot" } },
+      { identity: "bot+chatroom", body: { chatroom_id: chatroomId, content: text, type: "bot" } },
+      {
+        identity: "user",
+        body: { chatroom_id: chatroomId, broadcaster_user_id: broadcasterUserId, content: text, type: "user" },
+      },
+    ];
+    let last: { ok: false; code: string } = { ok: false, code: "SEND_FAILED" };
+    for (const attempt of attempts) {
+      try {
+        const res = await kickApiFetch("/public/v1/chat", {
+          method: "POST",
+          body: JSON.stringify(attempt.body),
+        });
+        const body = (await res.json().catch(() => ({}))) as {
+          data?: { is_sent?: boolean; message_id?: string };
+          message?: string;
+        };
+        if (!res.ok) {
+          const detail = (body.message ?? "").slice(0, 160);
+          last = { ok: false, code: detail ? `HTTP_${res.status}: ${detail}` : `HTTP_${res.status}` };
+          continue;
+        }
+        if (body.data?.is_sent === false) {
+          last = { ok: false, code: "NOT_SENT" };
+          continue;
+        }
+        return { ok: true, messageId: body.data?.message_id, identity: attempt.identity };
+      } catch (e) {
+        last = { ok: false, code: e instanceof Error ? e.message : "NETWORK" };
       }
-      if (body.data?.is_sent === false) return { ok: false, code: "NOT_SENT" };
-      return { ok: true, messageId: body.data?.message_id };
-    } catch (e) {
-      return { ok: false, code: e instanceof Error ? e.message : "NETWORK" };
     }
+    return last;
   };
 
   const chained = rt.sendChain.then(exec, exec);

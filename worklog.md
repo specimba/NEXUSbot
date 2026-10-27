@@ -1479,3 +1479,22 @@ Stage Summary:
 - Owner threads open (untouched per constraints): GitHub token dead + remote main diverged (backup lane fully blocked until resolved); Kick OAuth still NOT CONFIGURED — the owner's Kick form still holds the http:// fcapp.run URLs that Kick rejects; r2's v32 playbook (paste the two https://preview-chat-… values) remains the unblock path.
 - RSI / routing-upgrade candidates: (1) concurrent-agent .next wipes kill the live server — needs a coordinated wipe protocol (wipe only pre-boot or via the watchdog's purge); (2) dev.sh should reuse the watchdog's panic-aware heal at boot; (3) bench-cadence arena.ai kinds ×5 PARSE_FAILED (upstream format drift; aa-index fresh, 27 models); (4) rerunning backup lane is owner-blocked, script itself behaved fail-closed and honest.
 - Files: mini-services/mem-watchdog/index.ts only.
+
+---
+Task ID: 37
+Agent: main
+Task: Owner report — (a) "why are we still writing in my account while it says bot account active — is there any way for writing chat without my id, deep search that", (b) "GitHub connection refreshed 2 times but not working" (durability card FAILED: remote diverged).
+
+Work Log:
+- KICK BOT IDENTITY (deep search done on the source of truth): docs.kick.com/apis/chat.md (pulled live) states verbatim — "You can send a message as a Bot account or your User account… when sending as a bot, the broadcaster_user_id is not required and is ignored. As a bot, the message will always be sent to the channel attached to your token." Official schema {content, type:"user"|"bot"} — NO chatroom_id. The old "type bot → 404" probe predates the app's bot existing ("A BOT already exists for this App" now true). ROOT CAUSE of owner-identity posts: kickSendBotMessage used the morning's measured legacy contract {chatroom_id, broadcaster_user_id, type:"user"}.
+- FIX: kick.ts IDENTITY LADDER — try {content,type:"bot"} (official) → {chatroom_id,content,type:"bot"} (legacy shape) → {chatroom_id,broadcaster_user_id,type:"user"} (guaranteed fallback); returns which identity won. test-chat route + KickCard toast now surface it ("Posted as the BOT account" vs "Posted from YOUR account — bot identity rejected").
+- LIVE-VERIFIED (one disclosed test message via the card's own test-send lane, message_id 7cc9b4ec-…): response identity = "bot" — the reply posted as the BOT account, NOT specimba. All future !ai webhook replies take the same path.
+- GITHUB DIVERGENCE ROOT CAUSE: remote-only commit 7780fc41888b is OUR OWN "snapshot: 2026-10-27 09:45 +03" pushed by the MORNING sandbox session before the reboot; the mixed-time workspace restore then rebuilt the local chain from the older 3fe90634 base → two chains forked. Re-connecting GitHub (owner, ×2) only refreshed the TOKEN (auth was never the problem — GET /user 200).
+- PRE-GRAFT AUDIT: git diff 7780fc4→5ca7e9a6 = 125 files, +20509/−127, ZERO deleted files; deletions confined to strictly-newer local versions (mem-watchdog, kick.ts v32, tsconfig, obs-target); worklog +59/−0 (strict superset). Local tree is a safe superset of remote.
+- RESOLUTION (directive §8-compliant, no force push): graft commit d8a8d861 = commit-tree 17fbe55072ab (the script's own sanitized+scanned tree) with parent 7780fc41888b; refs/heads/public-snapshot updated; merge-base verified remote IS ancestor → future pushes fast-forward. Then backup run → SKIP + "auth probe OK: stale failure cleared" (content unchanged at that moment); the real PUSH OK lands with the next content change (this worklog).
+- VERIFIED: bun x tsc --noEmit exit 0; bun run lint exit 0.
+
+Stage Summary:
+- Bot replies now post as the App's BOT account (NEXUSspecimbaBOT), never the streamer identity — owner question answered with doc ground truth + a live probe; guaranteed user fallback retained for resilience.
+- Snapshot chain re-unified with the remote via a ff-only graft (no force push); durability lane unblocks on the next push.
+- Files: src/lib/connectors/kick.ts (identity ladder), src/app/api/kick/test-chat/route.ts (+identity), src/components/panel/connectors/kick-card.tsx (toast). No schema changes.

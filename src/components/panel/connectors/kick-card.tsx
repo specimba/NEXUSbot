@@ -240,7 +240,17 @@ export function KickCard() {
       }
       return res.json();
     },
-    onSuccess: () => toast.success("Test message sent to Kick chat", { description: "check the channel" }),
+    onSuccess: (data) => {
+      const identity = (data as { identity?: string } | null)?.identity;
+      toast.success("Test message sent to Kick chat", {
+        description:
+          identity === "user"
+            ? "Posted from YOUR account — the bot identity was rejected by Kick."
+            : identity
+              ? "Posted as the BOT account (not your streamer identity)."
+              : "check the channel",
+      });
+    },
     onError: (e: Error) => toast.error("Test send failed", { description: e.message }),
   });
 
