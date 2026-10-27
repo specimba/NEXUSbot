@@ -17,9 +17,12 @@ import {
   Gauge,
   KeyRound,
   Newspaper,
+  Pause,
+  Play,
   Radar,
   RefreshCw,
   Timer,
+  Trash2,
 } from "lucide-react";
 
 /**
@@ -64,6 +67,30 @@ type ExaStatus = {
     nextRunAt?: string | null;
   }>;
   monitorsError: string;
+  localMonitors: Array<{
+    id: string;
+    query: string;
+    periodLabel: string;
+    paused: boolean;
+    lastRunAt: string | null;
+    nextRunAt: string | null;
+    lastStatus: "never" | "ok" | "error";
+    lastError: string;
+    lastItemCount: number;
+    runCount: number;
+  }>;
+  monitorRuns: Array<{
+    id: string;
+    monitorId: string;
+    query: string;
+    at: string;
+    ok: boolean;
+    itemCount: number;
+    newCount: number;
+    error: string;
+    tookMs: number;
+  }>;
+  webhookMode: { nativeWebhook: boolean; source: string };
   webhookInbox: Array<{ receivedAt: string; monitorId: string; kind: string }>;
   edge: { reachable: boolean; service: string; exaArmed: boolean };
 };
@@ -172,7 +199,7 @@ export function ExaCard() {
   });
 
   const createMonitor = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (): Promise<{ transport?: string }> => {
       const res = await fetch("/api/exa", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -180,8 +207,35 @@ export function ExaCard() {
           action: "create-monitor",
           query: monitorQuery,
           period: monitorPeriod,
-          numResults: 10,
+          numResults: 8,
         }),
+      });
+      const body = (await res.json().catch(() => null)) as
+        | { transport?: string; error?: { message?: string } }
+        | null;
+      if (!res.ok || !body) throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
+      return body;
+    },
+    onSuccess: (data) => {
+      invalidate();
+      toast({
+        title: data.transport === "exa" ? "Native Exa monitor registered" : "Local monitor registered",
+        description:
+          data.transport === "exa"
+            ? "Exa will push deduped results to /api/exa/webhook on its interval."
+            : "The panel scheduler runs it in-process (first check ~1 min). Results land in the webhook inbox.",
+      });
+    },
+    onError: (e: Error) =>
+      toast({ title: "Monitor failed", description: e.message, variant: "destructive" }),
+  });
+
+  const runMonitor = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch("/api/exa", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "run-monitor", id }),
       });
       const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
       if (!res.ok) throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
@@ -189,13 +243,48 @@ export function ExaCard() {
     },
     onSuccess: () => {
       invalidate();
-      toast({
-        title: "Monitor registered",
-        description: "Exa will push deduped results to /api/exa/webhook on its interval.",
-      });
+      toast({ title: "Monitor run finished", description: "Run history + inbox updated." });
     },
     onError: (e: Error) =>
-      toast({ title: "Monitor failed", description: e.message, variant: "destructive" }),
+      toast({ title: "Run failed", description: e.message, variant: "destructive" }),
+  });
+
+  const toggleMonitor = useMutation({
+    mutationFn: async ({ id, paused }: { id: string; paused: boolean }) => {
+      const res = await fetch("/api/exa", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "toggle-monitor", id, paused }),
+      });
+      const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
+      if (!res.ok) throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
+      return body;
+    },
+    onSuccess: () => {
+      invalidate();
+      toast({ title: "Monitor updated" });
+    },
+    onError: (e: Error) =>
+      toast({ title: "Update failed", description: e.message, variant: "destructive" }),
+  });
+
+  const deleteMonitor = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch("/api/exa", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete-monitor", id }),
+      });
+      const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
+      if (!res.ok) throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
+      return body;
+    },
+    onSuccess: () => {
+      invalidate();
+      toast({ title: "Monitor deleted" });
+    },
+    onError: (e: Error) =>
+      toast({ title: "Delete failed", description: e.message, variant: "destructive" }),
   });
 
   const s = status.data;
@@ -366,18 +455,64 @@ export function ExaCard() {
 
         {/* Monitors */}
         <div className="space-y-2">
-          <div className="flex items-center gap-2 text-xs font-medium">
-            <Radar className="h-3.5 w-3.5" aria-hidden /> Monitors (scheduled searches → webhook)
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-xs font-medium">
+              <Radar className="h-3.5 w-3.5" aria-hidden /> Monitors (scheduled research)
+            </div>
+            <span className="text-[10px] text-muted-foreground" title="Local runs in-process and feeds the webhook inbox; native Exa monitors only with a public https webhook">
+              {s?.webhookMode?.nativeWebhook ? "transport: exa webhook" : "transport: local scheduler"}
+            </span>
           </div>
-          {s?.monitors?.length ? (
-            <ul className="max-h-28 space-y-1 overflow-y-auto pr-1 text-[11px]">
-              {s.monitors.map((m, i) => (
-                <li key={m.id ?? i} className="flex items-center justify-between gap-2 rounded border border-border/50 px-2 py-1">
+          {s?.localMonitors?.length || s?.monitors?.length ? (
+            <ul className="max-h-40 space-y-1 overflow-y-auto pr-1 text-[11px]">
+              {(s.localMonitors ?? []).map((m) => (
+                <li key={m.id} className="rounded border border-border/50 px-2 py-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate" title={m.query}>{m.query}</span>
+                    <span className="flex shrink-0 items-center gap-1">
+                      <Badge variant="secondary" className="px-1 py-0 text-[9px]">LOCAL</Badge>
+                      {m.paused ? (
+                        <span className="text-muted-foreground">paused</span>
+                      ) : m.lastStatus === "error" ? (
+                        <span className="font-medium text-destructive" title={m.lastError}>error</span>
+                      ) : m.lastStatus === "ok" ? (
+                        <span className="font-medium text-primary">ok</span>
+                      ) : (
+                        <span className="text-muted-foreground">pending</span>
+                      )}
+                    </span>
+                  </div>
+                  <div className="mt-0.5 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+                    <span className="truncate">
+                      {m.periodLabel}
+                      {m.lastRunAt ? ` · last ${formatDistanceToNow(new Date(m.lastRunAt), { addSuffix: true })} (${m.lastItemCount} items)` : " · not run yet"}
+                      {!m.paused && m.nextRunAt ? ` · next ${formatDistanceToNow(new Date(m.nextRunAt))}` : ""}
+                    </span>
+                    <span className="flex shrink-0 items-center gap-0.5">
+                      <Button size="icon" variant="ghost" className="h-6 w-6" title="Run now" disabled={runMonitor.isPending} onClick={() => runMonitor.mutate(m.id)}>
+                        <Play className="h-3 w-3" aria-hidden />
+                      </Button>
+                      <Button size="icon" variant="ghost" className="h-6 w-6" title={m.paused ? "Resume" : "Pause"} disabled={toggleMonitor.isPending} onClick={() => toggleMonitor.mutate({ id: m.id, paused: !m.paused })}>
+                        {m.paused ? <Play className="h-3 w-3" aria-hidden /> : <Pause className="h-3 w-3" aria-hidden />}
+                      </Button>
+                      <Button size="icon" variant="ghost" className="h-6 w-6 text-destructive" title="Delete" disabled={deleteMonitor.isPending} onClick={() => deleteMonitor.mutate(m.id)}>
+                        <Trash2 className="h-3 w-3" aria-hidden />
+                      </Button>
+                    </span>
+                  </div>
+                </li>
+              ))}
+              {(s.monitors ?? []).map((m, i) => (
+                <li key={m.id ?? `native-${i}`} className="flex items-center justify-between gap-2 rounded border border-border/50 px-2 py-1">
                   <span className="truncate">{m.search?.query ?? m.name ?? "(query n/a)"}</span>
                   <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
+                    <Badge variant="outline" className="px-1 py-0 text-[9px]">EXA</Badge>
                     <Timer className="h-3 w-3" aria-hidden />
                     {m.trigger?.period ?? "manual"}
                     {(m.status ?? m.state) ? ` · ${m.status ?? m.state}` : ""}
+                    <Button size="icon" variant="ghost" className="h-6 w-6 text-destructive" title="Delete" disabled={deleteMonitor.isPending || !m.id} onClick={() => m.id && deleteMonitor.mutate(m.id)}>
+                      <Trash2 className="h-3 w-3" aria-hidden />
+                    </Button>
                   </span>
                 </li>
               ))}
@@ -400,9 +535,11 @@ export function ExaCard() {
               onChange={(e) => setMonitorPeriod(e.target.value)}
               aria-label="Monitor interval"
             >
-              {/* Docs: single durations, minimum 1h (1h | 6h | 1d | 7d). */}
+              {/* Local scheduler floors at 15m; native Exa monitors floor at 1h (docs). */}
+              <option value="15m">15m</option>
               <option value="1h">1h</option>
               <option value="6h">6h</option>
+              <option value="12h">12h</option>
               <option value="1d">1d</option>
               <option value="7d">7d</option>
             </select>
@@ -410,9 +547,28 @@ export function ExaCard() {
               Create
             </Button>
           </div>
+          {s?.monitorRuns?.length ? (
+            <div className="space-y-1">
+              <p className="text-[10px] font-medium text-muted-foreground">Recent runs</p>
+              <ul className="max-h-24 space-y-0.5 overflow-y-auto pr-1 text-[10px]">
+                {s.monitorRuns.slice(0, 6).map((r) => (
+                  <li key={r.id} className="flex items-center justify-between gap-2 text-muted-foreground">
+                    <span className="truncate" title={r.error || r.query}>
+                      <span className={r.ok ? "text-primary" : "text-destructive"}>{r.ok ? "✓" : "✕"}</span>{" "}
+                      {r.query.slice(0, 40)}
+                    </span>
+                    <span className="shrink-0">
+                      {r.ok ? `${r.itemCount} items${r.newCount ? ` · ${r.newCount} new` : ""} · ` : `${r.error.slice(0, 24)} · `}
+                      {formatDistanceToNow(new Date(r.at), { addSuffix: true })}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
           {s?.webhookInbox?.length ? (
             <p className="text-[11px] text-muted-foreground">
-              Last webhook push: {formatDistanceToNow(new Date(s.webhookInbox[0].receivedAt), { addSuffix: true })} · monitor {s.webhookInbox[0].monitorId.slice(0, 12)}…
+              Last inbox push: {formatDistanceToNow(new Date(s.webhookInbox[0].receivedAt), { addSuffix: true })} · {s.webhookInbox[0].kind}
             </p>
           ) : null}
         </div>

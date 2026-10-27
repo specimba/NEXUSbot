@@ -273,7 +273,7 @@ async function exaFetch<T>(
   path: string,
   body: Record<string, unknown> | null,
   timeoutMs = EXA_TIMEOUT_MS,
-  method: "POST" | "GET" = "POST",
+  method: "POST" | "GET" | "DELETE" = "POST",
 ): Promise<{ ok: true; data: T; status: number } | { ok: false; error: string; status: number }> {
   const key = await getExaKey();
   if (!key) return { ok: false, error: "EXA_API_KEY not configured", status: 0 };
@@ -299,6 +299,15 @@ async function exaFetch<T>(
       }
       const scrubbed = detail.split(key).join("[redacted]");
       return { ok: false, error: `HTTP ${res.status} ${scrubbed}`.trim(), status: res.status };
+    }
+    if (res.status === 204) {
+      // DELETE /monitors/{id} answers 204 No Content on success.
+      return { ok: true, data: {} as T, status: res.status };
+    }
+    if (method === "DELETE") {
+      // Some deployments answer 200 with an empty body — treat as success.
+      const text = await res.text().catch(() => "");
+      return { ok: true, data: (text ? JSON.parse(text) : {}) as T, status: res.status };
     }
     const data = (await res.json()) as T;
     return { ok: true, data, status: res.status };
@@ -603,6 +612,27 @@ export async function exaCreateMonitor(
     }
   }
   return { ok: true, monitor: res.data };
+}
+
+/**
+ * DELETE /monitors/{id} — remove a native Exa monitor (v34). Best-effort
+ * callers surface the error; a 404 here means it is already gone (fine).
+ */
+export async function exaDeleteMonitor(
+  id: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const clean = clampStr(id, 120).trim();
+  if (!clean || /[/?#\s]/.test(clean)) return { ok: false, error: "bad monitor id" };
+  const res = await exaFetch<Record<string, unknown>>(
+    `/monitors/${encodeURIComponent(clean)}`,
+    null,
+    EXA_TIMEOUT_MS,
+    "DELETE",
+  );
+  if (res.ok) return { ok: true };
+  // Already deleted / never existed — idempotent delete is a success.
+  if (res.status === 404) return { ok: true };
+  return { ok: false, error: res.error };
 }
 
 /** One-time Exa webhook signing secret (vault, decrypted transiently). */

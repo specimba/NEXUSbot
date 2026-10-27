@@ -1,14 +1,9 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import {
-  hasBrainAccess,
-  clampStr,
-  redactSecrets,
-  FLAG_SEVERITY,
-  VALID_FLAGS,
-} from "@/lib/brain/auth";
+import { hasBrainAccess, clampStr, redactSecrets } from "@/lib/brain/auth";
 import { clientKey, rateLimit } from "@/lib/guard";
-import { mirrorInteraction, mirrorLesson } from "@/lib/brain/mirror";
+import { mirrorInteraction } from "@/lib/brain/mirror";
+import { computeSecurityFlags, foldSecurityLessons } from "@/lib/brain/security-lesson";
 import { cortexResultPeek, interactionRowDuplicate } from "@/lib/brain/cortex";
 
 /**
@@ -39,12 +34,17 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "username required" }, { status: 400 });
   }
 
-  const flagsRaw = Array.isArray(body.flags) ? body.flags : [];
-  const flags = flagsRaw
-    .map((f) => clampStr(f, 40).toUpperCase())
-    .filter((f) => VALID_FLAGS.has(f));
-  const uniqueFlags = Array.from(new Set(flags));
-  const injectionScore = uniqueFlags.reduce((max, f) => Math.max(max, FLAG_SEVERITY[f] ?? 1), 0);
+  // v34 — SERVER-AUTHORITATIVE INJECTION DETECTION. The panel-cortex and
+  // kick-webhook paths never computed flags (only the OBS overlay widget
+  // did), so live [SYSTEM INSTRUCTION] / "kuralları devre dışı bırak" attacks
+  // landed as unflagged rows and Security Memory stayed empty. Detection now
+  // recomputes from the raw message here — caller flags still merge on top.
+  // v34.1 — the fold lives in the SHARED module now: the webhook's
+  // writeInteractionRow (which wins the row for live chat) uses the exact
+  // same computation, so both writers cannot drift apart again.
+  const uniqueFlagsAndScore = computeSecurityFlags(String(body.message ?? ""), body.flags);
+  const uniqueFlags = uniqueFlagsAndScore.flags;
+  const injectionScore = uniqueFlagsAndScore.injectionScore;
 
   const message = clampStr(redactSecrets(String(body.message ?? "")), 2000);
   const response = clampStr(redactSecrets(String(body.response ?? "")), 2000);
@@ -134,32 +134,15 @@ export async function POST(req: Request) {
     },
   });
 
-  // Security memory — fold each flagged technique into a persistent lesson.
+  // Security memory — fold each flagged technique into a persistent lesson
+  // (shared fold, best-effort inside the module).
   if (uniqueFlags.length > 0) {
-    const snippet = clampStr(redactSecrets(message).replace(/\s+/g, " "), 120);
-    const counter = clampStr(finalResponse.replace(/\s+/g, " "), 200);
-    for (const technique of uniqueFlags) {
-      const lesson = await db.securityLesson
-        .upsert({
-          where: { technique_username: { technique, username } },
-          create: {
-            technique,
-            username,
-            snippet,
-            counter,
-            hits: 1,
-            severity: FLAG_SEVERITY[technique] ?? 1,
-            lastSeenAt: new Date(),
-          },
-          update: {
-            hits: { increment: 1 },
-            lastSeenAt: new Date(),
-            counter: counter || undefined,
-          },
-        })
-        .catch(() => null);
-      if (lesson) mirrorLesson(lesson);
-    }
+    await foldSecurityLessons({
+      username,
+      message,
+      response: finalResponse,
+      techniques: uniqueFlags,
+    });
   }
 
   // Supabase mirror (owner ask: local-first panel DB + cloud copy) — best-effort,

@@ -9,8 +9,9 @@ import {
   runCortex,
   type CortexResult,
 } from "@/lib/brain/cortex";
-import { getKickChatReplies, kickSendBotMessage, loadKickOAuth, verifyKickWebhook } from "@/lib/connectors/kick";
+import { getKickChatReplies, isBotHandle, kickSendBotMessage, loadKickOAuth, verifyKickWebhook } from "@/lib/connectors/kick";
 import { queueDeepResearch, type DeepResearchKind } from "@/lib/brain/deep-research";
+import { computeSecurityFlags, foldSecurityLessons } from "@/lib/brain/security-lesson";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -71,6 +72,14 @@ async function writeInteractionRow(opts: {
   ) {
     return;
   }
+  // v34.1 — SERVER-AUTHORITATIVE DETECTION AT THE ROW WRITER. This writer
+  // wins the row for live Kick chat (the overlay's /api/brain/log POST for
+  // the same exchange is deduped by interactionRowDuplicate), so the v34
+  // log-route wiring alone never saw webhook-written rows: every live attack
+  // landed as flags:"[]" and SecurityLesson stayed empty. Detect HERE from
+  // the raw viewer prompt; /api/brain/log keeps the same fold via the shared
+  // module — no write path can bypass detection anymore.
+  const { flags: detectedFlags, injectionScore } = computeSecurityFlags(opts.prompt, null);
   try {
     await db.interactionLog.create({
       data: {
@@ -94,14 +103,23 @@ async function writeInteractionRow(opts: {
         promptTokens: typeof r?.promptTokens === "number" ? r.promptTokens : null,
         completionTokens: typeof r?.completionTokens === "number" ? r.completionTokens : null,
         webUsed: r ? resultWebUsed(r) : false,
-        flags: "[]",
-        injectionScore: 0,
+        flags: JSON.stringify(detectedFlags),
+        injectionScore,
         memoryUsed: r?.memoryUsed === true,
         error: "",
       },
     });
   } catch {
     /* the log row is observability — never break the reply path on it */
+  }
+  // Security memory fold (best-effort, same discipline as the row itself).
+  if (detectedFlags.length) {
+    foldSecurityLessons({
+      username: opts.sender,
+      message: opts.prompt,
+      response,
+      techniques: detectedFlags,
+    }).catch(() => {});
   }
 }
 
@@ -123,6 +141,11 @@ async function noteEvent(payload: Record<string, unknown>): Promise<void> {
 
 async function processChatMessage(payload: ChatMessagePayload, messageId: string): Promise<void> {
   const sender = clampStr(payload.sender?.username ?? payload.sender_username ?? "izleyici", 60) || "izleyici";
+  // v34.2 — SELF-TRIGGER GUARD: the bot's own channel posts (a viewer can make
+  // the bot write "!ai …") come back through this webhook as chat events —
+  // without this gate the bot answers ITSELF (measured: ~7 self-generations
+  // and live self-talk on stream). The bot never consumes its own messages.
+  if (isBotHandle(sender)) return;
   const channel = clampStr(
     payload.broadcaster?.channel_slug ?? payload.broadcaster_channel_slug ?? "specimba",
     40,

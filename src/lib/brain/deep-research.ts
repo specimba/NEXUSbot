@@ -9,6 +9,11 @@ import {
 } from "@/lib/connectors/exa";
 import { hbAgentRun, loadHyperbrowserKey } from "@/lib/connectors/hyperbrowser";
 import { kickSendBotMessage } from "@/lib/connectors/kick";
+import {
+  PROMPT_LEAK_DEFLECTION,
+  isPromptLeak,
+  stripLeadingCommandToken,
+} from "@/lib/brain/prompt-guard";
 
 /**
  * NEXUS OS — v33 DEEP RESEARCH: the live-data lanes.
@@ -260,15 +265,18 @@ function hostOf(url: string): string {
 }
 
 /** Kick clamp is transport-level (480 graphemes); stay tighter here for a
- *  readable follow-up: answer + data date + up to 2 source hosts. */
+ *  readable follow-up: answer + data date + up to 2 source hosts. v34.3 —
+ *  these follow-ups POST STRAIGHT TO CHAT (no runCortex choke), so the same
+ *  prompt-echo + leading-"!ai" scrub runs here before anything leaves. */
 function formatChatFollowUp(
   winner: string,
   answer: string,
   asOf: string,
   hosts: string[],
 ): string {
+  const clean = stripLeadingCommandToken(answer.replace(/\s+/g, " ").trim());
+  if (isPromptLeak(clean, 2)) return PROMPT_LEAK_DEFLECTION;
   const bits: string[] = [];
-  const clean = answer.replace(/\s+/g, " ").trim();
   bits.push(`Güncel veri: ${clean}`);
   const today = todayUtc();
   if (asOf && asOf !== today) bits.push(`(veri tarihi: ${asOf})`);

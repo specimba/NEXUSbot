@@ -5,6 +5,7 @@ import {
   cortexEchoLookup,
   runCortex,
 } from "@/lib/brain/cortex";
+import { isBotHandle } from "@/lib/connectors/kick";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -46,6 +47,29 @@ export async function POST(req: Request) {
     return NextResponse.json(
       { ok: false, error: { code: "BAD_INPUT", message: "sender and prompt are required" } },
       { status: 400 },
+    );
+  }
+
+  // v34.2 — SELF-TRIGGER GUARD (server-side, widget-version independent):
+  // the overlay reads the same chat the webhook watches; the bot's own posts
+  // (which may start with "!ai" when a viewer made it write one) must never
+  // generate a model answer here either — otherwise the overlay displays the
+  // bot answering itself while the webhook posts the same to chat. A benign
+  // no-op result keeps old widget JS happy (no error surfaces in OBS).
+  if (isBotHandle(sender)) {
+    return NextResponse.json(
+      {
+        ok: true,
+        intent: "META",
+        reply: "",
+        modelLabel: "PANEL // SELF-SKIP",
+        modelId: "self-skip",
+        provider: "tool",
+        route: "cortex-self",
+        sources: [],
+        telemetry: { latencyMs: 0, webSearch: "none", intentMs: 0 },
+      },
+      { status: 200 },
     );
   }
 

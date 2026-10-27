@@ -187,8 +187,26 @@ export async function deleteKickConfig(): Promise<number> {
   return res.count;
 }
 
-export function maskKickApp(app: KickApp): { clientIdMasked: string; clientSecretMasked: string } {
+export function maskKickApp(app: KickApp): { clientIdMasked: string; clientSecretMasked } {
   return { clientIdMasked: maskSecret(app.clientId), clientSecretMasked: maskSecret(app.clientSecret) };
+}
+
+// ---------------------------------------------------------------------------
+// v34.2 — BOT SELF-IDENTITY guard (2026-10-28 live incident).
+// The app bot (NEXUSspecimbaBOT) posts replies INTO the channel; Kick then
+// delivers those messages back through the chat webhook / bridge. When a bot
+// reply itself starts with "!ai" (a viewer made the bot write one), the
+// pipeline processed ITS OWN message as a new viewer command — measured live:
+// ~7 self-triggered model generations in one hour, including the bot
+// answering itself on stream ("Aynen öyle, çete. Sen de mi ben oldun?").
+// Every ingest path MUST call isBotHandle() on the sender before generating.
+const KICK_BOT_SELF_HANDLES = new Set(["nexusspecimbabot"]);
+
+export function isBotHandle(handle: unknown): boolean {
+  const h = String(handle ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, "");
+  return KICK_BOT_SELF_HANDLES.has(h);
 }
 
 // ---------------------------------------------------------------------------

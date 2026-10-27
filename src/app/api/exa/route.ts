@@ -9,30 +9,58 @@ import {
   setExaBudget,
   exaListMonitors,
   exaCreateMonitor,
+  exaDeleteMonitor,
   readWebhookInbox,
   type ExaMonitorDraft,
 } from "@/lib/connectors/exa";
+import {
+  ensureMonitorScheduler,
+  listLocalMonitors,
+  listMonitorRuns,
+  createLocalMonitor,
+  deleteLocalMonitor,
+  setLocalMonitorPaused,
+  runLocalMonitorNow,
+  LOCAL_PERIODS,
+} from "@/lib/connectors/exa-monitors";
 import { getMgmtPat, mgmtUpsertSecrets, isValidProjectRef, resolveCortexProjectRef, resolveCortexAnonKey } from "@/lib/connectors/supabase";
 import { EXA_DIGEST_SETTING, buildNewsDigest } from "@/lib/brain/exa-news";
 import { clientKey, rateLimit } from "@/lib/guard";
 
 /**
  * GET /api/exa — status surface for the Connectors Exa card:
- * key armed (masked), today's usage ledger + budgets, monitors, webhook inbox,
- * cached news digest. No secret material ever leaves the process (P7).
+ * key armed (masked), today's usage ledger + budgets, native monitors,
+ * LOCAL monitors + run history, webhook inbox, cached news digest. No secret
+ * material ever leaves the process (P7). First GET also arms the in-process
+ * monitor scheduler (local monitors keep firing while the panel is closed).
  *
- * POST /api/exa — four owner actions:
+ * POST /api/exa — owner actions:
  *   { action: "set-key", secret }              → vault-encrypt + arm + live probe
  *   { action: "set-budget", dailySearch?, dailyAnswer?, dailyContents? }
- *   { action: "create-monitor", query, numResults?, period? }
- *                                              → registers an Exa Monitor that
- *                                                pushes deduped results to
- *                                                /api/exa/webhook
+ *   { action: "create-monitor", query, numResults?, period?, webhookUrl? }
+ *                                              → transport "exa" (native
+ *                                                monitor → public https
+ *                                                webhook) when an explicit
+ *                                                public URL exists (owner-
+ *                                                provided or EXA_WEBHOOK_URL
+ *                                                env); otherwise transport
+ *                                                "local" — the in-process
+ *                                                scheduler runs the query on
+ *                                                its interval and feeds the
+ *                                                SAME /api/exa/webhook inbox.
+ *   { action: "delete-monitor", id }           → local_ prefix = local store,
+ *                                                else DELETE /monitors/{id}
+ *   { action: "toggle-monitor", id, paused }   → local pause/resume
+ *   { action: "run-monitor", id }              → immediate local run
  *   { action: "refresh-digest" }               → force a fresh AI-news digest
  */
 export async function GET() {
   const denied = await requireSession();
   if (denied) return denied;
+
+  // Local monitors keep their schedule even with the panel closed; the first
+  // API touch after a restart re-arms the interval.
+  ensureMonitorScheduler();
 
   const [key, usage, budget, digestRow, inbox, ref, anon] = await Promise.all([
     getExaKey(),
@@ -79,6 +107,9 @@ export async function GET() {
     else monitorsError = m.error;
   }
 
+  const [localMonitors, monitorRuns] = await Promise.all([listLocalMonitors(), listMonitorRuns(12)]);
+  const envWebhook = (process.env.EXA_WEBHOOK_URL ?? "").trim();
+
   return NextResponse.json({
     ok: true,
     armed: Boolean(key),
@@ -88,6 +119,14 @@ export async function GET() {
     digest: digestRow,
     monitors,
     monitorsError,
+    localMonitors,
+    monitorRuns,
+    webhookMode: {
+      // Native monitors only when a public https webhook exists; otherwise
+      // creation falls back to the local scheduler (never fails on proto).
+      nativeWebhook: /^https:\/\//i.test(envWebhook),
+      source: /^https:\/\//i.test(envWebhook) ? "env:EXA_WEBHOOK_URL" : "local-scheduler",
+    },
     webhookInbox: inbox.slice(0, 8),
     edge,
   });
@@ -171,30 +210,118 @@ export async function POST(req: Request) {
         { status: 400 },
       );
     }
-    // The webhook must point at a publicly reachable origin — derive from the
-    // request host (preview gateway included), https enforced when forwarded.
-    const proto = (req.headers.get("x-forwarded-proto") ?? "http").split(",")[0].trim();
-    const host = req.headers.get("host") ?? "localhost:3000";
-    const webhookUrl = `${proto}://${host}/api/exa/webhook`;
+    const numResults = typeof body?.numResults === "number" ? body.numResults : 8;
     const period = String(body?.period ?? "1d");
-    const allowedPeriods: readonly ExaMonitorDraft["period"][] = ["1h", "6h", "12h", "1d", "1w", "7d"];
-    const created = await exaCreateMonitor({
-      query,
-      numResults: typeof body?.numResults === "number" ? body.numResults : 10,
-      // Docs (MEASURED 2026-10-25): single durations ≥ 1h; exaCreateMonitor
-      // maps "1w" → "7d" for the wire format.
-      period: allowedPeriods.includes(period as ExaMonitorDraft["period"])
-        ? (period as ExaMonitorDraft["period"])
-        : "1d",
-      webhookUrl,
-    });
+    const allowedPeriods = Object.keys(LOCAL_PERIODS);
+    const safePeriod = allowedPeriods.includes(period) ? period : "1d";
+
+    // v34 — transport decision. Native Exa monitors need a PUBLIC https
+    // webhook (no redirects). This sandbox origin is http-behind-gateway and
+    // not stably reachable by Exa's servers, so deriving it from the request
+    // ALWAYS failed ("webhook url required"). Native is only attempted when a
+    // public URL is explicitly configured: owner-provided body.webhookUrl or
+    // EXA_WEBHOOK_URL env. Everything else runs locally in-process.
+    const explicitUrl = typeof body?.webhookUrl === "string" ? body.webhookUrl.trim() : "";
+    const envUrl = (process.env.EXA_WEBHOOK_URL ?? "").trim();
+    const nativeUrl = /^https:\/\//i.test(explicitUrl)
+      ? explicitUrl
+      : /^https:\/\//i.test(envUrl)
+        ? envUrl
+        : "";
+
+    if (nativeUrl) {
+      // Docs (MEASURED 2026-10-25): native single durations ≥ 1h; "1w" maps
+      // to "7d" for the wire format. Local's 15m bumps to 1h on the wire.
+      const nativePeriod = (safePeriod === "15m" ? "1h" : safePeriod) as ExaMonitorDraft["period"];
+      const created = await exaCreateMonitor({
+        query,
+        numResults,
+        period: nativePeriod,
+        webhookUrl: nativeUrl,
+      });
+      if (!created.ok) {
+        return NextResponse.json(
+          { ok: false, error: { code: "EXA_ERROR", message: created.error } },
+          { status: 502 },
+        );
+      }
+      return NextResponse.json({ ok: true, transport: "exa", monitor: created.monitor, webhookUrl: nativeUrl });
+    }
+
+    const created = await createLocalMonitor({ query, numResults, period: safePeriod });
     if (!created.ok) {
       return NextResponse.json(
-        { ok: false, error: { code: "EXA_ERROR", message: created.error } },
+        { ok: false, error: { code: "MONITOR_REJECTED", message: created.error } },
+        { status: 400 },
+      );
+    }
+    ensureMonitorScheduler();
+    return NextResponse.json({ ok: true, transport: "local", monitor: created.monitor });
+  }
+
+  if (action === "delete-monitor") {
+    const id = String(body?.id ?? "").trim();
+    if (!id) {
+      return NextResponse.json(
+        { ok: false, error: { code: "BAD_ID", message: "monitor id required" } },
+        { status: 400 },
+      );
+    }
+    if (id.startsWith("local_")) {
+      const removed = await deleteLocalMonitor(id);
+      if (!removed) {
+        return NextResponse.json(
+          { ok: false, error: { code: "NOT_FOUND", message: "local monitor not found" } },
+          { status: 404 },
+        );
+      }
+      return NextResponse.json({ ok: true, transport: "local" });
+    }
+    const removed = await exaDeleteMonitor(id);
+    if (!removed.ok) {
+      return NextResponse.json(
+        { ok: false, error: { code: "EXA_ERROR", message: removed.error } },
         { status: 502 },
       );
     }
-    return NextResponse.json({ ok: true, monitor: created.monitor, webhookUrl });
+    return NextResponse.json({ ok: true, transport: "exa" });
+  }
+
+  if (action === "toggle-monitor") {
+    const id = String(body?.id ?? "").trim();
+    const paused = body?.paused === true;
+    if (!id.startsWith("local_")) {
+      return NextResponse.json(
+        { ok: false, error: { code: "BAD_ID", message: "pause/resume is local-only (native monitors are managed on dashboard.exa.ai)" } },
+        { status: 400 },
+      );
+    }
+    const updated = await setLocalMonitorPaused(id, paused);
+    if (!updated) {
+      return NextResponse.json(
+        { ok: false, error: { code: "NOT_FOUND", message: "local monitor not found" } },
+        { status: 404 },
+      );
+    }
+    return NextResponse.json({ ok: true, monitor: updated });
+  }
+
+  if (action === "run-monitor") {
+    const id = String(body?.id ?? "").trim();
+    if (!id.startsWith("local_")) {
+      return NextResponse.json(
+        { ok: false, error: { code: "BAD_ID", message: "run-now is local-only" } },
+        { status: 400 },
+      );
+    }
+    const run = await runLocalMonitorNow(id);
+    if (!run) {
+      return NextResponse.json(
+        { ok: false, error: { code: "NOT_FOUND", message: "local monitor not found (or a run is already in flight)" } },
+        { status: 404 },
+      );
+    }
+    return NextResponse.json({ ok: true, run });
   }
 
   if (action === "refresh-digest") {
