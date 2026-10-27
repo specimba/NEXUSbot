@@ -51,6 +51,7 @@ type KickStatus = {
     scope: string | null;
     expiresAt: number | null;
     redirectUri: string;
+    webhookUrl: string;
     scopes: string[];
     scopeHints: Record<string, string>;
     webhooks: { subs: Array<{ id: string; event: string; version: number }> | null; error: string | null };
@@ -286,14 +287,19 @@ export function KickCard() {
 
           {!status.isPending && s && (
             <>
-              {/* Step 0 — the exact redirect URL for the Kick Create-an-App form */}
-              <CopyRow label="Kick Create-an-App → Redirect URL (birebir yapıştır)" value={s.redirectUri} />
+              {/* Step 0 — the exact URLs for the Kick Create-an-App form */}
+              <div className="space-y-2">
+                <CopyRow label="Kick Create-an-App → Redirect URL (birebir yapıştır)" value={s.redirectUri} />
+                <CopyRow label="Kick Create-an-App → Webhooks URL (https zorunlu)" value={s.webhookUrl} />
+              </div>
 
               {!s.configured && (
                 <div className="space-y-3">
                   <div className="rounded-md border border-border bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground">
                     kick.com → <span className="text-foreground">Ayarlar → Developer → Create an App</span>:
-                    webhooks'i aç, Redirect URL'e yukarıdaki değeri yapıştır, şu kutucukları işaretle —{" "}
+                    Redirect URL ve Webhooks URL'e yukarıdaki iki değeri birebir yapıştır (eski
+                    <span className="font-mono text-foreground"> http://ws-ef-…fcapp.run</span> satırı hata
+                    verir — Kick yalnızca https kabul eder), şu kutucukları işaretle —{" "}
                     {s.scopes.map((sc) => s.scopeHints[sc]).filter(Boolean).join(", ")} — sonra Client ID/Secret'i
                     buraya gir.
                   </div>

@@ -7,6 +7,7 @@ import {
   getKickChatReplies,
   kickCallbackUrl,
   kickListWebhookSubs,
+  kickWebhookUrl,
   loadKickApp,
   loadKickOAuth,
   maskKickApp,
@@ -23,6 +24,8 @@ export const dynamic = "force-dynamic";
  *   - oauth:     connected? account, granted scope, token expiry
  *   - redirect:  the exact /api/kick/callback URL to register in the Kick
  *                Create-an-App form (computed from the request origin)
+ *   - webhookUrl: the exact /api/kick/webhook URL for the form's "Enable
+ *                webhooks" field (Kick validates it must be https)
  *   - webhooks:  live chat.message.sent subscriptions when connected
  *   - chatReplies: the bot-replies-in-chat toggle
  */
@@ -40,6 +43,7 @@ export async function GET(req: Request) {
   // origin is the FC tunnel host + http (the exact wrong URL the owner pasted
   // into the Kick form). The anchored OBS base URL is the real https origin.
   const redirectUri = kickCallbackUrl(await publicOrigin(req));
+  const webhookUrl = kickWebhookUrl(await publicOrigin(req));
 
   let webhooks: { subs: Array<{ id: string; event: string; version: number }> | null; error: string | null } = {
     subs: null,
@@ -63,6 +67,7 @@ export async function GET(req: Request) {
       scope: oauth?.scope ?? null,
       expiresAt: oauth?.expiresAt ?? null,
       redirectUri,
+      webhookUrl,
       scopes: KICK_SCOPES,
       scopeHints: KICK_SCOPE_HINTS,
       webhooks,

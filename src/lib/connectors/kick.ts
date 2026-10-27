@@ -223,6 +223,11 @@ export function kickCallbackUrl(origin: string): string {
   return `${origin.replace(/\/+$/, "")}/api/kick/callback`;
 }
 
+/** Exact URL to paste into the Kick Create-an-App "Enable webhooks" field. */
+export function kickWebhookUrl(origin: string): string {
+  return `${origin.replace(/\/+$/, "")}/api/kick/webhook`;
+}
+
 /** Public origin of an incoming panel request (behind the Caddy gateway). */
 export function requestOrigin(req: Request): string {
   const proto = (req.headers.get("x-forwarded-proto") ?? "").split(",")[0].trim() || "http";
