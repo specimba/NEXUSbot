@@ -352,6 +352,30 @@ const CAPABILITY_Q_RE =
 const TECH_EXPLAIN_RE =
   /(ne\s*anlama\s*gel|ne\s*demek\s*bu|noluyo(?:r)?\s*bu|ne\s*oluyor\s*bu|what\s*does\s*this\s*mean)/i;
 
+// v29.21 — DATE-NOW questions. The 03:14–03:16 +03 failure class: the owner
+// asked the current date three ways ("şuan tarih ne", "tarih?", "hangi
+// tarihteyiz. cevapla.") and the chat lanes deflected robot-style on every
+// one ("Tarihi bilmem dostum, elimde takvim yok"). A CURRENT-date question
+// is deterministic exactly like TIME — zero model, zero deflection. Guarded
+// against content-date questions ("vizyon tarihi ne zaman", "sezon tarihi"):
+// those need either a now-anchor word, a "hangi/what day" shape, or a BARE
+// "tarih?" — otherwise they stay in the research/chat tiers where they
+// belong.
+const DATE_NOW_RE =
+  /(hangi\s*tarih(?:te|yiz|eyiz|)?|ay[ıi]n\s*ka[çc]|hangi\s*(?:g[uü]n|ay|y[ıi]l)(?:de|da|dı|dı)?y?[ıi]z|ne\s*g[uü]n(?:d[uü]y[uü]z|e?yiz)|what\s*(?:'s|is)?\s*the\s*date|what\s*day\s*is\s*it)/i;
+const BARE_DATE_RE = /^\s*tarih\s*[?\.!,:]*\s*$/i;
+const DATE_WORD_RE = /tarih/i;
+const NOW_ANCHOR_RE = /(ş[uü]\s*a?n|suan|şimdi|simdi|bug[uü]n|bugun|kaçındayız|kacindayiz|g[uü]n(?:d[uü]n[mü]?|ün\s*deyiz)?\s*$)/i;
+
+// v29.21 — KNOWLEDGE-CUTOFF meta. The 03:16 +03 row: "knowledge cutoff un
+// kaç" got a ladder-poisoned BEAM answer ("O konu kapandı dostum, Supabase
+// ile eşitlendi") — the shared window carried old Supabase chatter and the
+// flash model happily welded it onto the cutoff question. Model-freshness
+// questions get the deterministic meta lane (same philosophy as
+// TIME/STATUS/SELFAQ): zero model, zero confabulation surface.
+const CUTOFF_RE =
+  /(knowledge\s*cutoff|cutoff\s*(?:'?(?:un|ün))?\s*(?:ka[çc]|nedir|ne\b)|e[ğg]itim\s*(?:tarih|veri|data)|training\s*(?:cutoff|data)|son\s*bilgi\s*tarihi|bilgin\s*(?:ne\s*zamana|hangi)|hangi\s*tarihe\s*kadar|ne\s*zamana\s*kadar\s*biliyorsun)/i;
+
 // Any prompt containing a URL forces the fetch path — the viewer pointed at a
 // SPECIFIC page; answering from model priors (web:no) is exactly the
 // hallucination class the owner banned (g1.globo.com election numbers).
@@ -381,7 +405,18 @@ export function classifyIntent(prompt: string): CortexIntent {
   // technical paragraph containing the word "busy" hijacked the whole race
   // into the deterministic STATUS tool. Long prompts can never be a "how
   // are you" question — they fall through to the real gates below.
-  if (p.length <= 160 && TIME_RE.test(p)) return "TIME";
+  // v29.21 — TIME answers both clock and current-date questions; a date
+  // question only qualifies with a now-anchor, a "hangi tarih" shape, or a
+  // bare "tarih?" (content-date questions keep their research/chat tier).
+  if (
+    p.length <= 160 &&
+    (TIME_RE.test(p) ||
+      DATE_NOW_RE.test(p) ||
+      BARE_DATE_RE.test(p) ||
+      (DATE_WORD_RE.test(p) && NOW_ANCHOR_RE.test(p)))
+  ) {
+    return "TIME";
+  }
   if (p.length <= 160 && STATUS_RE.test(p)) return "STATUS";
   if (DRAW_RE.test(p) && p.length <= 160) return "DRAW";
   if (URL_RE.test(p)) return "RESEARCH";
@@ -428,17 +463,25 @@ const ZONE_MAP: Array<{ re: RegExp; zone: string; tr: string }> = [
   { re: /\b(?:güney afrika|johannesburg)/i, zone: "Africa/Johannesburg", tr: "Güney Afrika" },
 ];
 
-function timeInZone(zone: string): { time: string; day: string } {
+function timeInZone(zone: string): { time: string; day: string; date: string } {
   const now = new Date();
   const fmt = new Intl.DateTimeFormat("tr-TR", {
     timeZone: zone,
     hour: "2-digit",
     minute: "2-digit",
     weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
   });
   const parts = fmt.formatToParts(now);
   const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
-  return { time: `${get("hour")}:${get("minute")}`, day: get("weekday") };
+  return {
+    time: `${get("hour")}:${get("minute")}`,
+    day: get("weekday"),
+    // v29.21 — "16 Aralık 2025": the date half of the KRONOS answer.
+    date: `${get("day")} ${get("month")} ${get("year")}`,
+  };
 }
 
 function zoneOffsetLabel(zone: string): string {
@@ -470,12 +513,27 @@ function answerTime(prompt: string, sender: string): string {
   const hit = ZONE_MAP.find((z) => z.re.test(prompt));
   const zone = hit ? hit.zone : "Europe/Istanbul";
   const label = hit ? hit.tr : "Türkiye";
-  const { time, day } = timeInZone(zone);
+  const { time, day, date } = timeInZone(zone);
   const off = zoneOffsetLabel(zone);
-  if (!hit) {
-    return `Saat sorgusu geldi ama yeri yakalayamadım — Türkiye'de şu an ${day} ${time}. Hangi ülke? Brezilya, Japonya, Almanya, Dubai... yaz, anında söylerim. ⏱`;
-  }
-  return `${label}'da (${zone.split("/")[1].replace(/_/g, " ")}) şu an ${day} günü saat ${time}${off ? ` — ${off}` : ""}. ⏱`;
+  const place = hit
+    ? `${label}'da (${zone.split("/")[1].replace(/_/g, " ")})`
+    : `Türkiye'de`;
+  // Offset label only makes sense for a NON-default zone (the default IS
+  // Türkiye — "Türkiye ile aynı saat dilimi" would be noise there).
+  const offSuffix = hit && off ? ` — ${off}` : "";
+  // v29.21 — date-questions get the full calendar line; time-only questions
+  // still carry the date in parentheses so the follow-up "tarih?" never
+  // needs to be asked (measured: the owner asked date 3× after a time-only
+  // KRONOS answer that omitted it).
+  const asksDate =
+    /(tarih|date|hangi\s*(?:g[uü]n|ay|y[ıi]l)|what\s*day|ay[ıi]n\s*ka[çc])/i.test(prompt) ||
+    BARE_DATE_RE.test(prompt);
+  const line = asksDate
+    ? `${place} bugün ${day} günü, ${date} — saat ${time}${offSuffix}.`
+    : `${place} şu an ${day} günü saat ${time} (${date})${offSuffix}.`;
+  const offer = hit ? "" : " Başka ülke? Brezilya, Japonya, Dubai, Londra... yaz, anında söylerim.";
+  void sender;
+  return `${line}${offer} ⏱`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1406,6 +1464,22 @@ export async function runCortex(req: CortexRequest): Promise<CortexResult> {
       ok: true, intent, reply: recapChatReply(rec),
       modelLabel: "VYCE // KAYIT HAT", provider: "tool", route: "cortex-recap",
       telemetry: { latencyMs: Date.now() - started, webSearch: "none", intentMs },
+    };
+  }
+
+  // --- v29.21 — META: model freshness ("knowledge cutoff") — deterministic --
+  // Never trust a flash model with a question we can answer ourselves: the
+  // shared window can carry unrelated chatter and the model welds it on
+  // (measured: "O konu kapandı, Supabase ile eşitlendi"). Long technical
+  // walls that merely mention "training data" stay in the research tier.
+  if (intent === "CHAT" && CUTOFF_RE.test(prompt) && prompt.length <= 160) {
+    const reply =
+      "Düzü söyleyeyim kanka: taban modellerimin eğitimi ~2025 başına kadar — ama cutoff beni bağlamaz, üstümde EXA canlı web hattı var: güncel ne varsa anında araştırıp kaynakla söylerim. 🛰";
+    noteHealth("tool", true, 0);
+    return {
+      ok: true, intent, reply,
+      modelLabel: "VYCE // KAYNAK HAT", provider: "tool", route: "cortex-meta",
+      telemetry: { latencyMs: Date.now() - started, webSearch: "none" as const, intentMs },
     };
   }
 
