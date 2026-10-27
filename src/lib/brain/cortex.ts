@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { clampStr, redactSecrets, isRosterAdmin } from "./auth";
 import { db } from "@/lib/db";
 import { chatComplete, type BrainMessage } from "@/lib/ai/client";
@@ -7,7 +8,27 @@ import { runPageRead } from "./search";
 import { buildNewsDigest, buildGeneralDigest } from "./exa-news";
 
 /**
- * NEXUS OS — Panel Cortex Engine (v29.20).
+ * NEXUS OS — Panel Cortex Engine (v29.22).
+ *
+ * v29.22 (owner directive 2026-10-27 ~04:5x +03 — "focus more on model
+ * routing and smartness", fresh log: the paid imagine lane 502'd on stream,
+ * a bare English image description landed in chat, release-date questions
+ * were answered from stale priors, and a fragment research query lost its
+ * antecedent):
+ *   1. RELEASE-DATE GATE: "ikinci sezon ne zaman" class routes to grounded
+ *      RESEARCH instead of prior-based chat.
+ *   2. ANTECEDENT-ENRICHED RESEARCH QUERIES: short fragments ("yönetmeni
+ *      kim", "hakkında detaylı bilgi ver") carry the last ladder topics into
+ *      the Exa query, so the search resolves the THING, not the fragment.
+ *   3. DRAW CONTINUATION: a bare image-description phrase ("a lovely woman
+ *      robot looks fragile") right after a channel draw routes to the
+ *      imagine flow instead of "my image engine is asleep".
+ *   4. UNIQ-ID META: "uniq id nedir" answers deterministically from the
+ *      panel's own stable channel identity — no web lane, no invented id.
+ *   5. URL READER THIRD LEG: direct HTML fetch + og:title/og:description
+ *      (+ YouTube player payload) — JS-heavy pages the reader APIs miss
+ *      still yield their real title/description, and video links get an
+ *      honest "can't watch, but here's what it is" shape.
  *
  * v29.20 (owner directive 2026-10-27 ~03:1x +03 — fresh live log: "I think
  * still you forgot some parts". DB forensics first: every response WAS stored;
@@ -330,7 +351,7 @@ export function cortexHealthSnapshot(): Record<string, ProviderHealth> {
 // chars, so /\bçiz/ can NEVER match. All Turkish-stem patterns below use
 // plain substring/anchor semantics instead of \b.
 const DRAW_RE =
-  /(?:çiz|ciz)|(?:resim|görsel|gorsel)\s+(?:yap|çiz|üret|uret|çıkar|cikar|oluştur|olustur)|(?:imagine|draw|paint)/i;
+  /(?:çiz|ciz)|(?:resim|görsel|gorsel)\s+(?:yap|çiz|üret|uret|çıkar|cikar|oluştur|olustur)|(?:imagine|draw|paint)|(?:photo|picture|image|art)\s+of\b|make\s+(?:me\s+)?(?:an?\s+)?(?:image|picture|photo|drawing|art)\b|generate\s+(?:an?\s+)?(?:image|picture|photo)\b/i;
 const TIME_RE =
   /(saat\s*kaç|saati\s*ne|kaç\s*oldu|what\s*time|time\s*(?:is\s*it|in)|şu\s*an\s*saat|suan\s*saat|kaç\s* geçiyor|saat\s*öğren)/i;
 const STATUS_RE =
@@ -375,6 +396,32 @@ const NOW_ANCHOR_RE = /(ş[uü]\s*a?n|suan|şimdi|simdi|bug[uü]n|bugun|kaçınd
 // TIME/STATUS/SELFAQ): zero model, zero confabulation surface.
 const CUTOFF_RE =
   /(knowledge\s*cutoff|cutoff\s*(?:'?(?:un|ün))?\s*(?:ka[çc]|nedir|ne\b)|e[ğg]itim\s*(?:tarih|veri|data)|training\s*(?:cutoff|data)|son\s*bilgi\s*tarihi|bilgin\s*(?:ne\s*zamana|hangi)|hangi\s*tarihe\s*kadar|ne\s*zamana\s*kadar\s*biliyorsun)/i;
+
+// v29.22 — RELEASE-DATE questions. The 03:07 +03 row: "penguen'in ikinci
+// sezon ne zaman amk ya" stayed in CHAT and BEAM answered from stale priors
+// ("Penguen ne demek bilmiyorum dostum") one minute before a ladder-fed
+// answer nailed The Penguin. Future release/event dates are exactly the
+// knowledge class that rots — they belong on the grounded research lane.
+// Guarded: needs BOTH a "when" shape AND a release noun or future verb, so
+// bot-directed "sen ne zaman geldin" banter never hijacks.
+const WHEN_Q_RE = /(ne\s*zaman|when\s+(?:does|is|will|do)\b)/i;
+const RELEASE_NOUN_RE = /(sezon|season|b[öo]l[üu]m|episode|film|movie|dizi|series|oyun|game|alb[üu]m|\bpart\b|update|g[üu]ncelleme|s[üu]r[üu]m|version|kitap|book|iphone|telefon|gpu|ekran\s*kart|konsol|console|trailer|fragman|\bbeta\b|\bdemo\b)/i;
+const RELEASE_VERB_RE = /(ç[ıi]kacak|c[ıi]kacak|yay[ıi]nlanacak|yayinlanacak|gelecek|geliyor|dropping|releasing|comes\s+out)/i;
+
+// v29.22 — DRAW CONTINUATION. The 04:39 +03 row: seven minutes after
+// "çiz şöyle güzel bi alımlı kadın", a SECOND viewer sent the bare English
+// description "a lovely woman robot looks fragile" — no draw verb, so it
+// fell to chat and BEAM said "my image engine is asleep". When the CHANNEL
+// drew recently, a short noun-phrase description IS a draw request. The
+// recent-draw check is async DB (runCortex), not this sync classifier.
+const DRAW_NOUN_RE =
+  /(kad[ıi]n|k[ıi]z\b|robot|adam|erkek|çocuk|cocuk|kedi|köpek|kopek|kurt|aslan|dragon|ejder|woman|girl|man\b|warrior|savaşç|savasc|samurai|ninja|cyberpunk|anime|portrait|portre|landscape|manzara|şeh[ıi]r|seh[ıi]r|forest|orman|da[ğg]\b|uzay|space\b|car\b|araba|sword|k[ıi]l[ıi]ç|mecha|alien|uzayl[ıi]|monster|canavar|cat\b|dog\b|tiger|kaplan|fox|tilki|angel|melek|demon|şeytan|seytan|witch|cad[ıi]|queen|kraliçe|kralice|king|kral\b|hero|kahraman|karakter|character)/i;
+
+// v29.22 — UNIQ-ID meta. The 02:31–02:32 +03 rows: "uniq id nedir" burned
+// a web search and "bana uniq id`ni soyle" got a denial. The panel HAS a
+// real, stable per-channel identity — answer deterministically, same
+// philosophy as TIME/STATUS/CUTOFF: zero model, zero confabulation.
+const UNIQ_ID_RE = /((?:uniq|unique|benzersiz)\s*[iı]?\.?\s*id|id\s*[`'’]?(?:n[iı]|nin|ni)\b|id\s+(?:nedir|ver|söyle|soyle|kaç|kac)\b)/i;
 
 // Any prompt containing a URL forces the fetch path — the viewer pointed at a
 // SPECIFIC page; answering from model priors (web:no) is exactly the
@@ -428,6 +475,10 @@ export function classifyIntent(prompt: string): CortexIntent {
   if (CAPABILITY_Q_RE.test(p)) return "RESEARCH";
   // v29.20 — technical explain walls (long prose + "ne anlama geliyor bu").
   if (TECH_EXPLAIN_RE.test(p) && p.length >= 100) return "RESEARCH";
+  // v29.22 — release-date questions ("ikinci sezon ne zaman") → grounded.
+  if (WHEN_Q_RE.test(p) && (RELEASE_NOUN_RE.test(p) || RELEASE_VERB_RE.test(p)) && p.length <= 220) {
+    return "RESEARCH";
+  }
   return "CHAT";
 }
 
@@ -1254,34 +1305,147 @@ async function urlAnswer(
     .then((r): { title: string; text: string } | null =>
       r.ok && r.text.length >= 60 ? { title: r.title || url, text: r.text.slice(0, 1_600) } : null)
     .catch(() => null);
+  // v29.22 — THIRD LEG: direct HTML fetch + meta extraction. JS-heavy pages
+  // (YouTube watch, some news shells) defeat both reader APIs
+  // intermittently, but the RAW HTML still carries the real og:title /
+  // og:description — and YouTube embeds the full player payload
+  // (title/author/shortDescription) in the initial document. Free, fast,
+  // no API dependency; the grounded model race still writes the answer.
+  const directLeg = (async (): Promise<{ title: string; text: string } | null> => {
+    try {
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 5_000);
+      const r = await fetch(url, {
+        headers: {
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+          accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "accept-language": "tr,en;q=0.8",
+        },
+        redirect: "follow",
+        signal: ctl.signal,
+      });
+      clearTimeout(timer);
+      if (!r.ok) return null;
+      const html = (await r.text()).slice(0, 400_000);
+      const decode = (s: string) =>
+        s
+          .replace(/\u003c/g, "<")
+          .replace(/&amp;/g, "&")
+          .replace(/&quot;/g, '"')
+          .replace(/&#39;/g, "'")
+          .replace(/&lt;/g, "<")
+          .replace(/&gt;/g, ">")
+          .replace(/&nbsp;/g, " ")
+          .replace(/\s{2,}/g, " ")
+          .trim();
+      let title = decode(html.match(/<title[^>]*>([^<]{3,300})<\/title>/i)?.[1] ?? "");
+      let desc = decode(
+        html.match(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']{3,600})["']/i)?.[1] ??
+          html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']{3,600})["']/i)?.[1] ?? "",
+      );
+      if (/(?:youtube\.com\/watch|youtu\.be)/i.test(url)) {
+        // v29.22 — YouTube serves a bot-walled shell to server fetches from
+        // this egress (measured: 200 in 116ms with EMPTY title/desc/player
+        // payload). The oEmbed endpoint is public, keyless, consent-free and
+        // returns the REAL title + channel for any public video.
+        try {
+          const vid = url.match(/(?:v=|youtu\.be\/)([\w-]{6,20})/)?.[1] ?? "";
+          const oeCtl = new AbortController();
+          const oeTimer = setTimeout(() => oeCtl.abort(), 3_000);
+          const oe = await fetch(
+            `https://www.youtube.com/oembed?url=${encodeURIComponent(vid ? `https://www.youtube.com/watch?v=${vid}` : url)}&format=json`,
+            { signal: oeCtl.signal, headers: { "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" } },
+          );
+          clearTimeout(oeTimer);
+          if (oe.ok) {
+            const oj = (await oe.json()) as { title?: string; author_name?: string };
+            if (oj?.title) {
+              return {
+                title: String(oj.title).slice(0, 200),
+                text: `Kanal: ${oj.author_name ?? "bilinmiyen"} — ${oj.title}`.slice(0, 2_600),
+              };
+            }
+          }
+        } catch {
+          // oEmbed failed too — fall through to the HTML scrape below
+        }
+        const unesc = (s: string) => s.replace(/\\u0026/g, "&").replace(/\\"/g, '"').replace(/\\n/g, " ").trim();
+        const ytTitle = unesc(html.match(/"title":"((?:[^"\\]|\\.){3,200})","lengthSeconds"/)?.[1] ?? "");
+        const ytAuthor = unesc(html.match(/"author":"((?:[^"\\]|\\.){1,120})"/)?.[1] ?? "");
+        const ytDesc = unesc(html.match(/"shortDescription":"((?:[^"\\]|\\.){0,900})"/)?.[1] ?? "");
+        if (ytTitle) title = decode(ytTitle);
+        const bits = [ytAuthor && `Kanal: ${ytAuthor}`, ytDesc].filter(Boolean);
+        if (bits.length) desc = decode(bits.join(" — ")) || desc;
+      }
+      if (title.length >= 3 && (desc.length >= 20 || title.length >= 12)) {
+        return { title: title.slice(0, 200), text: `${title}\n${desc}`.slice(0, 2_600) };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  })();
+  // v29.22 — RACE SEMANTICS FIX (the deep one). Promise.race settles with
+  // the FIRST-SETTLED promise — a reader that fails FAST (the z-ai remote fn
+  // 429s in ~25ms when throttled) resolved null BEFORE the 700ms direct leg
+  // or the 1.3s Exa leg could win, so a throttled reader KILLED the whole
+  // URL lane (measured live 05:1x +03: GitHub fell to generic exa-answer
+  // slop while both standalone legs read the page fine). A null leg must
+  // now KEEP WAITING: only a real page or the gate can settle the race.
+  const HANG = new Promise<{ title: string; text: string } | null>(() => {}); // never settles
+  const successOrHang = (leg: Promise<{ title: string; text: string } | null>) =>
+    leg.then((v) => (v ? v : HANG), () => HANG);
   const gate = (ms: number) => new Promise<null>((res) => setTimeout(() => res(null), ms));
 
-  let page = await Promise.race([exaLeg, readerLeg, gate(6_000)]);
+  let page = await Promise.race([successOrHang(exaLeg), successOrHang(readerLeg), successOrHang(directLeg), gate(6_000)]);
   if (!page) {
-    // Gate fired with both readers still working — one short second chance.
-    page = await Promise.race([exaLeg, readerLeg, gate(3_500)]);
+    // Gate fired with every reader still working — one short second chance.
+    page = await Promise.race([successOrHang(exaLeg), successOrHang(readerLeg), successOrHang(directLeg), gate(3_500)]);
   }
   if (!page) return null; // nothing could read the page — research ladder takes over
 
   const pageTitle = page.title;
   const pageText = page.text;
 
+  const isVideoLink = /(?:youtube\.com\/watch|youtu\.be|vimeo\.com\/|twitch\.tv\/)/i.test(url);
   const messages: BrainMessage[] = [
     { role: "system", content: buildSystemPrompt(req.sender, req.streamerName || "specimba", req.roomTranscript || "", true, selfRecap) },
     {
       role: "user",
       content:
         `İzleyicinin baktırdığı sayfa: ${url}\nSayfa başlığı: ${pageTitle}\nSayfa içeriği:\n${pageText}\n\nSoru: ${question}\n\n` +
-        `KURAL: SADECE yukarıdaki sayfa içeriğinden cevap ver (1-3 cümle). Aradığı bilgi içerikte YOKSA "Sayfada bu bilgi şu an görünmüyor" de. Sayfada olmayan bir sayı, isim veya detay ASLA ekleme — kendi bildiklerinle tamamlama yasak.`,
+        `KURAL: SADECE yukarıdaki sayfa içeriğinden cevap ver (1-3 cümle). Aradığı bilgi içerikte YOKSA "Sayfada bu bilgi şu an görünmüyor" de. Sayfada olmayan bir sayı, isim veya detay ASLA ekleme — kendi bildiklerinle tamamlama yasak.` +
+        (isVideoLink ? ` Bu bir VİDEO linki — videoyu İZLEYEMEZSİN: başlık/kanal/açıklamadan gerçekten ne varsa onu söyle, izleyemediğini dürüstçe ekle, içerik uydurma.` : ""),
     },
   ];
   const r = await raceModel(messages, true, req, deadline);
+  // v29.22 — GROUNDED ZERO-MODEL FALLBACK: when every chat lane is dead the
+  // viewer still gets the REAL page (title + leading snippet verbatim) —
+  // measured 05:1x +03: vyce 12s-degraded night, GitHub page-read answered
+  // "sıkıştım" while holding the actual repo description in hand.
+  if (!r.content) {
+    const bodySnippet = clampStr(
+      pageText.replace(String(pageTitle), "").replace(/\s{2,}/g, " ").trim(),
+      170,
+    );
+    const groundedReply = bodySnippet
+      ? `Sayfayı okudum ama cevabı derleyemedim — sayfadan aynen: "${clampStr(pageTitle, 90)}" — ${bodySnippet}`
+      : "Sayfayı okudum ama cevabı derlerken sıkıştım — soruyu bir kez daha atar mısın?";
+    return {
+      reply: groundedReply,
+      sources: [{ title: pageTitle || url, url }],
+      webSearch: "page-read",
+      provider: "exa",
+      modelLabel: "VYCE // PAGE READ",
+      usage: null,
+    };
+  }
   return {
-    reply: r.content || "Sayfayı okudum ama cevabı derlerken sıkıştım — soruyu bir kez daha atar mısın?",
+    reply: r.content,
     sources: [{ title: pageTitle || url, url }],
     webSearch: "page-read",
-    provider: r.content ? r.provider : "exa",
-    modelLabel: r.content ? r.modelLabel : "VYCE // PAGE READ",
+    provider: r.provider,
+    modelLabel: r.modelLabel,
     usage: r.usage ?? null,
   };
 }
@@ -1341,12 +1505,30 @@ async function researchAnswer(
     req.prompt.replace(URL_RE, " ").replace(/\s{2,}/g, " ").trim() || req.prompt,
     400,
   );
+  // v29.22 — ANTECEDENT-ENRICHED FRAGMENT QUERIES. The 03:48 +03 row:
+  // "hakkinda detayli bilgi ver" searched Exa AS-IS and researched the WORD
+  // "hakkında"; the 02:59 row ("yönetmeni kim", one turn after "Hardcore
+  // Henry") asked which director instead of answering Ilya Naishuller.
+  // Short fragments ride the last ladder topics into the query so the
+  // search resolves the THING, not the fragment.
+  const fragmentLike = req.prompt.length <= 80 && !URL_RE.test(req.prompt);
+  const pastTopics = fragmentLike
+    ? ladder
+        .filter((t) => t.role === "user" && t.content.trim() && t.content.trim() !== req.prompt.trim())
+        .slice(-2)
+        .map((t) => t.content.trim().slice(0, 60))
+    : [];
+  const exaQuery = pastTopics.length
+    ? clampStr(`${query} — geçmiş konuşma: ${pastTopics.map((c) => `"${c}"`).join(" | ")}`, 400)
+    : query;
   const exaArmed = await getExaKey();
   if (exaArmed) {
     const started = Date.now();
     const ans = await exaAnswer(
-      query,
-      "Sen bir Kick yayınının AI komutanısın. Türkçe, KISA (2-4 cümle, max 60 kelime), energik ve net cevap ver. Kaynak kültürünü cevabın sonuna '— kaynak' diye ekleme; sadece cevabı yaz.",
+      exaQuery,
+      fragmentLike
+        ? "Sen bir Kick yayınının AI komutanısın. Soru kısa bir parça olabilir — önce 'geçmiş konuşma' bölümünden konuyu çöz, sonra O konuya cevap ver. Türkçe, KISA (2-4 cümle, max 60 kelime), energik ve net. Kaynak ekleme; sadece cevabı yaz."
+        : "Sen bir Kick yayınının AI komutanısın. Türkçe, KISA (2-4 cümle, max 60 kelime), energik ve net cevap ver. Kaynak kültürünü cevabın sonuna '— kaynak' diye ekleme; sadece cevabı yaz.",
     );
     if (ans.ok && ans.answer) {
       noteHealth("exa", true, Date.now() - started);
@@ -1418,8 +1600,45 @@ export async function runCortex(req: CortexRequest): Promise<CortexResult> {
   }
 
   const intentStart = Date.now();
-  const intent = classifyIntent(prompt);
+  let intent = classifyIntent(prompt);
   const intentMs = Date.now() - intentStart;
+
+  // v29.22 — DRAW CONTINUATION (async half): a bare image-description phrase
+  // right after a CHANNEL draw is a draw request (the 04:39 "a lovely woman
+  // robot looks fragile" row). The recent-draw check reads the interaction
+  // log — ANY sender, streams are shared rooms — tightly time-boxed to 15 min
+  // and gated behind a noun-phrase heuristic so banter never hijacks.
+  if (
+    intent === "CHAT" &&
+    prompt.length <= 100 &&
+    !prompt.includes("?") &&
+    DRAW_NOUN_RE.test(prompt)
+  ) {
+    try {
+      // Trail first: a cortex-draw result from ANY sender in the last 15 min
+      // — works even while the imagine is still in flight (the widget logs
+      // its row only AFTER the image completes, and probe/direct calls never
+      // log at all). In-memory, instant, process-wide.
+      const trailDrawHit = Array.from(resultTrail.values()).some(
+        (v) => v.at >= Date.now() - 15 * 60_000 && v.result.route === "cortex-draw",
+      );
+      if (trailDrawHit) {
+        intent = "DRAW";
+      } else {
+        const recentDraw = await db.interactionLog.findFirst({
+          where: {
+            channel: req.channel || "specimba",
+            createdAt: { gte: new Date(Date.now() - 15 * 60_000) },
+            OR: [{ model: { contains: "IMAGINE" } }, { route: "cortex-draw" }],
+          },
+          select: { id: true },
+        });
+        if (recentDraw) intent = "DRAW";
+      }
+    } catch {
+      // log unavailable (fresh boot, db flap) — fall through as CHAT
+    }
+  }
 
   // --- TIME: instant, free, exact -------------------------------------------
   if (intent === "TIME") {
@@ -1479,6 +1698,22 @@ export async function runCortex(req: CortexRequest): Promise<CortexResult> {
     return {
       ok: true, intent, reply,
       modelLabel: "VYCE // KAYNAK HAT", provider: "tool", route: "cortex-meta",
+      telemetry: { latencyMs: Date.now() - started, webSearch: "none" as const, intentMs },
+    };
+  }
+
+  // --- v29.22 — META: channel identity ("uniq id") — deterministic --------
+  if (intent === "CHAT" && UNIQ_ID_RE.test(prompt) && prompt.length <= 120) {
+    const idHash = createHash("sha256")
+      .update(`nexus-channel-id:${req.channel || "specimba"}`)
+      .digest("hex")
+      .slice(0, 8)
+      .toUpperCase();
+    const reply = `Gerçek kimliğim bu kanka: NX-${idHash.slice(0, 4)}-${idHash.slice(4, 8)} — panelin bu kanala atadığı sabit ID, her oturumda aynı. 🛡`;
+    noteHealth("tool", true, 0);
+    return {
+      ok: true, intent, reply,
+      modelLabel: "VYCE // KIMLIK HAT", provider: "tool", route: "cortex-identity",
       telemetry: { latencyMs: Date.now() - started, webSearch: "none" as const, intentMs },
     };
   }

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth";
 import { clientKey, rateLimit } from "@/lib/guard";
-import { kickCallbackUrl, loadKickApp, mintKickAuth, requestOrigin } from "@/lib/connectors/kick";
+import { kickCallbackUrl, loadKickApp, mintKickAuth, publicOrigin } from "@/lib/connectors/kick";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +31,10 @@ export async function POST(req: Request) {
     );
   }
 
-  const redirectUri = kickCallbackUrl(requestOrigin(req));
+  // v31 — the redirect_uri must EXACTLY match what the owner registered in
+  // the Kick app form — the public (anchored) https origin, never the FC
+  // tunnel host the request headers carry behind the preview gateway.
+  const redirectUri = kickCallbackUrl(await publicOrigin(req));
   const { authorizeUrl } = mintKickAuth(app, redirectUri);
   return NextResponse.json({ ok: true, authorizeUrl, redirectUri });
 }

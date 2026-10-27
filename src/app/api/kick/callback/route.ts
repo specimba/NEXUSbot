@@ -4,7 +4,7 @@ import {
   exchangeKickCode,
   getKickUser,
   loadKickApp,
-  requestOrigin,
+  publicOrigin,
   saveKickOAuth,
   spendKickAuth,
 } from "@/lib/connectors/kick";
@@ -30,7 +30,11 @@ export async function GET(req: Request) {
   }
 
   const url = new URL(req.url);
-  const origin = requestOrigin(req);
+  // v31 — the post-auth browser redirect targets the PUBLIC origin: behind
+  // the preview gateway the request-derived origin is the FC tunnel host,
+  // whose session-affinity gate would 400 the owner's browser at the very
+  // last step of a successful OAuth round-trip.
+  const origin = await publicOrigin(req);
   const back = (state: string, reason?: string) => {
     const u = new URL(`/?kick=${state}`, origin);
     if (reason) u.searchParams.set("reason", reason.slice(0, 80));

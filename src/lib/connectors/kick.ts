@@ -232,6 +232,39 @@ export function requestOrigin(req: Request): string {
 }
 
 /**
+ * v31 — PUBLIC-ORIGIN TRUTH for everything the OUTSIDE world must reach
+ * (Kick redirect_uri, webhook subscription URL, post-auth browser redirect).
+ *
+ * Behind the Z.ai preview gateway the request-derived origin is the FC
+ * TUNNEL host with http scheme (measured live 05:3x +03: /api/kick/status
+ * through https://preview-chat-…space-z.ai still computed
+ * http://ws-ef-…fcapp.run/api/kick/callback — exactly the URL the owner
+ * pasted into Kick's Create-an-App form, which Kick rejected for scheme and
+ * which would ALSO have failed the FC session-affinity gate on both the
+ * browser redirect and Kick's webhook POSTs).
+ *
+ * The owner-anchored OBS base URL on the widget row is the REAL
+ * browser-reachable https origin — it is literally the URL the OBS overlay
+ * loads the panel through. Prefer it whenever it exists and is https;
+ * otherwise fall back to the request-derived origin (dev / direct access).
+ */
+export async function publicOrigin(req: Request): Promise<string> {
+  try {
+    const w = await db.widget.findFirst({
+      where: { obsBaseUrl: { not: null } },
+      select: { obsBaseUrl: true },
+    });
+    const anchored = (w?.obsBaseUrl ?? "").trim();
+    if (anchored && /^https:\/\//i.test(anchored)) {
+      return anchored.replace(/\/+$/, "");
+    }
+  } catch {
+    // db unavailable (fresh boot) — fall through to request-derived
+  }
+  return requestOrigin(req);
+}
+
+/**
  * Mints a one-time {state → verifier, redirectUri} record and returns the
  * full authorize URL. The verifier NEVER leaves the server — it is only spent
  * by the callback (single-use, 10-min TTL, cap 50).

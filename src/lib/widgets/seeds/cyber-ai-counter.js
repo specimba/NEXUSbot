@@ -1046,6 +1046,38 @@ const ALLOWED_IMAGINE_SIZES = new Set(['1024x1024', '1024x768', '768x1024']);
 // so a chat spam of "!imagine" can never hammer Vyce directly.
 let lastImagineEdgeBypassAt = 0;
 
+// v29.22 — PANEL IMAGINE FALLBACK (free lane). The 04:32 +03 stream failure:
+// vyce.ai's gateway 502'd (fast) on the direct lane, the viewer got
+// "tamamlanamadı + iade". The panel now hosts a FREE z-ai image engine
+// (/api/imagine) — same ingest-token auth as the cortex hop. It never
+// touches vyce (zero double-charge surface), and the panel route's own rate
+// limits stop spam. Fired only when a paid lane already failed or is
+// unconfigured; the viewer's $0.50 credit was deducted upstream and the
+// image is REAL, so no refund happens on this path.
+async function tryPanelImagineFallback(promptText, sender, size) {
+    try {
+        if (!window.NexusBrain || !window.NexusBrain.token) return null;
+        const res = await fetchWithTimeout('/api/imagine', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-nexus-token': window.NexusBrain.token
+            },
+            body: JSON.stringify({
+                sender: sender || 'specimba',
+                prompt: String(promptText || '').slice(0, 900),
+                size: ALLOWED_IMAGINE_SIZES.has(size) ? size : '1024x1024'
+            })
+        }, 48000);
+        if (!res.ok) return null;
+        const j = await res.json().catch(() => null);
+        if (j && j.ok === true && isSafeRenderableImageUrl(j.imageUrl)) {
+            return { ok: true, status: 200, imageUrl: j.imageUrl, modelLabel: 'NEXUS // Z-IMAGINE' };
+        }
+    } catch (e) {}
+    return null;
+}
+
 async function callGrokImagine2API(promptText, sender = 'specimba', requestedSize = '1024x1024') {
     const cleanPrompt = String(promptText || '').trim().slice(0, 900);
     if (!cleanPrompt) return { ok: false, status: 400, error: 'Görsel komutu (imagePrompt) boş olamaz.' };
@@ -1091,6 +1123,8 @@ async function callGrokImagine2API(promptText, sender = 'specimba', requestedSiz
                 if (edgeRes.status === 429) {
                     const canBypass = Boolean(config.vyceKey) && (Date.now() - lastImagineEdgeBypassAt) > 20000;
                     if (!canBypass) {
+                        const fb = await tryPanelImagineFallback(cleanPrompt, sender, size);
+                        if (fb) return fb;
                         return {
                             ok: false,
                             status: 429,
@@ -1105,6 +1139,8 @@ async function callGrokImagine2API(promptText, sender = 'specimba', requestedSiz
                 // Respect v4 fail-closed Upstash requirement (503) unless local `vyce_api_key` is explicitly provided
                 if (edgeRes.status === 503) {
                     if (!config.vyceKey) {
+                        const fb = await tryPanelImagineFallback(cleanPrompt, sender, size);
+                        if (fb) return fb;
                         return {
                             ok: false,
                             status: 503,
@@ -1116,6 +1152,8 @@ async function callGrokImagine2API(promptText, sender = 'specimba', requestedSiz
                     // NEVER retry a timed-out or failed provider request to avoid duplicate $0.50 billing!
                     const isUnconfiguredOnEdge = /VYCE_API_KEY is not configured/i.test(String(edgeData?.error || ''));
                     if (!isUnconfiguredOnEdge || !config.vyceKey) {
+                        const fb = await tryPanelImagineFallback(cleanPrompt, sender, size);
+                        if (fb) return fb;
                         return {
                             ok: false,
                             status: 502,
@@ -1123,6 +1161,8 @@ async function callGrokImagine2API(promptText, sender = 'specimba', requestedSiz
                         };
                     }
                 } else if (edgeRes.status >= 400 && !config.vyceKey) {
+                    const fb = await tryPanelImagineFallback(cleanPrompt, sender, size);
+                    if (fb) return fb;
                     return {
                         ok: false,
                         status: edgeRes.status,
@@ -1130,7 +1170,10 @@ async function callGrokImagine2API(promptText, sender = 'specimba', requestedSiz
                     };
                 }
             } catch (edgeErr) {
-                // If the Edge request itself timed out in flight, do NOT issue a second billable request!
+                // If the Edge request itself timed out in flight, do NOT issue a second BILLABLE request!
+                // (The panel fallback below is a DIFFERENT free engine — no vyce charge surface.)
+                const fb = await tryPanelImagineFallback(cleanPrompt, sender, size);
+                if (fb) return fb;
                 return {
                     ok: false,
                     status: 504,
@@ -1143,39 +1186,66 @@ async function callGrokImagine2API(promptText, sender = 'specimba', requestedSiz
         const vyceKey = config.vyceKey;
         if (vyceKey) {
             const base = (config.vyceBaseUrl || 'https://vyceai.com/v1').replace(/\/+$/, '');
-            try {
-                const res = await fetchWithTimeout(`${base}/images/generations`, {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${vyceKey}`,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        model: VYCE_IMAGE_MODEL.id,
-                        prompt: cleanPrompt,
-                        n: 1,
-                        size
-                    })
-                }, 25000);
-
-                if (!res.ok) {
-                    return { ok: false, status: res.status, error: `Görsel sağlayıcı HTTP ${res.status} döndürdü.` };
+            const directAttempt = async () => {
+                const t0 = Date.now();
+                try {
+                    const res = await fetchWithTimeout(`${base}/images/generations`, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${vyceKey}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            model: VYCE_IMAGE_MODEL.id,
+                            prompt: cleanPrompt,
+                            n: 1,
+                            size
+                        })
+                    }, 25000);
+                    return { res, elapsedMs: Date.now() - t0 };
+                } catch (e) {
+                    return { res: null, elapsedMs: Date.now() - t0, timedOut: true };
                 }
-                const j = await res.json();
-                const first = Array.isArray(j?.data) ? j.data[0] : j;
-                const imgUrl = first?.url ?? first?.image_url ?? j?.url ?? j?.image_url ?? (first?.b64_json ? `data:image/png;base64,${first.b64_json}` : '');
-                if (isSafeRenderableImageUrl(imgUrl)) {
-                    return { ok: true, status: 200, imageUrl: imgUrl, modelLabel: 'VYCE // GROK-IMAGINE-2' };
-                }
-                return { ok: false, status: 502, error: 'Görsel sağlayıcı geçerli bir görsel URL döndürmedi.' };
-            } catch (e) {
+            };
+            // v29.22 — fast gateway flap (502/503/504 in <8s) means vyce's own
+            // gateway choked BEFORE any generation/billing started (the 04:32
+            // stream failure was exactly this). ONE retry is charge-safe;
+            // timeouts stay unretried (a generation may exist upstream).
+            let attempt = await directAttempt();
+            if (attempt.res && !attempt.res.ok && [502, 503, 504].includes(attempt.res.status) && attempt.elapsedMs < 8000) {
+                await new Promise((r) => setTimeout(r, 1200));
+                attempt = await directAttempt();
+            }
+            if (!attempt.res) {
+                const fb = await tryPanelImagineFallback(cleanPrompt, sender, size);
+                if (fb) return fb;
                 return { ok: false, status: 504, error: 'Görsel isteği zaman aşımına uğradı; mükerrer ücretlendirmeyi önlemek için tekrar gönderilmedi.' };
             }
+            const res = attempt.res;
+            if (!res.ok) {
+                const fb = await tryPanelImagineFallback(cleanPrompt, sender, size);
+                if (fb) return fb;
+                return { ok: false, status: res.status, error: `Görsel sağlayıcı HTTP ${res.status} döndürdü.` };
+            }
+            const j = await res.json();
+            const first = Array.isArray(j?.data) ? j.data[0] : j;
+            const imgUrl = first?.url ?? first?.image_url ?? j?.url ?? j?.image_url ?? (first?.b64_json ? `data:image/png;base64,${first.b64_json}` : '');
+            if (isSafeRenderableImageUrl(imgUrl)) {
+                return { ok: true, status: 200, imageUrl: imgUrl, modelLabel: 'VYCE // GROK-IMAGINE-2' };
+            }
+            const fb = await tryPanelImagineFallback(cleanPrompt, sender, size);
+            if (fb) return fb;
+            return { ok: false, status: 502, error: 'Görsel sağlayıcı geçerli bir görsel URL döndürmedi.' };
         }
     } finally {
         setTimeout(() => setToolBadge(false), 1800);
     }
 
+    // v29.22 — last stop before the honest failure: the FREE panel engine
+    // works even with zero vyce/edge config, so imagine never dies with the
+    // providers.
+    const finalFb = await tryPanelImagineFallback(cleanPrompt, sender, size);
+    if (finalFb) return finalFb;
     return {
         ok: false,
         status: 503,

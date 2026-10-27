@@ -10,7 +10,7 @@ import {
   loadKickApp,
   loadKickOAuth,
   maskKickApp,
-  requestOrigin,
+  publicOrigin,
 } from "@/lib/connectors/kick";
 
 export const dynamic = "force-dynamic";
@@ -36,7 +36,10 @@ export async function GET(req: Request) {
   const app = await loadKickApp();
   const oauth = await loadKickOAuth();
   const chatReplies = await getKickChatReplies();
-  const redirectUri = kickCallbackUrl(requestOrigin(req));
+  // v31 — PUBLIC-ORIGIN TRUTH: behind the preview gateway the request-derived
+  // origin is the FC tunnel host + http (the exact wrong URL the owner pasted
+  // into the Kick form). The anchored OBS base URL is the real https origin.
+  const redirectUri = kickCallbackUrl(await publicOrigin(req));
 
   let webhooks: { subs: Array<{ id: string; event: string; version: number }> | null; error: string | null } = {
     subs: null,

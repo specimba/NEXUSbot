@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth";
 import { clientKey, rateLimit } from "@/lib/guard";
-import { kickListWebhookSubs, kickSubscribeWebhook, kickUnsubscribe, requestOrigin } from "@/lib/connectors/kick";
+import { kickListWebhookSubs, kickSubscribeWebhook, kickUnsubscribe, publicOrigin } from "@/lib/connectors/kick";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +24,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: { code: "RATE_LIMITED", message: "Slow down." } }, { status: 429 });
   }
 
-  const hookUrl = `${requestOrigin(req).replace(/\/+$/, "")}/api/kick/webhook`;
+  // v31 — Kick's servers POST the events here from the open internet: the
+  // URL must be the public https origin (the FC tunnel host would 400 at
+  // the session-affinity gate and Kick would auto-unsubscribe after a day).
+  const hookUrl = `${(await publicOrigin(req)).replace(/\/+$/, "")}/api/kick/webhook`;
   const res = await kickSubscribeWebhook(hookUrl);
   if (!res.ok) {
     return NextResponse.json(

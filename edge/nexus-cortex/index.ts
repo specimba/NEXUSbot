@@ -102,7 +102,7 @@ const IMAGE_MODEL = { id: "grok-imagine-2", label: "GROK IMAGINE 2.0" };
 // EVERY response that carries a service id must use THIS constant; the deploy
 // route regexes it out of the source so the panel card can never hardcode a
 // stale version again.
-const SERVICE_VERSION = "nexus-cortex-v29.19";
+const SERVICE_VERSION = "nexus-cortex-v29.22";
 
 const SAFE_HOSTS = new Set([
   "open.spotify.com",
@@ -156,6 +156,7 @@ interface ProviderAttemptTelemetry {
   status: number | null;
   elapsedMs: number;
   errorName?: string;
+  note?: string;
 }
 
 function safeHost(rawUrl: string): string {
@@ -176,6 +177,7 @@ function logProviderAttempt(entry: ProviderAttemptTelemetry) {
     status: entry.status,
     elapsedMs: entry.elapsedMs,
     ...(entry.errorName ? { errorName: entry.errorName } : {}),
+    ...(entry.note ? { note: entry.note } : {}),
   };
   if (entry.status && entry.status >= 200 && entry.status < 300) {
     console.info(JSON.stringify(payload));
@@ -1204,9 +1206,15 @@ async function generateImage(prompt: string, size: string) {
   const base = resolveVyceBaseUrls()[0] ?? "https://vyceai.com/v1";
   const host = safeHost(base);
   const t0 = Date.now();
-  // One attempt only: do not retry a billable generation against another host after a timeout.
-  try {
-    const r = await timedFetch(
+  // v29.22 — REFINED no-double-charge rule. The absolute rule stays for
+  // TIMEOUTS (a generation may exist upstream; the 03:48 +03 "ciz mimar"
+  // incident proved it — viewer saw the image AND the failure text). But a
+  // FAST gateway error (502/503/504 in <8s) means vyce's own gateway choked
+  // BEFORE any generation started — the 04:32 +03 stream failure was
+  // exactly this class (2559ms, "Image provider returned HTTP 502"). One
+  // bounded retry after a short backoff, SAME host, no second retry.
+  const doAttempt = () =>
+    timedFetch(
       base + "/images/generations",
       {
         method: "POST",
@@ -1228,7 +1236,9 @@ async function generateImage(prompt: string, size: string) {
       // widget-side edge fetch budget moved 26s → 42s in step.
       40000,
     );
-    const elapsedMs = Date.now() - t0;
+  try {
+    let r = await doAttempt();
+    let elapsedMs = Date.now() - t0;
     logProviderAttempt({
       action: "imagine",
       provider: "vyce",
@@ -1237,6 +1247,24 @@ async function generateImage(prompt: string, size: string) {
       status: r.status,
       elapsedMs,
     });
+    if (!r.ok) {
+      const fastGatewayFlap =
+        (r.status === 502 || r.status === 503 || r.status === 504) && elapsedMs < 8000;
+      if (fastGatewayFlap) {
+        await new Promise((res) => setTimeout(res, 1500));
+        r = await doAttempt();
+        elapsedMs = Date.now() - t0;
+        logProviderAttempt({
+          action: "imagine",
+          provider: "vyce",
+          host,
+          model: IMAGE_MODEL.id,
+          status: r.status,
+          elapsedMs,
+          note: "fast-flap retry",
+        });
+      }
+    }
     if (!r.ok)
       return {
         ok: false,

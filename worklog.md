@@ -1298,3 +1298,22 @@ Stage Summary:
 - OWNER NEXT STEPS (the exact Create-an-App form): kick.com → Settings → Developer → Create an App; Redirect URL = <panel origin>/api/kick/callback (the KickCard shows and copies the exact string — behind the preview origin it's the public https URL); enable webhooks; tick at least: Read user information, Read channel information, Write to Chat feed, Subscribe to events. Then paste Client ID + Secret into the Kick card → Connect with Kick → Register webhook → (optional) Test message. Chat replies post as the connected account via type:"bot".
 - Services: panel :3000 stable (fresh cache, V8-capped), kick-bridge :3010 LIVE, backup-cadence :3011 up. Memory discipline: stale chrome killed; dev server V8-capped at 1GB on the 4GB box.
 - Files: src/lib/brain/cortex.ts, src/lib/connectors/kick.ts, src/app/api/kick/{status,app,state,callback,oauth,webhook-setup,webhook,test-chat,replies}/route.ts, src/components/panel/connectors/kick-card.tsx, src/components/panel/connectors.tsx. Snapshot commit bc8e8f48f42e awaits a live GitHub token to push.
+
+---
+Task ID: 31-b
+Agent: full-stack-developer (subagent)
+Task: Free last-resort imagine lane — POST /api/imagine (z-ai SDK, zero-cost fallback for the widget's imagine flow when the paid Supabase→vyce lanes fail).
+
+Work Log:
+- Read worklog (Task 29 + 30 sections) for conventions: globalThis lesson (Turbopack per-route module instances — v29.19), denial/error JSON shapes, JSDoc WHY comments, sticky rate-guard style.
+- Studied (not modified): src/lib/brain/auth.ts (hasBrainAccess), src/app/api/brain/cortex/route.ts (denial shape 401 UNAUTHORIZED "Brain access denied", dynamic/maxDuration exports, no runtime export), src/lib/guard.ts (rateLimit/clientKey), src/app/api/backup/workspace/route.ts (rateLimit 429 shape, safe catch-slice error text).
+- Confirmed z-ai-web-dev-sdk v0.0.18 installed; read its d.ts — images.generations.create({prompt, size}) → ImageGenerationResponse{data:[{base64}]}, size union matches the 7 contract sizes exactly.
+- Created ONE file: src/app/api/imagine/route.ts. Contract implemented exactly: POST-only (GET/HEAD/PUT/PATCH/DELETE/OPTIONS → 405 {code:METHOD_NOT_ALLOWED,message:"POST required"}); hasBrainAccess gate mirroring cortex 401; body {sender?,prompt,size?} — sender trim/clamp60/default "izleyici", prompt trim + <2 chars → 400 BAD_PROMPT + clamp 900 + strip \x00-\x1F (with post-strip emptiness guard back to BAD_PROMPT), size coerced into the 7-value union (default 1024x1024, never errors); rate limits in order imagine:${sender} 4/300s → imagine-ip:${clientKey} 10/300s → imagine-global 14/300s, each 429 {code:RATE_LIMITED} short friendly message; z-ai SDK client cached on globalThis.__nexusZAI (??= await ZAI.create() — the v29.19 lesson, no other file used the name); generation raced against a 45s timer → timeout 504 {code:ZAI_TIMEOUT,"Free image engine timed out."}, missing base64 → 502 {code:ZAI_UNAVAILABLE,"Free image engine did not return an image."}; success 200 {ok, imageUrl data:image/png;base64,…, modelLabel:"NEXUS // Z-IMAGINE", provider:"zai", size} with Cache-Control: no-store; whole handler in try/catch → 500 {code:IMAGINE_FAILED, message ≤160 chars, no stack/secrets}; exports dynamic="force-dynamic" + maxDuration=60 (runtime not mirrored — cortex doesn't export it).
+- Timer hygiene: clearTimeout in finally; the race keeps handlers on the losing promise so a late generation rejection can't become an unhandled rejection.
+- VERIFIED: bun x tsc --noEmit CLEAN (exit 0 — zero errors, mine or pre-existing); bun run lint CLEAN.
+
+Stage Summary:
+- Route live: POST /api/imagine (src/app/api/imagine/route.ts — the ONLY file created/modified by this task).
+- Negative probe PASS: curl -X POST /api/imagine {"prompt":"test","sender":"probe"} → 401 {"ok":false,"error":{"code":"UNAUTHORIZED","message":"Brain access denied"}} (first-hit compile 110ms, no retry needed). Bonus method probe: GET /api/imagine → 405 {"ok":false,"error":{"code":"METHOD_NOT_ALLOWED","message":"POST required"}}.
+- dev.log clean through all probe traffic (only expected 401/405 lines). Positive-path generation probe intentionally NOT attempted (needs the secret ingest token — left to the main agent per task instructions).
+- The lane is free by construction (z-ai SDK, server-side only) so a viewer whose credit was already burned on a failed paid lane gets an image instead of a dead card — and is never billed twice.
