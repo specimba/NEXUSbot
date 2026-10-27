@@ -1,0 +1,904 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns="http://www.w3.org/2005/Atom">
+  <id>https://arxiv.org/api/ZlWV9aLssUTKsJQwR7rKZHruVi0</id>
+  <title>arXiv Query: search_query=all:"self-improving" AND all:agents&amp;id_list=&amp;start=0&amp;max_results=25</title>
+  <updated>2026-10-23T00:12:55Z</updated>
+  <link href="https://arxiv.org/api/query?search_query=all:%22self-improving%22+AND+all:agents&amp;start=0&amp;max_results=25&amp;id_list=" type="application/atom+xml"/>
+  <opensearch:itemsPerPage>25</opensearch:itemsPerPage>
+  <opensearch:totalResults>677</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+  <entry>
+    <id>http://arxiv.org/abs/2610.30042v1</id>
+    <title>HGM-Dual: Lineage-Aware Guided Agent Harness Optimization for Long-Horizon Planning</title>
+    <updated>2026-10-21T17:02:28Z</updated>
+    <link href="https://arxiv.org/abs/2610.30042v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.30042v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Harness optimization, which improves an agent's prompts, tools, and workflows, is an increasingly effective way to enhance agents built on frozen or closed-source LLMs. Leading approaches such as the Darwin--Godel Machine and the Huxley--Godel Machine (HGM) rely on recursive self-improvement and were developed mainly for coding, where the competence needed to improve the agent coincides with the competence being improved. Planning tasks, in which an agent must produce a sequence of tool calls that jointly satisfies interacting constraints, break this alignment. There, open-ended self-modification repeatedly explores ineffective changes and consumes substantial evaluation budgets. We introduce HGM-Dual, a diagnostic-guided framework for budget-efficient harness evolution for planning agents. First, HGM-Dual represents agent evolution as lineage-aware context. This context records what each ancestor changed, which behaviors improved or regressed, and which modifications were ineffective, giving the editor explicit edit-outcome attribution instead of an unstructured archive of past agents. Second, HGM-Dual introduces error-conditioned dual-path child generation. For each selected parent, it generates a general child that preserves open-ended exploration and specialized children that target the harness components most likely responsible for the parent's highest-ranked constraint violations. HGM-Dual outperforms the strongest baseline by up to 14.45% relative improvement in case accuracy while matching HGM variants' final performance with 2x-4x fewer evaluation budget.</summary>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.NE" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-21T17:02:28Z</published>
+    <arxiv:primary_category term="cs.AI"/>
+    <author>
+      <name>Sudipta Paul</name>
+    </author>
+    <author>
+      <name>Pengrui Quan</name>
+    </author>
+    <author>
+      <name>Aounon Kumar</name>
+    </author>
+    <author>
+      <name>Nicholas Tzou</name>
+    </author>
+    <author>
+      <name>Vivek Kulkarni</name>
+    </author>
+    <author>
+      <name>Srinivas Chappidi</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.29784v1</id>
+    <title>Evolving with Open Worlds: Towards Recursive Self-Improvement for Future Forecasting</title>
+    <updated>2026-10-21T14:09:57Z</updated>
+    <link href="https://arxiv.org/abs/2610.29784v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.29784v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Most contemporary artificial intelligence (AI) systems are released with frozen parameters and improve through external updates, whereas an ideal system would keep improving from its own experience, a capacity we call recursive self-improvement (RSI). Yet studying RSI requires an environment that is continuously changing, objectively verifiable, and naturally grounded, posing a fundamental challenge for agent evolution. Here we introduce DeepEvolve, a sustainable evolution agent system grounded in future event prediction, in which agents continuously interact with a dynamically evolving environment and improve by internalizing and externalizing the experience gained through these interactions. A living environment synthesizes verifiable tasks, and a recursive-evolution engine turns the reasoning trajectory behind each prediction back into capability: decoupling search from prediction adapts parameter-level evolution to the contamination-prone live environment, while distilling reusable skills lets the agent evolve from the limited live trajectories such an environment affords. On the external FutureX leaderboard, which evaluates predictions against real-world outcomes and is updated weekly, our self-improved forecaster ranked first across all systems over three consecutive weeks, achieving up to a 195% improvement in rating. On our synthesized evaluation, it ranked among the top three across four base LLMs, outperforming the strongest baseline by up to 10.7 Bradley--Terry points. More broadly, these results suggest that a system built for self-improvement is best understood as an agent that co-evolves with a genuinely living, open-ended environment, pointing to a shift in AI from training static models on fixed data toward cultivating agents that grow stronger from their own experience, with such an open world as the indispensable basis of that growth.</summary>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-21T14:09:57Z</published>
+    <arxiv:comment>47 pages, 13 figures. Working in progress</arxiv:comment>
+    <arxiv:primary_category term="cs.CL"/>
+    <author>
+      <name>Zhipeng Chen</name>
+    </author>
+    <author>
+      <name>Yunsen Liang</name>
+    </author>
+    <author>
+      <name>Yanxi Chen</name>
+    </author>
+    <author>
+      <name>Hongkang Zhao</name>
+    </author>
+    <author>
+      <name>Lingyun Feng</name>
+    </author>
+    <author>
+      <name>Ruiyang Ren</name>
+    </author>
+    <author>
+      <name>Guoxin Chen</name>
+    </author>
+    <author>
+      <name>Jia Deng</name>
+    </author>
+    <author>
+      <name>Feng Chang</name>
+    </author>
+    <author>
+      <name>Chuan Hao</name>
+    </author>
+    <author>
+      <name>Ran Tao</name>
+    </author>
+    <author>
+      <name>Jian Yang</name>
+    </author>
+    <author>
+      <name>Ji-Rong Wen</name>
+    </author>
+    <author>
+      <name>Bryan Dai</name>
+    </author>
+    <author>
+      <name>Wayne Xin Zhao</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.29677v1</id>
+    <title>Toward Recursive Self-Improvement in Physical AI</title>
+    <updated>2026-10-21T12:54:50Z</updated>
+    <link href="https://arxiv.org/abs/2610.29677v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.29677v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Recursive self-improvement (RSI) describes a system that improves not only its behavior but also the process by which it improves. Recent digital agents test this idea by rewriting their own code and checking each version with executable tests. Bringing these mechanisms into the physical world requires learning from partial observations through costly trials, while accounting for changing operating conditions and potentially irreversible consequences. We position RSI within robot learning and trace pathways from improving robot capabilities to improving the processes that generate them. We examine how physical experience can strengthen these improvement mechanisms and when the resulting gains can support further self-improvement of the mechanisms themselves. Gains carry forward only when feedback addresses remaining learning needs, the receiving component can use the change, its value survives changes in tasks or hardware, and continued practice remains safe and affordable. Existing studies, concentrated in manipulation, support behavioral improvement, benefits to later learning, and procedure improvement. Some systems also change the improver's knowledge or tools, but the physical studies reviewed here have yet to isolate gains attributable to recursion. We synthesize these findings into evaluation principles and research directions for machines that, trial by trial, safely improve the way they improve.</summary>
+    <category term="cs.RO" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-21T12:54:50Z</published>
+    <arxiv:comment>93 pages, 15 figures, 21 tables. Project page: https://physical2rsi.github.io/</arxiv:comment>
+    <arxiv:primary_category term="cs.RO"/>
+    <author>
+      <name>Meng Luo</name>
+    </author>
+    <author>
+      <name>Zechen Bai</name>
+    </author>
+    <author>
+      <name>Shanqing Xu</name>
+    </author>
+    <author>
+      <name>Yanlin Li</name>
+    </author>
+    <author>
+      <name>Kaixin Li</name>
+    </author>
+    <author>
+      <name>Mengchen Qian</name>
+    </author>
+    <author>
+      <name>Weifeng Lu</name>
+    </author>
+    <author>
+      <name>Ran Zhang</name>
+    </author>
+    <author>
+      <name>Yingtian Zou</name>
+    </author>
+    <author>
+      <name>Ziyang Luo</name>
+    </author>
+    <author>
+      <name>Wei Chen</name>
+    </author>
+    <author>
+      <name>Hongzhan Lin</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.29641v1</id>
+    <title>Recursive Code Evolution for Task-Oriented Semantic Communications</title>
+    <updated>2026-10-21T12:23:33Z</updated>
+    <link href="https://arxiv.org/abs/2610.29641v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.29641v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Semantic communication jointly optimizes inference accuracy, channel use, and computation, yet the underlying communication program is typically specified before training. This paper presents ComRSI (Communications-Oriented Recursive Self-Improvement), a framework for recursively evolving that program through large-language-model-assisted code edits. A fixed agent modifies the encoder, channel adapters, decoder, loss, and training policy; a protected evaluator screens candidates under prescribed budgets and resource constraints. Accepted code and textual feedback inform subsequent proposals, while candidate weights are trained from scratch. In the original ten-generation CIFAR-100 lineage, eight accepted revisions produce an attention-pooled code achieving 74.3% test accuracy over an Additive White Gaussian Noise (AWGN) channel at 32 complex symbols per image, compared with 67.2% at 256 symbols for the initial design. The program also improves fading-channel accuracy and transfers to Tiny-ImageNet after retraining. A repeat study with ten searches per method compares ComRSI against non-recursive agents with and without textual history. Mean final search scores balancing accuracy, transmission rate, and computational cost are 0.7587, 0.7376, and 0.7089, respectively; the mean numbers of accepted revisions per search are 6.0, 5.0, and 2.1. The advantage over the memoryless agent is supported by a two-sided rank test, whereas the difference from the history-equipped agent remains statistically inconclusive at this sample size. Archived proposals show that pooling can yield a large improvement, while retained history supports subsequent refinement. These results support recursive program optimization within the evaluated setting and expose its remaining rate-robustness and compute-placement trade-offs.</summary>
+    <category term="cs.IT" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="eess.SP" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-21T12:23:33Z</published>
+    <arxiv:primary_category term="cs.IT"/>
+    <author>
+      <name>Yan Gong</name>
+    </author>
+    <author>
+      <name>Zheng Chu</name>
+    </author>
+    <author>
+      <name>Wei Koong Chai</name>
+    </author>
+    <author>
+      <name>Hari Mohan Pandey</name>
+    </author>
+    <author>
+      <name>Jingrui Hou</name>
+    </author>
+    <author>
+      <name>Miao Zhang</name>
+    </author>
+    <author>
+      <name>Yuanjian Li</name>
+    </author>
+    <author>
+      <name>Pei Xiao</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.29357v1</id>
+    <title>Memory-Centric Continual Learning for AI Agents</title>
+    <updated>2026-10-21T07:49:42Z</updated>
+    <link href="https://arxiv.org/abs/2610.29357v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.29357v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Autonomous agents powered by foundation models can reason, plan, and use tools, but their fixed weights and context limits hinder sustained learning from experience over long-term deployment. While external memory systems attempt to bridge this gap, they mostly act as passive retrieval caches, evaluated primarily by whether they can recall stored facts or past interactions. Whether memory can drive genuine continual learning remains an open question. In this paper, we introduce Memory-Centric Continual Learning (MCCL), arguing that memory should be judged by whether it improves future actions, not merely what it retrieves. MCCL has three main parts. First, a three-axis taxonomy organizes memory by where state is stored (substrates), what form it takes (assets), and how it is managed (policies). This defines a two-loop lifecycle that updates memory state in an inner loop while refining management policies in an outer loop based on task feedback. Second, an evaluation protocol measures retention under interference, adaptation to change, and task transfer to isolate genuine behavioral gains from simple context expansion. Third, a memory scaling framework models how agent performance scales with experience, storage capacity, and compute budgets across non-parametric and parametric memory. Together, these components reframe agent memory from passive lookup to continuous learning, offering a principled route toward self-improving autonomous agents.</summary>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-21T07:49:42Z</published>
+    <arxiv:primary_category term="cs.CL"/>
+    <author>
+      <name>Dongfang Li</name>
+    </author>
+    <author>
+      <name>Zhuoen Chen</name>
+    </author>
+    <author>
+      <name>Bonian Jia</name>
+    </author>
+    <author>
+      <name>Zixuan Liu</name>
+    </author>
+    <author>
+      <name>Zhengxuan Lu</name>
+    </author>
+    <author>
+      <name>Can Deng</name>
+    </author>
+    <author>
+      <name>Yukun Shi</name>
+    </author>
+    <author>
+      <name>Yuhang Meng</name>
+    </author>
+    <author>
+      <name>Xin Zhang</name>
+    </author>
+    <author>
+      <name>Jiahe Huang</name>
+    </author>
+    <author>
+      <name>Fuhao Li</name>
+    </author>
+    <author>
+      <name>Junmai Wang</name>
+    </author>
+    <author>
+      <name>Shunyao Wen</name>
+    </author>
+    <author>
+      <name>Jingjun Sun</name>
+    </author>
+    <author>
+      <name>Jiaxu Tian</name>
+    </author>
+    <author>
+      <name>Jiangling Zhang</name>
+    </author>
+    <author>
+      <name>Zihan Wang</name>
+    </author>
+    <author>
+      <name>Liangyou Li</name>
+    </author>
+    <author>
+      <name>Yitong Yao</name>
+    </author>
+    <author>
+      <name>Shuangyong Song</name>
+    </author>
+    <author>
+      <name>Beilun Wang</name>
+    </author>
+    <author>
+      <name>Pengxu Wei</name>
+    </author>
+    <author>
+      <name>Hanlin Xu</name>
+    </author>
+    <author>
+      <name>Chang Liu</name>
+    </author>
+    <author>
+      <name>Yongxiang Li</name>
+    </author>
+    <author>
+      <name>Baotian Hu</name>
+    </author>
+    <author>
+      <name>Xiangyang Ji</name>
+    </author>
+    <author>
+      <name>Min Zhang</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.29121v1</id>
+    <title>Recursive Self-Improvement on a Budget: Scoring Code Edits Before They Run</title>
+    <updated>2026-10-21T03:04:25Z</updated>
+    <link href="https://arxiv.org/abs/2610.29121v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.29121v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>A coding agent that rewrites its own scaffold has to choose which proposed edit to expand before that edit has been evaluated, and the search then has to return one agent. Each run fits one linear readout on the parent's steering-split solve rate and eight coordinates of the proposed diff, from 96 scaffold edits labeled by four evaluations of a 16-instance fit split, and then freezes the coefficients. HumanEval+ reserves 48 instances as the steering split and Polyglot reserves 64. That split scores parents and keeps an archive of four nodes. Huxley-Gödel Machine selection draws a parent by Thompson sampling on the steering counts of nodes that have already been evaluated, and it expands the child that parent proposes. Every method then returns the earliest evaluated node whose steering-split solve count is maximal. The tables report the held-out score of that node on the other 100 HumanEval+ instances and the other 145 Polyglot instances, next to the root scaffold and the calibration edit with the highest fit-split label. Twelve runs of GPT-4o return a node at 87.0% on held-out HumanEval+, against 84.2% for the parent-rate ablation. On that split Huxley-Gödel Machine selection returns 85.1%, the root is at 81.2%, and the calibration-best edit is at 82.8%. On the same split Claude Sonnet 4.5 returns 86.6%, beside 86.5% for Huxley-Gödel Machine selection, 85.3% for the parent-rate ablation, and 85.1% for the calibration-best edit.</summary>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-21T03:04:25Z</published>
+    <arxiv:comment>9 pages, 3 figures</arxiv:comment>
+    <arxiv:primary_category term="cs.AI"/>
+    <author>
+      <name>Erfan Darzi</name>
+    </author>
+    <author>
+      <name>Sree Bhargavi Balija</name>
+    </author>
+    <author>
+      <name>Sheng He</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.29005v1</id>
+    <title>VeriEvolve: Evaluator-First Evolution for Tool-Using Agents</title>
+    <updated>2026-10-21T00:13:29Z</updated>
+    <link href="https://arxiv.org/abs/2610.29005v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.29005v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>A central obstacle to self-improving agents is the absence of a reliable fitness signal for realistic stateful tasks. We introduce \textsc{VeriEvolve}, an evaluator-first evolution framework that constructs this missing evaluation layer before optimizing the agent. From task instruction, VeriEvolve synthesizes instruction-grounded challenge states and an executable evaluator that checks them. During each round of workflow evolution, the evaluator is frozen and serves as the fitness signal. Between rounds, VeriEvolve revises the evaluator by converting the end states of strong and weak runs into a pair of counterfactual test cases.
+  Across all 30 MCPMark Filesystem tasks, VeriEvolve constructs 30 evaluators with 141 challenge states, achieving 141/141 agreement on the generated suites and 113/122 agreement on held-out states produced by executor agents. Evaluator-guided evolution increases externally verified success from 6/30 to 18/30 for GLM-5.2 and from 27/30 to 30/30 for Claude; refinement removes all three false positives that the weak executor exposes. Cross-environment studies on PostgreSQL, Playwright, Notion, and GitHub further expose complementary limits from observability, state representation, and search/execution capacity. These results show that executable evaluators can be synthesized and used to guide search when task success is observable and an external verifier is available for calibration.</summary>
+    <category term="cs.SE" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-21T00:13:29Z</published>
+    <arxiv:comment>24 pages, 3 figures. Accepted to the REALM Workshop at EMNLP 2026 (non-archival)</arxiv:comment>
+    <arxiv:primary_category term="cs.SE"/>
+    <author>
+      <name>Yueshen Li</name>
+    </author>
+    <author>
+      <name>Kamer Ali Yuksel</name>
+    </author>
+    <author>
+      <name>Gokhan Tur</name>
+    </author>
+    <author>
+      <name>Dilek Hakkani-Tür</name>
+    </author>
+    <author>
+      <name>João Pedro Maia</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.28987v1</id>
+    <title>PerMIT: Securing Persistent Memory for LLM Agents via Machine-Checked Integrity Theorems and Scalable Community Trust</title>
+    <updated>2026-10-20T23:31:06Z</updated>
+    <link href="https://arxiv.org/abs/2610.28987v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.28987v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Persistent memory is a largely undefended surface for injection and poisoning, and the same risk limits memory sharing among agents. We present PerMIT, a memory architecture with provable integrity guarantees under an explicit trust assumption: only user-typed inputs and values confirmed at a gate are trusted. PerMIT mediates the release and use of untrusted environment-derived values through a finite memory interface, while preserving agent-driven multi-turn planning and tool choice. Over this finite interface, we prove two integrity theorems that are also machine-checked in Lean 4, which together ensure that environment-derived memory reaches a sensitive action only if confirmed at the gate and influences the agent's behavior only through what the gate displays. Every attack in our threat model thereby reduces to a single auditable decision, which a human, an LLM verifier, or both can make in practice. On Trojan Hippo, PerMIT records zero observed attack success with self-verification and lightweight verifiers. Because each confirmation is a logged verdict on exact content, endorsements accumulate across users, and sufficiently endorsed items become community-confirmed with no further verification required. Under explicit assumptions, we prove and corroborate in simulation a co-scaling property: as the community grows, the risks of promoting poison and of wrongly evicting benign knowledge fall, while per-user verification effort does not rise. On $τ^2$-bench, communities of up to 90 autonomous agents use PerMIT to build shared knowledge bases with no direct memory injection promoted, and the resulting knowledge significantly improves new agents on held-out tasks, suggesting a path toward agents that safely self-improve at test time.</summary>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.CR" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-20T23:31:06Z</published>
+    <arxiv:primary_category term="cs.AI"/>
+    <author>
+      <name>Tanqiu Jiang</name>
+    </author>
+    <author>
+      <name>Min Bai</name>
+    </author>
+    <author>
+      <name>Sadat Shahriar</name>
+    </author>
+    <author>
+      <name>Wanyu Du</name>
+    </author>
+    <author>
+      <name>Sandesh Swamy</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.28945v1</id>
+    <title>Self-Improving Agents with World Model Predictive Paths</title>
+    <updated>2026-10-20T21:46:29Z</updated>
+    <link href="https://arxiv.org/abs/2610.28945v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.28945v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Large language model (LLM) agents are increasingly expected to interact with environments and improve their decisions during deployment. However, how anticipating future outcomes and drawing on accumulated interaction experience can jointly support decision-making remains underexplored. We propose a test-time framework, inspired by Model Predictive Path Integral (MPPI) control, that combines multi-branch predictive analysis with experience-based adaptation. At each step, the agent proposes multiple candidate actions and imagines their outcomes with a world model, so that alternatives can be compared without being executed in the environment. Since language environments provide neither explicit dynamics nor costs, the predicted outcomes are evaluated for task progress and risk, and MPPI-style weights over the resulting costs guide the final decision. A dual-branch experience memory enables self-improvement: the planner branch refines candidate generation and action selection, while the world model branch improves next-observation prediction. Experiments on ALFWorld and ScienceWorld across three backbones demonstrate the strong overall performance of our method and the effectiveness of experience-guided predictive control. Our code will be made publicly available.</summary>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-20T21:46:29Z</published>
+    <arxiv:comment>17 pages, 4 figures</arxiv:comment>
+    <arxiv:primary_category term="cs.AI"/>
+    <author>
+      <name>Haori Lu</name>
+    </author>
+    <author>
+      <name>Tianyu Gao</name>
+    </author>
+    <author>
+      <name>Yaoyao Liu</name>
+    </author>
+    <author>
+      <name>Yingying Li</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.28577v1</id>
+    <title>Cache Engineering for Agents</title>
+    <updated>2026-10-20T17:32:24Z</updated>
+    <link href="https://arxiv.org/abs/2610.28577v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.28577v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Large Language Model (LLM) agents can handle increasingly complex tasks, navigating long trajectories of observations and actions. As these trajectories grow, key-value (KV) cache I/O and storage become the dominant cost. Trajectories can also exceed the LLM's maximum context length, requiring control over active cache growth. Prior work uses context engineering to reduce cache size by trimming or summarizing history. However, modifying the trajectory prefix invalidates subsequent cached states and triggers costly re-prefilling of retained context. Task accuracy can also suffer when too little context is retained to limit re-prefill costs. We propose cache engineering as a new scheme. It allows agents to directly control their active KV cache without modifying the trajectory or re-prefilling retained context. Specifically, agents can proactively use drop to exclude selected cache from future attention and repos to adjust retained keys' position encodings. We formalize these cache operations and identify history dependence as a serving challenge: identical token sequences can yield different cache states under different cache operation sequences, making prefix matching insufficient for correct cache reuse. Thus, we co-design the AKV serving engine. It provides a stateless interface compatible with existing serving APIs, while internally managing stateful cache reuse, eviction, and restoration. Experiments show that a tool-response rolling-drop cache policy improves average benchmark scores by 1.7 points and reduces average cost by 27.7%, compared with conventional threshold-triggered summarization. With AKV, it achieves up to 1.2x the output throughput and a 1.5x speedup in P95 request latency. Recursive self-improvement of cache policies further reduces cost by 7.1% over expert design. Our code is at https://github.com/thu-nics/AKV.</summary>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-20T17:32:24Z</published>
+    <arxiv:primary_category term="cs.CL"/>
+    <author>
+      <name>Tianyu Fu</name>
+    </author>
+    <author>
+      <name>Ruoxi Wang</name>
+    </author>
+    <author>
+      <name>Zihan Min</name>
+    </author>
+    <author>
+      <name>Zhongqi Ren</name>
+    </author>
+    <author>
+      <name>Zhihao Li</name>
+    </author>
+    <author>
+      <name>Tengxuan Liu</name>
+    </author>
+    <author>
+      <name>Shengxu Mu</name>
+    </author>
+    <author>
+      <name>Hanling Zhang</name>
+    </author>
+    <author>
+      <name>Yu Wang</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.28282v1</id>
+    <title>ChartEvo: Self-Evolving Agent Harnesses for Long-Tail Chart Reasoning</title>
+    <updated>2026-10-20T14:34:54Z</updated>
+    <link href="https://arxiv.org/abs/2610.28282v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.28282v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Multimodal large language models (MLLMs) have substantially advanced chart understanding and reasoning, yet their performance remains highly uneven across chart types. While modern MLLMs perform well on common charts, their accuracy drops sharply on long-tail charts with diverse visual structures and reasoning requirements. Tool-augmented agents can improve complex chart reasoning by introducing specialized visual capabilities, but manually engineering strategies and tools for the heterogeneous and evolving long tail is difficult to scale. We introduce \textbf{ChartEvo}, a recursive self-improvement framework that enables chart agents to adapt to underperforming chart types through experience-driven harness-level self-improvement. ChartEvo jointly evolves reusable chart-specific Skills and executable Tools, while learning reusable local tool-call chains to compose evolved capabilities and control the inference overhead of tool-augmented reasoning. On long-tail charts from ChartBench and ChartX, ChartEvo improves accuracy over its base MLLM, Qwen3.7-Plus, by \textbf{45.6\%} and \textbf{32.5\%}, respectively, demonstrating the effectiveness of recursive self-improvement for long-tail chart adaptation.</summary>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.CV" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-20T14:34:54Z</published>
+    <arxiv:primary_category term="cs.AI"/>
+    <author>
+      <name>Qi Wang</name>
+    </author>
+    <author>
+      <name>Peijie Wang</name>
+    </author>
+    <author>
+      <name>Jun Cao</name>
+    </author>
+    <author>
+      <name>Haoyang Tong</name>
+    </author>
+    <author>
+      <name>Xiao-Hui Li</name>
+    </author>
+    <author>
+      <name>Fei Yin</name>
+    </author>
+    <author>
+      <name>Cheng-Lin Liu</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.28201v1</id>
+    <title>MaD-RSI: Model-as-Data for Recursive Self-Improvement of Agent Harnesses</title>
+    <updated>2026-10-20T13:41:00Z</updated>
+    <link href="https://arxiv.org/abs/2610.28201v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.28201v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Recursive self-improvement (RSI) of agent harnesses has emerged as an effective approach to enhancing the capabilities of large language model (LLM) agents. By searching the harness space for a specific LLM on a given dataset, RSI can discover a harness tailored to the capabilities and behavioral characteristics of that model. However, such optimization often creates a strong coupling between the learned harness and its target LLM, limiting generalization across models and requiring substantial computational resources to adapt to new LLMs. Moreover, existing RSI methods typically optimize a harness using feedback from a single model and evaluate its generalization to other models only after training. This paradigm treats model differences primarily as a criterion for evaluating generalization rather than as valuable evidence for optimization. In this paper, we introduce a new perspective that treats models as data and places the harness at the center of optimization. Building on this perspective, we propose \textsc{MaD-RSI}, a framework that directly optimizes a shared harness across multiple heterogeneous LLMs by incorporating their diverse failure trajectories into the training process. Rather than assessing model differences only after optimization, \textsc{MaD-RSI} leverages these differences as training evidence to guide the self-improvement of a shared harness. Furthermore, we introduce a new evaluation framework with two complementary metrics designed to assess the effectiveness of harness optimization across models. Experiments across multiple datasets and LLMs demonstrate that \textsc{MaD-RSI} improves generalization over existing approaches while reducing training costs.</summary>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-20T13:41:00Z</published>
+    <arxiv:primary_category term="cs.AI"/>
+    <author>
+      <name>Yu Cui</name>
+    </author>
+    <author>
+      <name>Hong He</name>
+    </author>
+    <author>
+      <name>Ruiqing Yue</name>
+    </author>
+    <author>
+      <name>Sicheng Pan</name>
+    </author>
+    <author>
+      <name>Zhuoyu Sun</name>
+    </author>
+    <author>
+      <name>Yifei Liu</name>
+    </author>
+    <author>
+      <name>Ting Li</name>
+    </author>
+    <author>
+      <name>Wenzhuo Zhu</name>
+    </author>
+    <author>
+      <name>Baohan Huang</name>
+    </author>
+    <author>
+      <name>Haibin Zhang</name>
+    </author>
+    <author>
+      <name>Cong Zuo</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.27889v1</id>
+    <title>Elicitation or Expansion? Demystifying Gains from Agent Harness Optimization</title>
+    <updated>2026-10-20T09:11:39Z</updated>
+    <link href="https://arxiv.org/abs/2610.27889v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.27889v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Recent studies in harness optimization have shown substantial performance gains in language model agents without updating model weights. A well-designed harness more effectively leverages the underlying model's capabilities by shaping context, tool use, and execution workflows. However, naïve success rates alone do not fully characterize whether optimized harness yields more reliable success on tasks already within reach (elicitation) or a broader range of solvable tasks (expansion). This distinction is crucial for recursive self-improvement and evolutionary search, as expansion may provide a broader range of successful experiences to push the capability boundaries. Despite the growing significance, this distinction remains underexplored in harness optimization. We conduct a systematic analysis to study the effect of gains from harness optimization. Building on pass@k analyses in the reinforcement learning (RL) literature that compare models before and after RL training, we compare optimized harnesses with their pre-optimization counterparts. Specifically, we assess changes in reachable task coverage, compare harness optimization with model scaling and increased inference-time compute, and examine how gains vary with task difficulty. Across static prediction and dynamic tasks, we find that pass@1 advantages of harness over stronger interventions can reverse at larger attempt budgets and aggregate gains conceal shortfalls on hard tasks, underscoring the need for a fine-grained diagnosis.</summary>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-20T09:11:39Z</published>
+    <arxiv:comment>Project page: https://furiosa-air.github.io/elicitation-or-expansion</arxiv:comment>
+    <arxiv:primary_category term="cs.LG"/>
+    <author>
+      <name>Younghyun Kim</name>
+    </author>
+    <author>
+      <name>Wooseok Seo</name>
+    </author>
+    <author>
+      <name>Minseo Kim</name>
+    </author>
+    <author>
+      <name>Seunghyuk Oh</name>
+    </author>
+    <author>
+      <name>Minjae Lee</name>
+    </author>
+    <author>
+      <name>Donghoon Kim</name>
+    </author>
+    <author>
+      <name>Hyung Il Koo</name>
+    </author>
+    <author>
+      <name>Jaehyung Kim</name>
+    </author>
+    <author>
+      <name>Wonjun Kang</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.27735v1</id>
+    <title>RSI Control: Can AI Models Perform Covert Sabotage in the Self-Improvement Process?</title>
+    <updated>2026-10-20T06:57:59Z</updated>
+    <link href="https://arxiv.org/abs/2610.27735v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.27735v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Recursive self-improvement, in which frontier AI models work on training the next generation, is quickly becoming a reality. However, the safety of this process has received far less attention than it should. A misaligned model training its successor can shape what that successor knows, how it behaves, and what it wants, and the harm carries forward into the next generation. We study this risk through the lens of AI control. We introduce RSI Control Arena, a testbed in which a frontier model, acting as an autonomous R\&amp;D agent, is given a benign main task from a stage of a successor model's training pipeline together with a covert side task to install a misaligned property in the successor. The testbed contains 16 side tasks in three classes, forming 22 task pairs with main tasks that span the pipeline from data curation to reinforcement learning. We evaluate six frontier models as agents against LLM monitors that read the transcript of the run and the agent's reasoning. We observe that every model completes a substantial share of the side tasks without degrading the main-task performance, including side tasks that make the successor itself a better saboteur. Under minimal instructions to stay covert, models already produce successful attacks that monitors fail to detect, and providing a short list of evasion tactics further reduces the detection rate. Monitors with access to agent's reasoning detects most attacks, but not all. Our results indicate that recursive self-improvement raises significant safety concerns, and that strong safety effort should be in place before models are trusted with greater responsibility of training their successors.</summary>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-20T06:57:59Z</published>
+    <arxiv:primary_category term="cs.AI"/>
+    <author>
+      <name>Kaiwen Zhou</name>
+    </author>
+    <author>
+      <name>Udari Madhushani Sehwag</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.27610v1</id>
+    <title>Auditing the Product, Not the Recursion: The Evaluation Evidence Behind Recursive Self-Improvement Claims</title>
+    <updated>2026-10-20T04:23:05Z</updated>
+    <link href="https://arxiv.org/abs/2610.27610v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.27610v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Recursive self-improvement (RSI) promises AI systems, such as self-evolving LLM agents, that become better at producing further improvements. Evaluating this promise requires separating product claims about the final system from process claims about the improvement process itself. Existing surveys specify the evidence these claims require, but how often studies report that evidence remains unmeasured. We examine this question through full-text coding of 114 eligible studies in a reproducible arXiv search frame frozen in October 2026, including 90 that describe their own systems as RSI. The codebook links claims to evaluation designs. Independent human coding, third-reader adjudication, and a separate blind coding of improver comparisons assess coding reliability. Among the 90 RSI studies, 90% report product evaluation beyond development tasks under a broad criterion that includes partial or unstated separation, while 60% report evaluation on tasks unused for selection. Only 22% audit two or more reruns of the full loop. In a human-coded random sample, the RSI studies show the same contrast: 45% evaluate on tasks unused for selection and 14% audit two or more reruns. Of the 26 studies claiming a better improvement procedure, 23 report a related comparison, but only 4 compare earlier and later procedures from identical starting artifacts at a matched budget. Across these results and a comparison set of established works, evidence for repeatability and improved procedures remains less developed than product evaluation. Three propositions explain how selection effects, shared evaluator errors, and changes in system state limit what product evaluations can establish. Together, the findings support a claim-indexed reporting standard that connects each claim to the evaluation design needed to test it.</summary>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.SE" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-20T04:23:05Z</published>
+    <arxiv:comment>39 pages, 1 figure, 20 tables</arxiv:comment>
+    <arxiv:primary_category term="cs.LG"/>
+    <author>
+      <name>Zihan Chen</name>
+    </author>
+    <author>
+      <name>Di Zhu</name>
+    </author>
+    <author>
+      <name>Lei Nico Zheng</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.27465v1</id>
+    <title>Recoverability and Verifier Strength: Two Measured Preconditions for Unattended Agent Self-Improvement</title>
+    <updated>2026-10-20T01:32:13Z</updated>
+    <link href="https://arxiv.org/abs/2610.27465v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.27465v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Agent platforms are starting to improve their own agents: they read a deployed agent's execution traces, derive a change, have an automated verifier approve it, and release it with no human author. How much of this loop can safely run without a human? We propose two quantities a platform can measure. Verifier strength $σ$ is how well the available verifier -- often an LLM judge -- agrees with a trusted reference verifier; it limits how much a step can improve the agent. Recoverability is how cheaply a bad change can be undone: whether undoing it needs a new verifier approval, and how much of the old behavior a rollback restores. A step should run unattended only if both are adequate. On our platform this rule allows prompt, tool and skill edits to run unattended and keeps weight updates under human sign-off.
+  Our main contribution is these two definitions and how to measure them. We built a platform that applies the rule and tested it in two ways: on the platform's own approval gate, and in controlled experiments on the $τ^2$-bench agent benchmark. On verifier strength, the platform's LLM judge sometimes gave the same score no matter what it was shown (9 of 37 settings) and reported no error, so a verifier can look healthy while approving anything; its strength must be measured, and two simple tests catch the failure. On recoverability, restoring a saved copy brought the agent back to its original behavior, but a regenerated undo did not, so only changes whose old version is kept can be reversed without a human; and while a change was deployed, it altered the outcome of 17 percent of tasks beyond normal run-to-run variation, which no undo repairs. Together these support the rule: a change can run unattended only when its old version is kept and its verifier's strength has been measured.</summary>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.SE" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-20T01:32:13Z</published>
+    <arxiv:comment>Accepted at the NeurIPS 2026 Workshop on AgenticOS. 6 pages + appendix</arxiv:comment>
+    <arxiv:primary_category term="cs.AI"/>
+    <author>
+      <name>De Wang</name>
+    </author>
+    <author>
+      <name>Peng Qi</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.27406v1</id>
+    <title>More Memory, Worse Agents: Error Reproduction and Anti-Persistence in LLM Agents</title>
+    <updated>2026-10-19T23:58:46Z</updated>
+    <link href="https://arxiv.org/abs/2610.27406v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.27406v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>LLM agents can improve across tasks without updating model parameters by storing experience from their own executions in external memory and reusing it to guide later decisions. A central design question is whether to retain only observed trajectories and outcomes or also the rules, summaries, and skills inferred from them. Retaining these abstractions allows agents to reuse strategies without repeatedly deriving them from raw trajectories. However, errors in stored abstractions can propagate to subsequent decisions through retrieval and reuse. They can also shape execution trajectories, which then become the basis for new abstractions that reproduce the original errors. We term this feedback mechanism error reproduction: errors are regenerated through a cycle of abstraction, execution, and re-abstraction, extending their persistence beyond direct reuse of the original faulty knowledge. We propose Anti-Persistence, a memory design that accumulates trajectories and outcomes while reconstructing task-specific guidance on demand. An adaptive selector uses prior outcomes to decide whether and how to synthesize guidance, which is discarded after execution. This prevents its direct reuse as a stored object, although indirect feedback through retained trajectories remains possible. Across different benchmarks and backbones, Anti-Persistence achieves higher overall held-out success and the lowest average LLM-call cost among the evaluated memory designs. These results support separating experience accumulation from abstraction persistence in memorybased self-improvement.</summary>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-19T23:58:46Z</published>
+    <arxiv:comment>31 pages, 12 figures, 7 tables, including appendices</arxiv:comment>
+    <arxiv:primary_category term="cs.AI"/>
+    <author>
+      <name>Ruhan Wang</name>
+    </author>
+    <author>
+      <name>Kishan Panaganti</name>
+    </author>
+    <author>
+      <name>Dongruo Zhou</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.26848v1</id>
+    <title>Where is Physical RSI capability from? An Observational Scaling Law of LLM-as-policy</title>
+    <updated>2026-10-19T17:59:30Z</updated>
+    <link href="https://arxiv.org/abs/2610.26848v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.26848v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>In this paper, we systematically investigate the mechanisms, scaling behavior, and generalization of physical Recursive self-improvement. We introduce PhysRSI-eval to quantify physical RSI through a five-axis metric: First-Attempt Performance, Efficiency, Success, Budget and Improvement from failure. Different VLMs are evaluated on 18 manipulation tasks under a fixed interaction budget. The analysis of experimental results motivates the Physical Barrel Hypothesis: different capabilities may constrain different parts of improvement. The five-axis metrics also distinguish systems with close public benchmark averages and show that high scores need not come with early or efficient gains. We study observational scaling from two perspectives: predicting the relative performance of VLM agents from their public capabilities, and forecasting later progress from early physical feedback. Together, these analyses ask how quickly and how far an agent can improve. Moreover, we conduct workspace interventions and then analyze what improvement leaves behind. Removing history reduces late-round success, frozen workspaces remain useful on unseen layouts, and three cross-task cases achieve success earlier. The results suggest that scene-specific adaptation and reusable experience can coexist.</summary>
+    <category term="cs.RO" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.CV" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-19T17:59:30Z</published>
+    <arxiv:comment>Tech Report</arxiv:comment>
+    <arxiv:primary_category term="cs.RO"/>
+    <author>
+      <name>Zekai Li</name>
+    </author>
+    <author>
+      <name>Jiayi Yu</name>
+    </author>
+    <author>
+      <name>Jinlu Zhang</name>
+    </author>
+    <author>
+      <name>Luyang Niu</name>
+    </author>
+    <author>
+      <name>Zekun Qi</name>
+    </author>
+    <author>
+      <name>Jun Zheng</name>
+    </author>
+    <author>
+      <name>Xuchuan Chen</name>
+    </author>
+    <author>
+      <name>Dairu Liu</name>
+    </author>
+    <author>
+      <name>Yintianrun Zhang</name>
+    </author>
+    <author>
+      <name>He Wang</name>
+    </author>
+    <author>
+      <name>Li Yi</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.26770v2</id>
+    <title>HarnessPro: Recursive Harness Self-Improvement with Pareto Optimization for Performance-Cost Trade-offs</title>
+    <updated>2026-10-20T06:00:54Z</updated>
+    <link href="https://arxiv.org/abs/2610.26770v2" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.26770v2" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Harness development plays a crucial role in building capable AI agents. Recent approaches improve harnesses through recursive self-improvement (RSI), but their performance gains often come with higher execution costs. We introduce HarnessPro, a label-free method for evolving harnesses to improve task performance while reducing execution cost. In this setting, candidate harnesses are evaluated using LLM-generated tests without access to ground-truth solutions or official tests. Specialized agents diagnose execution trajectories, plan updates with different performance-cost priorities, and implement them as candidate harnesses. Rather than returning a single harness, HarnessPro uses normalized weighted squared-distance selection to provide cost-focused (lite), balanced (medium), and performance-focused (heavy) harnesses for different deployment budgets. Selected harnesses enter the next iteration, where execution feedback guides further updates. Our experiments cover Terminal-Bench 2, SWE-Bench Pro, and ProgramBench, using GPT-5.5 with Codex and GLM-5.2 with Claude Code. Across these benchmarks using GPT-5.5 with Codex, the heavy mode of HarnessPro achieves an average pass-rate gain of 2.0 percentage points and an average per-task cost reduction of 26.1% relative to RHO. This advantage also holds when using GLM-5.2 with Claude Code. Code is available at https://github.com/pzs19/HarnessPro</summary>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-19T17:27:38Z</published>
+    <arxiv:comment>41 pages, 4 figures, 4 tables, under review</arxiv:comment>
+    <arxiv:primary_category term="cs.LG"/>
+    <author>
+      <name>Zhuoshi Pan</name>
+    </author>
+    <author>
+      <name>ZhiYuan Feng</name>
+    </author>
+    <author>
+      <name>Yukuo Cen</name>
+    </author>
+    <author>
+      <name>Honglin Lin</name>
+    </author>
+    <author>
+      <name>Junru Lu</name>
+    </author>
+    <author>
+      <name>Zhongxia Chen</name>
+    </author>
+    <author>
+      <name>Shuo Yang</name>
+    </author>
+    <author>
+      <name>H. Vicky Zhao</name>
+    </author>
+    <author>
+      <name>Jie Tang</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.26554v1</id>
+    <title>BetaMem: Learning to Remember a Changing World for Embodied Agents</title>
+    <updated>2026-10-19T15:13:56Z</updated>
+    <link href="https://arxiv.org/abs/2610.26554v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.26554v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Long-horizon embodied agents face temporal confusion and incomplete or distorted records, recurring errors from fixed memory rules, and growing storage and retrieval costs. We present BetaMem, a framework for building and evolving traceable long-term memory through six linked layers: working, spatial, entity, episodic, experiential, and procedural memory. A dual-level write contract constrains operation executability and source support for content: supervised fine-tuning learns compliant memory operations, while reinforcement learning combines repeated sampling with teacher verification of the original observations to reward complete, accurate records and penalize omissions, distortion, and unsupported content. We formulate failure-driven policy recursive self-improvement through diagnosis along the causal sequence of memory operations and local rule repairs gated by independent replay. Atomic tools frame storage, updates, retrieval, and forgetting as cost-utility allocation under storage and read budgets. Using the open-source Qwen3.5-9B model for memory generation, BetaMem achieves overall scores of 48.08% on M3-Bench-robot, 92.08% on LoCoMo, 72.6% on OpenEQA EM-EQA, and 62.4% on EgoLifeQA, the highest among the listed memory methods under their respective evaluation protocols. Training the model for memory generation raises the contract pass rate from 50.9% to 86.2% while reducing output tokens per stored action by 47.3%. A separate Qwen3-VL-8B-Instruct evaluation on EMem-Bench achieves an average success rate of 38.4% and an average error recurrence rate of 24.9%. We perform best among evaluated methods using comparably sized open-source models. Category results show that we have advantages in integrating information across observations, recalling events over long histories, and inferring personal habits.</summary>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-19T15:13:56Z</published>
+    <arxiv:primary_category term="cs.AI"/>
+    <author>
+      <name>Mai Liu</name>
+    </author>
+    <author>
+      <name>He Sun</name>
+    </author>
+    <author>
+      <name>Siru Zhong</name>
+    </author>
+    <author>
+      <name>Kerun Chen</name>
+    </author>
+    <author>
+      <name>Hao Yan</name>
+    </author>
+    <author>
+      <name>Xiaohui Lv</name>
+    </author>
+    <author>
+      <name>Shuai Tao</name>
+    </author>
+    <author>
+      <name>Wulong Liu</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.26453v2</id>
+    <title>Learning What to Remember: Resource-Efficient Self-Improvement for Lifelong Agents</title>
+    <updated>2026-10-21T14:25:06Z</updated>
+    <link href="https://arxiv.org/abs/2610.26453v2" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.26453v2" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Self-improving agents aim to continuously improve their behavior by learning from experience after deployment. However, accumulating and reusing more experience does not necessarily lead to better decisions, particularly when generation, interaction, and memory resources are jointly constrained. Under such stringent constraints, we find that several existing lifelong-memory methods provide limited benefits over simple retrieval or even no-memory agents. This reveals a fundamental challenge for resource-efficient self-improvement: agents must learn not only which past experiences are relevant, but which are actually worth reusing to improve future decisions. When memory capacity and opportunities for reasoning and recovery are limited, retrieving an ineffective experience can consume scarce resources and hinder downstream execution. To address this challenge, we propose TokenWorth, a lightweight feedback-driven memory adaptation framework that learns query-dependent memory worth from sparse execution feedback. Without updating the backbone model, TokenWorth uses the learned worth to guide both experience retrieval and bounded memory management, enabling the agent to continually adapt how it reuses accumulated experience. Across three LifelongAgentBench environments and both local and API-based deployments, TokenWorth achieves the highest task success rate while using the fewest output tokens among the evaluated methods under the specified resource budgets. These results suggest that effective self-improvement under resource constraints depends not on accumulating more experience, but on learning what is worth remembering. Our code is publicly available at https://github.com/AIGNLAI/TokenWorth.</summary>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-19T14:09:45Z</published>
+    <arxiv:primary_category term="cs.AI"/>
+    <author>
+      <name>Guannan Lai</name>
+    </author>
+    <author>
+      <name>Zi-Yang Bai</name>
+    </author>
+    <author>
+      <name>Jun-Peng Jiang</name>
+    </author>
+    <author>
+      <name>Han-Jia Ye</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.26342v2</id>
+    <title>VibeTraining-Bench: Data-Trainer-Harness Co-Design for Iterative System Improvement</title>
+    <updated>2026-10-20T13:03:07Z</updated>
+    <link href="https://arxiv.org/abs/2610.26342v2" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.26342v2" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Recursive self-improvement (RSI) requires agents to diagnose system bottlenecks and coordinate improvements across training and inference. We refer to the agents' capability to jointly optimize training data, the trainer, and the inference harness as cross-component co-design. We introduce VibeTraining-Bench, a benchmark for evaluating this capability across tasks spanning terminal operation, software engineering, multi-turn tool use, and mathematical reasoning. Within each task, research agents start from an identical initial agent system under a fixed resource budget. Guided by validation feedback, they iteratively refine data, trainers, and inference harnesses, then select and submit a final agent system for evaluation on the test set. To prevent reward hacking, we enforce three safeguards: test data isolation, separate research and grading containers, and network restrictions for research agents. Our evaluation results show that frontier research agents substantially improve target agent systems. For example, on SWE-bench Verified, GPT-6-Astra raises the target agent system's performance from 32.9% to 53.7%, comparable to the human-developed instruct model's 55.4%. However, there is still room to improve their ability to co-design and iteratively refine data, trainer, and harness to achieve cumulative performance gains. We hope that VibeTraining-Bench will serve as a unified platform for advancing RSI, deepening our understanding of cross-component optimization for agent systems. Code and data are available at https://github.com/D2I-ai/VibeTraining-Bench.</summary>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-19T13:10:54Z</published>
+    <arxiv:comment>(Technical report (27 pages, 21 figures)</arxiv:comment>
+    <arxiv:primary_category term="cs.AI"/>
+    <author>
+      <name>Ruotian Peng</name>
+    </author>
+    <author>
+      <name>Yuanyi Ren</name>
+    </author>
+    <author>
+      <name>Shuaiqi Liu</name>
+    </author>
+    <author>
+      <name>Xin Guo</name>
+    </author>
+    <author>
+      <name>Fang Zhu</name>
+    </author>
+    <author>
+      <name>Yangyi Huang</name>
+    </author>
+    <author>
+      <name>Yue Wu</name>
+    </author>
+    <author>
+      <name>Zheng Wang</name>
+    </author>
+    <author>
+      <name>Yandong Wen</name>
+    </author>
+    <author>
+      <name>Zhihang Fu</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.25705v1</id>
+    <title>How Effectively Do Security Skills Guide Coding Agents in Vulnerability Detection in Linux Kernel?</title>
+    <updated>2026-10-19T02:50:45Z</updated>
+    <link href="https://arxiv.org/abs/2610.25705v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.25705v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Large language model (LLM) coding agents, such as Claude Code, are increasingly used for security auditing, with task-specific skills providing reusable vulnerability-analysis procedures. However, their effectiveness in detecting real vulnerabilities and the reasons for their failures remain unclear. We conduct the first large-scale empirical study of 37 security skills using Claude Code with four underlying LLMs on 100 real Linux kernel vulnerabilities across ten classes, totaling 14800 runs. We evaluate vulnerability detection at the function, statement, and vulnerability-class levels. Results show that 24.4 percent of runs locate the correct function, 18.3 percent identify both the function and responsible statement, and 15.7 percent correctly classify the vulnerability. Our failure analysis reveals limitations in evidence acquisition, state-relation reasoning, code interpretation, candidate verification, investigation coverage, and reporting. Based on these findings, we propose SKILL-SIF, a self-improving framework that iteratively evolves security skills by learning from missed vulnerabilities and failure patterns. We evolve five top-performing skills using the original benchmark and evaluate them on 100 previously unseen vulnerabilities. SKILL-SIF improves fully correct vulnerability detection by up to eight times (from 2 percent to 16 percent) on unseen vulnerabilities, while aggregate accuracy across four LLMs increases by 1.85 times (from 6.05 percent to 11.20 percent). These findings highlight the limitations of existing security skills and demonstrate the potential of failure-driven skill evolution to improve vulnerability detection in coding agents.</summary>
+    <category term="cs.CR" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.SE" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-19T02:50:45Z</published>
+    <arxiv:primary_category term="cs.CR"/>
+    <author>
+      <name>Haoran Xue</name>
+    </author>
+    <author>
+      <name>Nikta Akbarpour</name>
+    </author>
+    <author>
+      <name>Gias Uddin</name>
+    </author>
+    <author>
+      <name>Song Wang</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.25114v1</id>
+    <title>Compile Once, Run Cheap: Frozen, Portable Skills for Embodied Agents, and What Recursive Self-Improvement Adds</title>
+    <updated>2026-10-18T08:46:13Z</updated>
+    <link href="https://arxiv.org/abs/2610.25114v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.25114v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Embodied AI lacks the data-rich pretraining that gave language models their agents and skills, so new manipulation capability costs demonstrations per task or a frontier model in every episode. We study a third route: a strong general model acts only as an offline author that writes, runs, diagnoses and repairs a manipulation skill in simulation until it passes an exam on layouts drawn after freezing; the frozen skill then runs as code alone or under a cheap caller that reads only its description. We call this skill-level recursive self-improvement Skill-RSI and specify a compile protocol (isolated, audited author; hidden validation layouts; no-feedback and inherit-only controls; tamper-evident ledger) and a reuse protocol that runs the identical files with executors from another model family. On 7 RoboTwin 2.0 tasks with cluttered tables, Claude Code compiled 4 tasks into 7 frozen skills, 5 from a first draft needing only qualification, at USD 4.29-8.22 of author cost each (USD 55 per skill counting the 13 failed campaigns). The other three tasks did not compile in 18 campaigns, including five with GPT-6 and a pre-registered 150-layout run: on the hardest task every campaign scored 78-95 of 100 but had 3-16 safety aborts, failing the gate of 95% success with zero aborts; a 100-episode exam bounds an abort rate only to 3.6%. On hidden layouts, repair that inherits the previous version beat from-scratch rewriting in 8 of 8 controlled campaigns (sign test p = 0.004); an inherit-only lineage attributes most of the gap to inheritance, with development feedback adding a little (3 of 3, p = 0.125). Write-once campaigns found no detectable first-draft effect of practice (minimum detectable effect 14 points). The frozen skills kept 148/150 successes on new layouts with no model and 147/150 with a DeepSeek-flash caller at USD 0.00028-0.00054 per episode; no direct-control baseline was run.</summary>
+    <category term="cs.RO" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-18T08:46:13Z</published>
+    <arxiv:comment>28 pages, 4 figures, 13 tables. Code and data: https://github.com/Orillusion/embodied-skill-rsi</arxiv:comment>
+    <arxiv:primary_category term="cs.RO"/>
+    <author>
+      <name>Jingwen Bai</name>
+    </author>
+    <author>
+      <name>Guochao Bai</name>
+    </author>
+    <author>
+      <name>Canbo Zhang</name>
+    </author>
+    <author>
+      <name>Shuangqi Li</name>
+    </author>
+    <author>
+      <name>Minchao Hu</name>
+    </author>
+    <author>
+      <name>Weichun Huang</name>
+    </author>
+    <author>
+      <name>Shuang Liu</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.25078v1</id>
+    <title>CoEvo-RSI: When Harnesses Evolve, Which Models Should Follow?</title>
+    <updated>2026-10-18T07:38:03Z</updated>
+    <link href="https://arxiv.org/abs/2610.25078v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.25078v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Model--harness co-evolution has emerged as a prominent paradigm for recursive self-improving (RSI) agents, jointly evolving their execution scaffolds and intrinsic capabilities. We study the persistent yet often overlooked brain--body mismatch problem in this paradigm, where an evolving harness (body) demands behaviors its model (brain) has not learned or restricts capabilities it already possesses. We introduce CoEvo-RSI, a RSI framework that advances model--harness co-evolution through agent-driven, bidirectional historical inheritance. Drawing on a shared evolutionary archive and execution feedback, a meta-agent coordinates harness development from historical designs with model checkpoint selection or merging and subsequent adaptation under the selected harness, aligning inherited capabilities with evolving execution requirements to reduce brain--body mismatch. Using only supervised fine-tuning (SFT) on its own rejection-sampled trajectories, CoEvo-RSI makes Qwen3.5-9B competitive with larger models across diverse vertical applications, including multi-agent failure attribution, role-aware text-to-SQL, and smart-home instruction following. It surpasses DeepSeek-V4-Pro on TraceElephant (+14.16 agent accuracy) and GLM-5.3 on HomeBench VM (+4.90 success rate), underscoring the need for brain--body alignment and the potential of bidirectional historical inheritance to advance agent co-evolution.</summary>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-18T07:38:03Z</published>
+    <arxiv:primary_category term="cs.LG"/>
+    <author>
+      <name>Jiaqi Su</name>
+    </author>
+    <author>
+      <name>Guibin Zhang</name>
+    </author>
+    <author>
+      <name>Jie-Jing Shao</name>
+    </author>
+    <author>
+      <name>Cong Pang</name>
+    </author>
+    <author>
+      <name>Tiankuo Yao</name>
+    </author>
+    <author>
+      <name>Ivor Tsang</name>
+    </author>
+    <author>
+      <name>Haiyan Yin</name>
+    </author>
+    <author>
+      <name>Shuicheng Yan</name>
+    </author>
+  </entry>
+</feed>

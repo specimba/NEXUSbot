@@ -43,6 +43,9 @@
     "examples",
     "skills",
     "scripts",
-    "mini-services"
+    "mini-services",
+    "supabase",
+    "tests",
+    ".zscratch"
   ]
 }

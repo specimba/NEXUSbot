@@ -99,6 +99,10 @@ export type EgressClassification =
 
 export const EGRESS_ROUTING_KEY = "egress.routing";
 
+/** Routing-map target for the custom-provider upstreams (routeFor("custom-providers", map) — the
+ * per-upstream key the egress routing UI/Settings persist; falls back to map.default ?? "direct"). */
+export const EGRESS_CUSTOM_PROVIDERS_KEY = "custom-providers";
+
 /** Probe targets (task contract whitelist). `kind:"country"` parses Cloudflare trace loc= ONLY. */
 export const EGRESS_PROBE_TARGETS = {
   // probeTimeoutMs (2026-10-26 "egress not worked on vyce" fix): the probe must

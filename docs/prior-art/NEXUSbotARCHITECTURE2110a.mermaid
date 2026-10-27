@@ -1,0 +1,25 @@
+flowchart TD
+    A[Kick Chat Event] --> B[nexus-cortex Edge Function]
+    B --> C{Generator Router}
+    C -->|Fast Banter| D[Vyce: DeepSeek v4 Flash]
+    C -->|Deep Lore| E[Vyce: Claude 4.6 Pro]
+    
+    D --> F[Reply to User]
+    E --> F
+    
+    F --> G[EdgeRuntime.waitUntil Async Log]
+    G --> H[(Supabase: nexus_stream_events)]
+    
+    H --> I[RSI Loop Triggers every 20 msgs]
+    
+    I --> J{Judge Router}
+    J -->|If Gen was DeepSeek| K[Vyce: GLM-5.3 Free]
+    J -->|If Gen was Claude| L[Groq: Qwen-3-32b]
+    
+    K --> M[JSON Evaluation & Diagnosis]
+    L --> M
+    
+    M --> N[Propose Rule]
+    N --> O[Simulated A/B Test vs Base Harness]
+    O -->|Pass| P[(Supabase: nexus_persona_rules)]
+    O -->|Fail| Q[Discard & Log Negative Result]

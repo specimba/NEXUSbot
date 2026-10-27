@@ -1,0 +1,424 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns="http://www.w3.org/2005/Atom">
+  <id>https://arxiv.org/api/gSKMVZ8UXUNMN+iRcTGXIFBk9DU</id>
+  <title>arXiv Query: search_query=all:"prompt optimization" AND all:overfitting&amp;id_list=&amp;start=0&amp;max_results=15</title>
+  <updated>2026-10-23T00:12:55Z</updated>
+  <link href="https://arxiv.org/api/query?search_query=all:%22prompt+optimization%22+AND+all:overfitting&amp;start=0&amp;max_results=15&amp;id_list=" type="application/atom+xml"/>
+  <opensearch:itemsPerPage>15</opensearch:itemsPerPage>
+  <opensearch:totalResults>24</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+  <entry>
+    <id>http://arxiv.org/abs/2610.12601v1</id>
+    <title>Reflective Prompt Optimization of a Deep-Research Agent: A Topic-Disjoint, Multi-Seed Protocol for Measuring Transferable Gains and Prompt-Level Overfitting</title>
+    <updated>2026-10-08T18:23:23Z</updated>
+    <link href="https://arxiv.org/abs/2610.12601v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.12601v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Prompt optimization is an attractive alternative to reinforcement learning for adapting language-model agents, since it is cheap and produces human-readable artifacts. On factual tasks, however, it carries a failure mode that scalar-reward reinforcement learning does not. An optimizer that reads the training examples can write their answers into the prompt, so an in-distribution gain may be memorization rather than transferable behaviour. We apply reflective prompt evolution (GEPA) to the two system prompts of a multi-agent deep-research agent and evaluate it under a topic-disjoint split in which no topic is shared across train, validation, and test. Held-out citation reward rises by 0.079, from 0.702 to 0.781, with a bootstrap 95\% confidence interval of [0.051, 0.107], and the gain replicates across three seeds (mean 0.107). Nearly half of the winning prompt is a memorized answer key, yet a controlled ablation shows this content earns no reward even on the exact training questions it encodes. The large validation-minus-held-out gap is therefore small-sample selection under a noisy judge, not memorization. Varying the verifier isolates what makes the gain transfer. Decomposed per-dimension feedback is the causal ingredient, and collapsing it to a single scalar reward makes held-out transfer negative. The gain persists under an out-of-family judge and is largely reproduced by a hand-written version of the discovered recipe. Credible evaluation of prompt optimizers therefore requires held-out topics, multiple seeds, and verifier ablations. We release the candidate prompts, lineage diffs, figures, tables, and analysis.</summary>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-08T18:23:23Z</published>
+    <arxiv:primary_category term="cs.CL"/>
+    <author>
+      <name>Elias Lumer</name>
+    </author>
+    <author>
+      <name>Sahil Sen</name>
+    </author>
+    <author>
+      <name>Vamse Kumar Subbiah</name>
+    </author>
+    <author>
+      <name>Kevin Paul</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.11373v1</id>
+    <title>From a Prompt to Repertoires: Evolving Functional REpertoires Enable LLM Continual Learning</title>
+    <updated>2026-10-08T07:06:52Z</updated>
+    <link href="https://arxiv.org/abs/2610.11373v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.11373v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Continual learning remains challenging for large language models, which must enable models to acquire new skills and knowledge without degrading existing capabilities. Existing approaches typically address this challenge by carefully designing how model parameters are updated. In contrast, prompt optimization avoids costly parameter updates while achieving competitive or even superior performance to reinforcement learning methods such as GRPO on individual knowledge-intensive and reasoning tasks. This raises a natural question: \textit{Can prompt optimization, as an efficient adaptation approach, be directly applied to continual learning?} Our analysis shows that, under sequential task adaptation, it suffers from catastrophic forgetting, while optimized prompts accumulate rules that overfit to local task distributions. To address these limitations, we propose \emph{Evolving Functional REpertoires} (EFRE), which replaces a single prompt with a repertoire of functions that evolves as new tasks arrive: compatible updates refine existing functions, while conflicting updates trigger the emergence of new ones. On a three-task continual-learning stream, EFRE achieves a final average performance 7.50 percentage points higher than GRPO. Moreover, after adaptation to the Bio task, its performance on FinQA decreases by only 1.56 percentage points, compared with 25.10 percentage points for the base prompt optimization method. We further instantiate EFRE in a minimal agent system and observe consistent improvements across different backbone models. Overall, these results demonstrate EFRE's strong performance in continual learning for large language models and highlight its substantial potential for continual learning in advanced agent systems.</summary>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-08T07:06:52Z</published>
+    <arxiv:primary_category term="cs.LG"/>
+    <author>
+      <name>Fengyuan Liu</name>
+    </author>
+    <author>
+      <name>Yue Wang</name>
+    </author>
+    <author>
+      <name>Hangxi Guo</name>
+    </author>
+    <author>
+      <name>Fengyuan Liu</name>
+    </author>
+    <author>
+      <name>Chenxu Wu</name>
+    </author>
+    <author>
+      <name>Yanguang Liu</name>
+    </author>
+    <author>
+      <name>Mengnan Du</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2609.32452v1</id>
+    <title>What Should the Reflector See? An Empirical Study of Evidence in Reflective Prompt Optimization</title>
+    <updated>2026-09-26T10:38:10Z</updated>
+    <link href="https://arxiv.org/abs/2609.32452v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2609.32452v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Reflective prompt optimization revises instructions using examples of a model's behavior, but which evidence the reflector should receive remains unclear. We study evidence composition, visibility of examples, candidate selection and domain-knowledge policy within a single-parent Pareto-guided search. Using Qwen3.5-9B as both task model and reflector, we evaluate nine reflection strategies on five datasets. From these experiments, we find three distinct patterns. For performance improvement, Failures-only produces the largest mean test gain (+8.0 percentage points), while Balanced-mix and No-examples+Val share the best mean performance rank. For reflection effectiveness, No-examples achieves the best rank for improving sampled parents, yet yields only a 1.4-point mean test gain: local reflection success does not necessarily produce a stronger final prompt. For overfitting assessment, Failures-only and Balanced-mix share the lowest mean calibration-gap rank, while larger gaps on GPQA and IFBench show that calibration gains can overstate held-out improvement. This gap is a descriptive indicator, not a direct measure of overfitting. Together, these results show why reflection strategies should be assessed separately on final performance, parent improvement and calibration-to-test transfer.</summary>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-09-26T10:38:10Z</published>
+    <arxiv:comment>32 pages, 2 figures, 5 tables</arxiv:comment>
+    <arxiv:primary_category term="cs.CL"/>
+    <author>
+      <name>Xiaofan Zhou</name>
+    </author>
+    <author>
+      <name>Lu Cheng</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2608.12486v1</id>
+    <title>DIVE: Unlocking Self-Improvement in Frozen Language Models Through Diversity-Driven Skill Evolution</title>
+    <updated>2026-08-12T18:06:41Z</updated>
+    <link href="https://arxiv.org/abs/2608.12486v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2608.12486v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Large language models (LLMs) cannot retain post-deployment experience without parameter updates. We introduce DIVE, a diversity-driven framework that enables frozen LLMs to improve by evolving persistent natural-language skills from task experience and verifier feedback. These skills encode reusable reasoning procedures, verification strategies, common failure modes, and output constraints and are both executed and revised by the same underlying model without access to a teacher model. Since natural-language skill evolution is a stochastic, non-convex search process, optimizing a single skill trajectory can overfit to sampled experience or converge to a suboptimal solution. DIVE mitigates this optimization variance by independently evolving multiple skill populations from bootstrapped experience, adaptively refining them through diverse transformations, and jointly selecting a complementary set of skills. Across six mathematical and logical reasoning tasks and multiple model families, DIVE consistently outperforms existing reasoning methods, prompt-optimization approaches, skill-development frameworks, and memory-based baselines. It achieves rapid self-improvement from accumulated experience, obtaining substantially larger performance gains with fewer rollouts than parameter-based methods such as SFT and GRPO, and prompt optimization with GEPA. Further, the resulting skills transfer across model scales and families, enabling smaller models such as GPT-5-nano to match or outperform larger counterparts, i.e., GPT-5, under conventional prompting. These results establish diversity-driven skill evolution as an effective, interpretable, and parameter-free approach to LLM self-improvement.</summary>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-08-12T18:06:41Z</published>
+    <arxiv:primary_category term="cs.CL"/>
+    <author>
+      <name>Siheng Xiong</name>
+    </author>
+    <author>
+      <name>Ali Payani</name>
+    </author>
+    <author>
+      <name>Oguzhan Gungordu</name>
+    </author>
+    <author>
+      <name>Faramarz Fekri</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2607.16001v1</id>
+    <title>BayesPO: Bayesian Prompt Optimization via Parallel-Tempered Gradient-Guided Discrete MCMC</title>
+    <updated>2026-07-17T14:39:05Z</updated>
+    <link href="https://arxiv.org/abs/2607.16001v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2607.16001v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Prompt optimization adapts large language models (LLMs) without updating model parameters, but many automatic prompt optimizers remain heuristic search procedures over candidate instructions. This paper studies prompt optimization as Bayesian posterior sampling over discrete prompt tokens. We define a posterior distribution by combining a task likelihood term, which rewards prompts that explain input-output examples, with a language-model prior, which favors fluent instructions. This converts prompt optimization into an energy-based posterior sampling problem, for which gradients can be used to guide discrete Markov chain Monte Carlo (MCMC) proposals over vocabulary tokens. We refer to our framework as BayesPO, short for Bayesian Prompt Optimization. In this paper, BayesPO is instantiated with Markov chain Monte Carlo: it uses a Metropolis-Hastings corrected Gibbs-with-Langevin (GwL) proposal and integrates parallel tempering for global exploration of rugged LLM-induced energy landscapes. The concrete sampler further adapts the GwL sampler to the practical constraints of non-weight-tied LLM embeddings. Experiments with Qwen2.5 models show that the sampler discovers semantically meaningful prompts on diagnostic tasks, that parallel tempering helps escape a local optimum in a poetry completion task, and that post-optimizing APE prompts on 24 instruction-induction subtasks improves average accuracy from 60.04% to 63.23%. The study also reveals two main limitations: energy minimization may overfit small optimization sets, and the current sampler remains computationally expensive. These findings position Bayesian prompt sampling as a principled post-optimization tool and point to a promising direction for probabilistic prompt optimization.</summary>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-07-17T14:39:05Z</published>
+    <arxiv:primary_category term="cs.CL"/>
+    <author>
+      <name>Junjie Zhou</name>
+    </author>
+    <author>
+      <name>Zhijian Ou</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2609.01615v1</id>
+    <title>Prompt-Space Meta-Learning Does Not Transfer Across Users: A Frozen-LLM Negative Result</title>
+    <updated>2026-06-25T03:55:29Z</updated>
+    <link href="https://arxiv.org/abs/2609.01615v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2609.01615v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Personalizing a frozen large language model (LLM) to individual users is often framed as a meta-learning problem in prompt space: each user is a task, and one seeks a shared natural-language adaptation policy that, given a handful of the user's labeled interactions, configures the frozen model for that user. The framing is attractive because it is backbone-agnostic and reuses the machinery of prompt optimization, yet the field rarely tests whether the optimized meta-objective encodes transferable cross-user adaptation rather than generic instruction quality. We study this question with Muse (Meta-learned User-adaptation via Shared Evolution), which evolves a single shared adaptation prompt over a meta-train user population by reflective prompt evolution, freezes it, and applies it zero-shot to held-out users; matched controls isolate learning from confounds of phrasing and selection. On two standard personalization benchmarks (LaMP-2 categorization and LaMP-3 rating) over 200 held-out users each, Muse does not significantly improve on its own un-evolved seed prompt or on a structure-broken control that meta-trains on mismatched user-support pairs, and is dominated by plain few-shot retrieval on the rating task (Delta MAE +0.175, p &lt; 0.001). We attribute these outcomes to a single mechanism, meta-objective collapse: the meta-validation objective is statistically invariant to whether the user-support correspondence is genuine (p=0.555 on LaMP-2, p=0.622 on LaMP-3), so it cannot be optimized into transferable adaptation and instead rewards instruction polish and validation overfitting. The seed-prompt, wrong-support, and invariance-oracle controls form a reusable protocol that separates learned adaptation from these confounds.</summary>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-06-25T03:55:29Z</published>
+    <arxiv:primary_category term="cs.LG"/>
+    <author>
+      <name>Liam Byrne</name>
+    </author>
+    <author>
+      <name>David Dylan</name>
+    </author>
+    <author>
+      <name>Orla Fitzgerald</name>
+    </author>
+    <author>
+      <name>Eoin Doyle</name>
+    </author>
+    <author>
+      <name>Ciara Nolan</name>
+    </author>
+    <author>
+      <name>Padraig Lynch</name>
+    </author>
+    <author>
+      <name>Sinead Gallagher</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2606.22567v1</id>
+    <title>Concept-Constrained Prompt Learning for Few-Shot CLIP Adaptation</title>
+    <updated>2026-06-21T16:09:32Z</updated>
+    <link href="https://arxiv.org/abs/2606.22567v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2606.22567v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Few-shot prompt learning is an effective strategy for adapting CLIP to downstream tasks, but class-only prompt optimization can overfit base-class supervision and weaken transfer to unseen classes. We propose Concept-Constrained Prompt Learning (CCPL), a lightweight regularization framework that anchors learnable class prompts to frozen concept-level text prototypes without updating CLIP encoders. CCPL learns a set of shared context tokens, instantiates class prompts by appending class names, and constructs frozen concept prototypes from a class-level concept bank. During training, a text-space cosine consistency objective aligns learnable class-prompt embeddings with frozen concept prototypes; concept dropout provides additional regularization against over-reliance on fixed concept lists. At inference, CCPL optionally fuses class-prompt logits with concept-prototype logits using a controllable ensemble weight alpha. Our default configuration uses text-space concept regularization lambda = 0.5, concept dropout p = 0.3 and weak concept-guided fusion (alpha = 0.1), with no KL-based prediction consistency term. Experiments under identical automatically-generated fallback splits show that CCPL improves the base-to-new harmonic mean on DTD (+0.6) and EuroSAT (+2.9) compared with CoOp, while remaining near-neutral on OxfordPets (-0.1). Ablations indicate that text-space concept regularization is consistently beneficial, while the best concept-guided inference strength is dataset- and protocol-sensitive. These results suggest concept constraints are most effective when concept prototypes align naturally with dataset semantics, and identify fine-grained categories as a current boundary condition. The code is released at: https://github.com/richael-sang/concept-constrained-prompt-learning.</summary>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.GR" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-06-21T16:09:32Z</published>
+    <arxiv:primary_category term="cs.LG"/>
+    <author>
+      <name>Na Sang</name>
+    </author>
+    <author>
+      <name>Ding Ma</name>
+    </author>
+    <author>
+      <name>Rui Sang</name>
+    </author>
+    <author>
+      <name>Yuxuan Liu</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2605.21318v2</id>
+    <title>TextReg: Mitigating Prompt Distributional Overfitting via Regularized Text-Space Optimization</title>
+    <updated>2026-10-05T05:51:13Z</updated>
+    <link href="https://arxiv.org/abs/2605.21318v2" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2605.21318v2" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Large language models (LLMs) are highly sensitive to the prompts used to specify task objectives and behavioral constraints. Many recent prompt optimization methods iteratively rewrite prompts using LLM-generated feedback, but the resulting prompts often become longer, accumulate narrow sample-specific rules, and generalize poorly beyond the training distribution. We study this failure mode as prompt distributional overfitting and argue that it reflects a lack of representation control in discrete text-space optimization. We formalize this view through representational inefficiency, a dual-factor measure that decomposes prompt inefficiency into capacity cost and scope narrowness, attributing distributional prompt overfitting to their coupled growth during optimization. We propose TextReg, a regularization framework that realizes a soft-penalty objective through regularized textual gradients, combining Dual-Evidence Gradient Purification, Semantic Edit Regularization, and Regularization-Guided Prompt Update. Across multiple reasoning benchmarks, TextReg substantially improves out-of-distribution (OOD) generalization, with accuracy gains of up to +11.8% over TextGrad and +16.5% over REVOLVE.</summary>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-05-20T15:47:26Z</published>
+    <arxiv:comment>Website: https://textreg.github.io/; Code: https://github.com/luchengfu6/TextReg</arxiv:comment>
+    <arxiv:primary_category term="cs.CL"/>
+    <author>
+      <name>Lucheng Fu</name>
+    </author>
+    <author>
+      <name>Ye Yu</name>
+    </author>
+    <author>
+      <name>Yiyang Wang</name>
+    </author>
+    <author>
+      <name>Yiqiao Jin</name>
+    </author>
+    <author>
+      <name>Haibo Jin</name>
+    </author>
+    <author>
+      <name>B. Aditya Prakash</name>
+    </author>
+    <author>
+      <name>Haohan Wang</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2605.04425v1</id>
+    <title>Joint Semantic Token Selection and Prompt Optimization for Interpretable Prompt Learning</title>
+    <updated>2026-05-06T02:38:59Z</updated>
+    <link href="https://arxiv.org/abs/2605.04425v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2605.04425v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Vision-language models such as CLIP achieve strong visual-textual alignment, but often suffer from overfitting and limited interpretability when adapted through continuous prompt learning. While discrete prompt optimization improves interpretability, it usually depends on large external models, leading to high computational costs and limited scalability. In this paper, we propose Interpretable Prompt Learning (IPL), a hybrid framework that alternates between discrete semantic token selection and continuous prompt optimization. Specifically, IPL formulates semantic token selection as an approximate submodular optimization problem, encouraging tokens that are both human-understandable and semantically diverse. It further adopts an alternating optimization strategy to integrate discrete token selection with continuous prompt tuning, improving interpretability while preserving adaptability to downstream tasks. Our framework is plug-and-play, allowing seamless integration with existing prompt learning methods. Extensive experiments on multiple benchmarks show that IPL consistently improves both interpretability and accuracy across five representative prompt learning methods, providing an effective and scalable extension to existing frameworks.</summary>
+    <category term="cs.CV" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-05-06T02:38:59Z</published>
+    <arxiv:comment>15 pages, 4 figures. Preprint version</arxiv:comment>
+    <arxiv:primary_category term="cs.CV"/>
+    <author>
+      <name>Yating Wang</name>
+    </author>
+    <author>
+      <name>Yaqi Zhao</name>
+    </author>
+    <author>
+      <name>Yongshun Gong</name>
+    </author>
+    <author>
+      <name>Yilong Yin</name>
+    </author>
+    <author>
+      <name>Haoliang Sun</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2604.22565v3</id>
+    <title>Learning Evidence Highlighting for Frozen LLMs</title>
+    <updated>2026-09-26T19:07:52Z</updated>
+    <link href="https://arxiv.org/abs/2604.22565v3" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2604.22565v3" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Large Language Models (LLMs) can reason well, yet often miss decisive evidence when it is buried in long, noisy contexts. We introduce HiLight, an Evidence Emphasis framework that decouples evidence selection from reasoning for frozen LLM solvers. HiLight avoids compressing or rewriting the input, which can discard or distort evidence, by training a lightweight Emphasis Actor to insert minimal highlight tags around pivotal spans in the unaltered context. A frozen Solver then performs downstream reasoning on the emphasized input. We cast highlighting as a weakly supervised decision-making problem and optimize the Actor with reinforcement learning using only the Solver's task reward, requiring no evidence labels and no access to or modification of the Solver. Across sequential recommendation and long-context question answering, HiLight consistently improves performance over strong prompt-based and automated prompt-optimization baselines. The learned emphasis policy transfers zero-shot to both smaller and larger unseen Solver families, including an API-based Solver, suggesting that the Actor captures genuine, reusable evidence structure rather than overfitting to a single backbone.</summary>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-04-24T13:57:19Z</published>
+    <arxiv:comment>NeurIPS 2026</arxiv:comment>
+    <arxiv:primary_category term="cs.CL"/>
+    <author>
+      <name>Shaoang Li</name>
+    </author>
+    <author>
+      <name>Yanhang Shi</name>
+    </author>
+    <author>
+      <name>Yufei Li</name>
+    </author>
+    <author>
+      <name>Mingfu Liang</name>
+    </author>
+    <author>
+      <name>Xiaohan Wei</name>
+    </author>
+    <author>
+      <name>Yunchen Pu</name>
+    </author>
+    <author>
+      <name>Fei Tian</name>
+    </author>
+    <author>
+      <name>Chonglin Sun</name>
+    </author>
+    <author>
+      <name>Frank Shyu</name>
+    </author>
+    <author>
+      <name>Sandeep Pandey</name>
+    </author>
+    <author>
+      <name>Luke Simon</name>
+    </author>
+    <author>
+      <name>Xi Liu</name>
+    </author>
+    <author>
+      <name>Jian Li</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2604.20726v2</id>
+    <title>Exploiting LLM-as-a-Judge Disposition on Free Text Legal QA via Prompt Optimization</title>
+    <updated>2026-04-23T08:13:50Z</updated>
+    <link href="https://arxiv.org/abs/2604.20726v2" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2604.20726v2" rel="related" type="application/pdf" title="pdf"/>
+    <summary>This work explores the role of prompt design and judge selection in LLM-as-a-Judge evaluations of free text legal question answering. We examine whether automatic task prompt optimization improves over human-centered design, whether optimization effectiveness varies by judge feedback style, and whether optimized prompts transfer across judges. We systematically address these questions on the LEXam benchmark by optimizing task prompts using the ProTeGi method with feedback from two judges (Qwen3-32B, DeepSeek-V3) across four task models, and then testing cross-judge transfer. Automatic optimization consistently outperforms the baseline, with lenient judge feedback yielding higher and more consistent gains than strict judge feedback. Prompts optimized with lenient feedback transfer better to strict judges than the reverse direction. Analysis reveals that lenient judges provide permissive feedback, yielding prompts with broader applicability, whereas strict judges produce restrictive feedback, leading to judge-specific overfitting. Our findings demonstrate algorithmically optimizing prompts on training data can outperform human-centered prompt design and that judges' dispositions during optimization shape prompt generalizability.</summary>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-04-22T16:12:36Z</published>
+    <arxiv:comment>Accepted at the 21st International Conference on Artificial Intelligence and Law (ICAIL 2026), Singapore, June 8-12, 2026. 10 pages, 14 figures, 2 tables</arxiv:comment>
+    <arxiv:primary_category term="cs.CL"/>
+    <author>
+      <name>Mohamed Hesham Elganayni</name>
+    </author>
+    <author>
+      <name>Runsheng Chen</name>
+    </author>
+    <author>
+      <name>Sebastian Nagl</name>
+    </author>
+    <author>
+      <name>Matthias Grabmair</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2603.20213v1</id>
+    <title>AgenticGEO: A Self-Evolving Agentic System for Generative Engine Optimization</title>
+    <updated>2026-03-02T16:13:13Z</updated>
+    <link href="https://arxiv.org/abs/2603.20213v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2603.20213v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Generative search engines represent a transition from traditional ranking-based retrieval to Large Language Model (LLM)-based synthesis, transforming optimization goals from ranking prominence towards content inclusion. Generative Engine Optimization (GEO), specifically, aims to maximize visibility and attribution in black-box summarized outputs by strategically manipulating source content. However, existing methods rely on static heuristics, single-prompt optimization, or engine preference rule distillation that is prone to overfitting. They cannot flexibly adapt to diverse content or the changing behaviors of generative engines. Moreover, effectively optimizing these strategies requires an impractical amount of interaction feedback from the engines. To address these challenges, we propose AgenticGEO, a self-evolving agentic framework formulating optimization as a content-conditioned control problem, which enhances intrinsic content quality to robustly adapt to the unpredictable behaviors of black-box engines. Unlike fixed-strategy methods, AgenticGEO employs a MAP-Elites archive to evolve diverse, compositional strategies. To mitigate interaction costs, we introduce a Co-Evolving Critic, a lightweight surrogate that approximates engine feedback for content-specific strategy selection and refinement, efficiently guiding both evolutionary search and inference-time planning. Through extensive in-domain and cross-domain experiments on two representative engines, AgenticGEO achieves state-of-the-art performance and demonstrates robust transferability, outperforming 14 baselines across 3 datasets. Our code and model are available at: https://github.com/AIcling/agentic_geo.</summary>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.NE" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-03-02T16:13:13Z</published>
+    <arxiv:primary_category term="cs.AI"/>
+    <author>
+      <name>Jiaqi Yuan</name>
+    </author>
+    <author>
+      <name>Jialu Wang</name>
+    </author>
+    <author>
+      <name>Zihan Wang</name>
+    </author>
+    <author>
+      <name>Qingyun Sun</name>
+    </author>
+    <author>
+      <name>Ruijie Wang</name>
+    </author>
+    <author>
+      <name>Jianxin Li</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2603.00829v2</id>
+    <title>Constitutional Black-Box Monitoring for Scheming in LLM Agents</title>
+    <updated>2026-05-30T12:33:57Z</updated>
+    <link href="https://arxiv.org/abs/2603.00829v2" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2603.00829v2" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Safe deployment of Large Language Model (LLM) agents in autonomous settings requires reliable oversight mechanisms. A central challenge is detecting scheming, where agents covertly pursue misaligned goals. One approach to mitigating such risks is LLM-based monitoring: using language models to examine agent behaviors for suspicious actions. We study constitutional black-box monitors: prompted classifiers that detect scheming using only externally observable inputs and outputs, optimized on synthetic data generated from natural-language behavior specifications. We introduce two pipelines for generating synthetic agent trajectories, STRIDE (iterative refinement) and Gloom (agent-environment simulation), from which we generate 1,000 samples each. We optimize frontier LLM monitors on these datasets via prompt sweeps, human refinement, and automated prompt optimization, and evaluate performance on 7,500 held-out trajectories from ControlArena, a suite of grounded environments where agents operate in more realistic contexts. Our results demonstrate that monitors selected purely on synthetic data can generalize to more realistic environments, capturing a meaningful scheming signal. However, we find that performance saturates quickly in our setting, with simple prompt sweeps matching the results of more extensive optimization. Pushing beyond this limit yields no further improvements and instead leads to overfitting.</summary>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-02-28T22:31:32Z</published>
+    <arxiv:comment>Accepted at ICML 2026. Camera-ready version</arxiv:comment>
+    <arxiv:primary_category term="cs.CL"/>
+    <author>
+      <name>Simon Storf</name>
+    </author>
+    <author>
+      <name>Rich Barton-Cooper</name>
+    </author>
+    <author>
+      <name>James Peters-Gill</name>
+    </author>
+    <author>
+      <name>Marius Hobbhahn</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2602.16037v1</id>
+    <title>Optimization Instability in Autonomous Agentic Workflows for Clinical Symptom Detection</title>
+    <updated>2026-02-17T21:45:20Z</updated>
+    <link href="https://arxiv.org/abs/2602.16037v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2602.16037v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Autonomous agentic workflows that iteratively refine their own behavior hold considerable promise, yet their failure modes remain poorly characterized. We investigate optimization instability, a phenomenon in which continued autonomous improvement paradoxically degrades classifier performance, using Pythia, an open-source framework for automated prompt optimization. Evaluating three clinical symptoms with varying prevalence (shortness of breath at 23%, chest pain at 12%, and Long COVID brain fog at 3%), we observed that validation sensitivity oscillated between 1.0 and 0.0 across iterations, with severity inversely proportional to class prevalence. At 3% prevalence, the system achieved 95% accuracy while detecting zero positive cases, a failure mode obscured by standard evaluation metrics. We evaluated two interventions: a guiding agent that actively redirected optimization, amplifying overfitting rather than correcting it, and a selector agent that retrospectively identified the best-performing iteration successfully prevented catastrophic failure. With selector agent oversight, the system outperformed expert-curated lexicons on brain fog detection by 331% (F1) and chest pain by 7%, despite requiring only a single natural language term as input. These findings characterize a critical failure mode of autonomous AI systems and demonstrate that retrospective selection outperforms active intervention for stabilization in low-prevalence classification tasks.</summary>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.MA" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-02-17T21:45:20Z</published>
+    <arxiv:primary_category term="cs.AI"/>
+    <author>
+      <name>Cameron Cagan</name>
+    </author>
+    <author>
+      <name>Pedram Fard</name>
+    </author>
+    <author>
+      <name>Jiazi Tian</name>
+    </author>
+    <author>
+      <name>Jingya Cheng</name>
+    </author>
+    <author>
+      <name>Shawn N. Murphy</name>
+    </author>
+    <author>
+      <name>Hossein Estiri</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2511.18619v1</id>
+    <title>Prompt Optimization as a State-Space Search Problem</title>
+    <updated>2025-11-23T21:24:13Z</updated>
+    <link href="https://arxiv.org/abs/2511.18619v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2511.18619v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Language Models are extremely susceptible to performance collapse with even small changes to input prompt strings. Libraries such as DSpy (from Stanford NLP) avoid this problem through demonstration-based prompt optimisation. Inspired by this, I propose an alternative approach that treats prompt optimisation as a classical state-space search problem. I model the prompt space as a graph where nodes represent prompt states and edges correspond to deliberate transformations such as shortening, adding examples, or re- ordering content. Using beam search and random walk algorithms, I systematically explore this space, evaluating candidates on development sets and pruning unpromising branches. Across five NLP tasks (sentiment classification, question answering, summarisation, reason- ing, and natural language inference), I find that even shallow search configurations (beam width=2, depth=2) improve upon seed prompts on development sets. For instance, beam search achieves development accuracy gains from 0.40 to 0.80 on reasoning tasks, though test set improvements are more modest (0.20 to 0.50), indicating overfitting to the develop- ment heuristic. Analysis of successful optimisation paths reveals that transformations that make prompts concise appear most frequently, while verbosity operators are never selected. My results validate prompt optimization as a search problem and suggest that with greater computational resources and improved evaluation metrics, deeper exploration could yield more robust prompts that generalize beyond development sets. Code and implementation are available at [https://github.com/MaanasTaneja/PromptOptimiser].</summary>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2025-11-23T21:24:13Z</published>
+    <arxiv:primary_category term="cs.CL"/>
+    <author>
+      <name>Maanas Taneja</name>
+    </author>
+  </entry>
+</feed>

@@ -1,0 +1,15 @@
+🚀 Initializing Z-AI SDK...
+🚀 Invoking function: page_reader...
+Failed to invoke remote function: 477 |                 headers,
+478 |                 body: JSON.stringify(body),
+479 |             });
+480 |             if (!response.ok) {
+481 |                 const errorBody = await response.text();
+482 |                 throw new Error(`Function invoke failed with status ${response.status}: ${errorBody}`);
+                                ^
+error: Function invoke failed with status 429: {"error":"Too many requests, please try again later"}
+      at invokeFunction (/home/z/.bun/install/global/node_modules/z-ai-web-dev-sdk/dist/index.js:482:27)
+      at async handleFunction (/home/z/.bun/install/global/node_modules/z-ai-web-dev-sdk/dist/cli.js:1018:45)
+      at async main (/home/z/.bun/install/global/node_modules/z-ai-web-dev-sdk/dist/cli.js:1092:23)
+
+❌ Error: Function invoke failed with status 429: {"error":"Too many requests, please try again later"}

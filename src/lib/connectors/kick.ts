@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { db } from "@/lib/db";
 import { decryptSecret, encryptSecret, maskSecret } from "@/lib/crypto";
 
@@ -240,35 +242,122 @@ export function requestOrigin(req: Request): string {
 }
 
 /**
- * v31 — PUBLIC-ORIGIN TRUTH for everything the OUTSIDE world must reach
+ * A candidate origin is only usable for the OUTSIDE world (Kick form paste,
+ * Kick's webhook POSTs, the post-auth browser redirect) when it is https and
+ * publicly reachable. Loopback/private hosts never qualify, and the FC
+ * tunnel host (*.fcapp.run) must never be advertised: it 400s every request
+ * that lacks the platform session-affinity header (measured 2026-10-27 on
+ * GET /, GET /api/kick/callback, POST /api/kick/webhook).
+ */
+function isPublicHttpsOrigin(value: string | null | undefined): boolean {
+  if (!value) return false;
+  try {
+    const u = new URL(value);
+    if (u.protocol !== "https:" || u.username || u.password) return false;
+    const host = u.hostname.toLowerCase();
+    if (
+      host === "localhost" ||
+      host.endsWith(".localhost") ||
+      host === "127.0.0.1" ||
+      host === "::1" ||
+      host === "0.0.0.0" ||
+      /^10\./.test(host) ||
+      /^192\.168\./.test(host) ||
+      /^169\.254\./.test(host) ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
+      host.endsWith(".fcapp.run")
+    ) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Setting key maintained by /api/obs/publish-origin (auto-fired on every authenticated panel load). */
+const OBS_PUBLISHED_ORIGIN_KEY = "obs.published-origin";
+
+/** 60s cache for the public/obs-target.json disk read (tiny file, sync read is fine). */
+type KickTargetCache = { origin: string | null; at: number };
+const kickTargetCache: KickTargetCache = ((globalThis as Record<string, unknown>).__kickTargetCache as KickTargetCache) ?? {
+  origin: null,
+  at: 0,
+};
+(globalThis as Record<string, unknown>).__kickTargetCache = kickTargetCache;
+
+function obsTargetOrigin(): string | null {
+  const now = Date.now();
+  if (kickTargetCache.at && now - kickTargetCache.at < 60_000) return kickTargetCache.origin;
+  let origin: string | null = null;
+  try {
+    const raw = JSON.parse(
+      readFileSync(path.join(process.cwd(), "public", "obs-target.json"), "utf8"),
+    ) as { origin?: unknown };
+    if (typeof raw.origin === "string" && isPublicHttpsOrigin(raw.origin)) {
+      origin = raw.origin.replace(/\/+$/, "");
+    }
+  } catch {
+    origin = null; // file missing/corrupt — treat as no source
+  }
+  kickTargetCache.origin = origin;
+  kickTargetCache.at = now;
+  return origin;
+}
+
+/**
+ * v32 — PUBLIC-ORIGIN TRUTH for everything the OUTSIDE world must reach
  * (Kick redirect_uri, webhook subscription URL, post-auth browser redirect).
  *
- * Behind the Z.ai preview gateway the request-derived origin is the FC
- * TUNNEL host with http scheme (measured live 05:3x +03: /api/kick/status
- * through https://preview-chat-…space-z.ai still computed
+ * ROOT CAUSE (closed here): behind the Z.ai gateway the request-derived
+ * origin is the FC TUNNEL host with http scheme (measured live: even a
+ * request through https://preview-chat-…space-z.ai computed
  * http://ws-ef-…fcapp.run/api/kick/callback — exactly the URL the owner
- * pasted into Kick's Create-an-App form, which Kick rejected for scheme and
- * which would ALSO have failed the FC session-affinity gate on both the
- * browser redirect and Kick's webhook POSTs).
+ * pasted into Kick's Create-an-App form, which Kick rejected with
+ * "URLs must use a secure protocol (HTTPS)" and which would ALSO have
+ * failed the FC session-affinity gate on Kick's webhook POSTs).
  *
- * The owner-anchored OBS base URL on the widget row is the REAL
- * browser-reachable https origin — it is literally the URL the OBS overlay
- * loads the panel through. Prefer it whenever it exists and is https;
- * otherwise fall back to the request-derived origin (dev / direct access).
+ * The request headers can therefore NEVER be trusted for this purpose. The
+ * panel maintains the true public origin itself — the publish flow
+ * (/api/obs/publish-origin) stores it in the DB Setting AND on disk in
+ * public/obs-target.json, and the owner may additionally anchor it on the
+ * widget row. Resolution order, each validated by isPublicHttpsOrigin:
+ *
+ *   1. Widget.obsBaseUrl anchor (owner-pinned)
+ *   2. Setting obs.published-origin (auto-maintained, authenticated loads)
+ *   3. public/obs-target.json on disk (survives DB rollbacks — the
+ *      2026-10-27 reboot restored a DB snapshot that had lost the Setting
+ *      row while this file still carried the CURRENT origin)
+ *   4. request-derived origin (dev / direct access only)
  */
 export async function publicOrigin(req: Request): Promise<string> {
+  // 1. owner-anchored OBS base URL on the widget row
   try {
     const w = await db.widget.findFirst({
       where: { obsBaseUrl: { not: null } },
       select: { obsBaseUrl: true },
     });
     const anchored = (w?.obsBaseUrl ?? "").trim();
-    if (anchored && /^https:\/\//i.test(anchored)) {
+    if (isPublicHttpsOrigin(anchored)) {
       return anchored.replace(/\/+$/, "");
     }
   } catch {
-    // db unavailable (fresh boot) — fall through to request-derived
+    // db unavailable (fresh boot) — fall through
   }
+  // 2. auto-maintained published origin (Setting)
+  try {
+    const s = await db.setting.findUnique({ where: { key: OBS_PUBLISHED_ORIGIN_KEY } });
+    const published = (s?.value ?? "").trim();
+    if (isPublicHttpsOrigin(published)) {
+      return published.replace(/\/+$/, "");
+    }
+  } catch {
+    // fall through
+  }
+  // 3. on-disk publish target (rollback-proof)
+  const onDisk = obsTargetOrigin();
+  if (onDisk) return onDisk;
+  // 4. request-derived (last resort — dev / direct access)
   return requestOrigin(req);
 }
 
