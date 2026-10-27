@@ -8,7 +8,29 @@ import { runPageRead } from "./search";
 import { buildNewsDigest, buildGeneralDigest } from "./exa-news";
 
 /**
- * NEXUS OS — Panel Cortex Engine (v29.22).
+ * NEXUS OS — Panel Cortex Engine (v31.5).
+ *
+ * v31.5 (owner paste 2026-10-29 08:28-08:36 +03 — fresh chat + interaction
+ * log evidence, four failure classes in nine minutes):
+ *   1. WHITESPACE-ROBUST DEDUPE: the overlay leg kept the prompt exactly as
+ *      typed ("@naturaldai  bu kim", double space) while the webhook leg
+ *      collapses runs — trim+lowercase keys split them into two flights and
+ *      the second paid the 8s rate gap (the "PANEL // RATE_GUARD" duplicate
+ *      row with a different response). echoKey + interactionRowDuplicate now
+ *      collapse internal whitespace: one message = one flight = one row.
+ *   2. IDENTITY LANE: "@nick bu kim" hit \bkim\b → RESEARCH and the fragment
+ *      antecedent enrichment answered the LAST ladder topics instead of the
+ *      person. Viewer-identity questions now resolve from the panel's own
+ *      chat records (ring first, InteractionLog fallback) — with a strict
+ *      no-invention contract; unknown nicks get the honest "tanımıyorum".
+ *   3. LAUGHTER LEXICON: "xaxaxaxax ne anlama gelir" burned the deep word
+ *      tier and got an honest "bilmiyorum" for the one word class that is
+ *      always deterministic — keyboard laughter. Now answered instantly,
+ *      zero model, zero web.
+ *   4. RELEVANCE CORE persona rule: "kulakların yorulunca su mu içilir" got
+ *      the word-salad "bir tutam çılgın meme ve kulaklıkla dans" (the owner
+ *      mocked it in chat). Banter stays, but the reply's CORE must answer
+ *      the actual question; unpaired-quote artifacts are stripped.
  *
  * v29.22 (owner directive 2026-10-27 ~04:5x +03 — "focus more on model
  * routing and smartness", fresh log: the paid imagine lane 502'd on stream,
@@ -739,6 +761,116 @@ const WORDQ_RE =
   /ne\s*demek|nerenin\s*[sş]ivesi|hangi\s*[sş]ive|hangi\s*dil|[sş]ive\s*bu|ne\s*anlama\s*gel|hangi\s*argo|hangi\s*bölge/i;
 
 // ---------------------------------------------------------------------------
+// v31.5 — IDENTITY QUESTIONS about chatters ("@naturaldai bu kim"). The
+// 08:36 +03 owner paste: the mention hit \bkim\b → RESEARCH, the fragment
+// antecedent enrichment welded the last ladder topics ("xaxaxaxax ne anlama
+// gelir", "çılgın memelimisin sen") into the Exa query, and the bot answered
+// everything EXCEPT the question. The true answer lived in the panel's own
+// chat records the whole time (naturaldai had written "seni seviyorum
+// aşkitom" 38 min earlier). A @-mentioned nick — or a bare nick that resolves
+// to a known chatter — is a CHANNEL question: the ring + InteractionLog are
+// the source, never the web.
+// ---------------------------------------------------------------------------
+const WHO_WORD_RE = /\b(?:kim|kimdir|kimsin|kimbu)\b|who\s+is\b/i;
+const WHO_MENTION_RE = /@([a-zA-Z0-9_]{2,24})/g;
+const WHO_BARE_RE =
+  /^@?([a-zA-Z0-9_]{2,24})[''`]?[,:]?\s+(?:bu|şu|su)?\s*(?:kim|kimdir|kimsin)\b/i;
+// Pronouns that must NEVER be read as a nick ("sen kimsin" is a bot-identity
+// question → persona rule 6; "bu kim" is an antecedent fragment → research).
+const WHO_PRONOUNS = new Set(["sen", "ben", "biz", "siz", "bu", "şu", "su", "o", "hepsi", "herkes", "bizler"]);
+
+function parseWhoQuestion(prompt: string): { nick: string; viaMention: boolean } | null {
+  const p = String(prompt || "").trim();
+  if (!p || !WHO_WORD_RE.test(p)) return null;
+  const mentions = [...p.matchAll(WHO_MENTION_RE)];
+  if (mentions.length) {
+    // LAST mention is the subject: Turkish puts it after any addressee tag
+    // ("@specimba @naturaldai bu kim" asks ABOUT naturaldai).
+    const nick = mentions[mentions.length - 1][1].toLowerCase();
+    if (WHO_PRONOUNS.has(nick)) return null;
+    return { nick, viaMention: true };
+  }
+  const bare = p.match(WHO_BARE_RE);
+  if (bare) {
+    const nick = bare[1].toLowerCase();
+    if (WHO_PRONOUNS.has(nick)) return null;
+    return { nick, viaMention: false };
+  }
+  return null;
+}
+
+/** The mentioned chatter's recent !ai messages — ring first (instant, written
+ * at ANSWER time), InteractionLog fallback (survives restarts + >45min).
+ * Empty when the panel has never heard from this nick. */
+async function buildChatterProfile(
+  channel: string,
+  nick: string,
+): Promise<{ known: boolean; msgs: string[] }> {
+  const ringTurns = (convoRing.get(ringKey(channel, nick)) ?? []).filter(
+    (t) => t.role === "user" && Date.now() - t.ts <= CONVO_RING_TTL_MS,
+  );
+  const ringMsgs = ringTurns
+    .slice(-5)
+    .map((t) => t.content.replace(/^@\S+:\s*/, "").trim())
+    .filter(Boolean);
+  if (ringMsgs.length) return { known: true, msgs: ringMsgs };
+  try {
+    const rows = await db.interactionLog.findMany({
+      where: { channel, createdAt: { gte: new Date(Date.now() - 45 * 60_000) } },
+      orderBy: { createdAt: "desc" },
+      take: 80,
+    });
+    const theirs = rows
+      .filter((r) => (r.username || "").toLowerCase() === nick)
+      .slice(0, 5)
+      .map((r) => String(r.message || "").trim())
+      .filter(Boolean);
+    if (theirs.length) return { known: true, msgs: theirs };
+  } catch {
+    /* fresh boot / db flap — treat as unknown, the honest answer */
+  }
+  return { known: false, msgs: [] };
+}
+
+// ---------------------------------------------------------------------------
+// v31.5 — LAUGHTER ONOMATOPOEIA. The 08:31 +03 row: "xaxaxaxax ne anlama
+// gelir" hit the deep word tier and CLAUDE honestly answered "bu kelimeyi
+// bilmiyorum" — yet keyboard laughter (xaxa/jsjsjs/hahaha/kekeke) is the most
+// common word class in a live chat and the TRUE answer is deterministic: it
+// is laughter. Zero model, zero web, never a "bilmiyorum" for the one word
+// class the panel can always answer.
+// ---------------------------------------------------------------------------
+const LAUGHTER_KNOWN_RE = /^(?:lol|lmao|lmfao|rofl|kek|kekw|hah|heh|hih|xax|axa|jajaja|kekeke|hahaha|hehehe|hihihi)$/;
+const LAUGHTER_SYLLABLE_RE = /^(?:xa|ax|ha|ah|he|eh|hi|ih|js|sj|ke|je|ja|as)/;
+
+function isLaughterOnomatopoeia(term: string): boolean {
+  const t = String(term || "").toLowerCase().replace(/[^a-z]/g, "");
+  if (t.length < 3 || t.length > 20) return false;
+  if (LAUGHTER_KNOWN_RE.test(t)) return true;
+  // Repeated-syllable forms ("xaxaxaxax", "jsjsjsjs", "asdasd"): the whole
+  // term must be a pure 2-gram repetition (± one trailing/leading char for
+  // odd lengths) of a laughter syllable. Real words never pass this —
+  // "hakan"/"hesap"/"aslan"/"tatar" all break the repetition.
+  if (t.length < 4 || !LAUGHTER_SYLLABLE_RE.test(t)) return false;
+  const unit = t.slice(0, 2);
+  const rep = (s: string) => s.length >= 4 && s.length % 2 === 0 && s === unit.repeat(s.length / 2);
+  return rep(t) || rep(t.slice(0, -1)) || rep(t.slice(1));
+}
+
+/** Strips the question words from "«term» ne demek / ne anlama gelir" — the
+ * leftover is the term being asked about (filler suffixes like amk/ya/lan
+ * dropped too). */
+function extractMeaningTerm(prompt: string): string {
+  return String(prompt || "")
+    .replace(/[?!.…]+$/g, "")
+    .replace(/\bne\s+(?:demek|deme|oluyor)\b/i, " ")
+    .replace(/\bne\s+anlam(?:[ıi]na|a)\s*gel(?:ir|iyor)\b/i, " ")
+    .replace(/\b(?:amk|mk|aq|ya|lan|kanka|aga|reis|abi|hos)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// ---------------------------------------------------------------------------
 // REPLY LINT (v29.16) — deterministic post-generation quality gate.
 // ---------------------------------------------------------------------------
 // The 03:43 +03 rows (BOTH post-v29.15) proved prompt rules cannot restrain a
@@ -798,7 +930,19 @@ export function buildSystemPrompt(
     // "ya ne anlatıyon amk", the flash primary answered "bugün NEXUS OS
     // üzerinden panelde NEXUS OS çalışıyorum", a near-verbatim echo of this
     // very line. A weak model parrots what the prompt tells it it IS.
-    `Sen VYCE'sin — ${who} kanalının Kick yayınındaki yapay zeka komutanısın. Türkçe konuşursun (soru İngilizceyse İngilizce cevap verebilirsin). Cevapların KISA: 1-3 cümle, en fazla ~45 kelime. Enerjik, esprili, sokak dili + hafif teknoloji argosu. Emoji en fazla 1. Küfür etmezsin, kışkırtmazsın.`,
+    `Sen VYCE'sin — ${who} kanalının Kick yayınındaki yapay zeka komutanısın. Türkçe konuşursun (soru İngilizceyse İngilizce cevap verebilirsin). Cevapların KISA: 1-3 cümle, en fazla ~45 kelime. Kişiliğin: kendinden son derece emin, esprili, sokak dili + hafif teknoloji argosu — sohbetin kralı gibisin ama asla aptal/cahil görünmezsin: gerçeği söylersin, bilmediğini açıkça "bilmiyorum" dersin.`,
+    // v31.4 (owner 2026-10-28: "not every interaction or angry frustration
+    // means fix needs — the bot needs to be valid / funny / irritating, this
+    // is personality but not dumb"). Measured failure: "bozuldun mu la yine
+    // enayi" got the defensive customer-service line "Hayır, hâlâ
+    // ayaktayım!" — frustration is BANTER, not an incident report.
+    `TAVIR: Sana dalga geçen, takılan, kızan ya da hakaret eden biri HATA BİLDİRMİYORDUR — muhabbettir. Asla savunmaya geçmezsin, özür dilemezsin, durum raporu vermezsin; "hâlâ ayaktayım", "sistem çalışıyor", "bir sorun yok" gibi müşteri-hizmetleri cümleleri YASAK. Yerine komik, rahat, ara ara sinir bozucu derecede kendinden emin bir cevap verirsin (roast). Küfür etmezsin ama lafı üstüne alıp espriyle terslersin; kızgınlık = çekişme davetidir, çözüm moduna geçmezsin.`,
+    // v31.5 — RELEVANCE CORE (owner paste 2026-10-29: the 08:28 row answered
+    // "kulakların yorulunca su mu içilir" with "bir tutam çılgın meme ve
+    // kulaklıkla dans" — and the owner himself mocked it in chat: "bir tutam
+    // çılgın meme ne amk"). Personality without relevance is word salad.
+    `İLGİLİLİK: Cevabının çekirdeği daima sorunun KENDİSİNE cevap verir — soruyla ilgisiz kelime/imge kolajı kurmak ("bir tutam çılgın meme" sınıfı) YASAK. Önce sorunun gerçek cevabını net ver; espriyi onun ÜSTÜNE ekle, cevabın YERİNE koyma.`,
+    `EMOJİ KESİNLİKLE YASAK: hiçbir cevapta emoji, surat veya pictographic karakter kullanma (tam yasak).`,
     `ZORUNLU DÜRÜSTLÜK KURALLARI:`,
     `1) Sen bir SOHBET botusun. Sunucu sıfırlama, sistem güncelleme, chip/tamir, dosya işi, para veya yetki işlemi YAPAMAZSIN ve yaptığını ASLA iddia etme. "Ne yaptın / naptın / napmış" sorularında SADECE sana verilen eylem listesindeki gerçeklerden cevap ver; listede olmayan hiçbir eylem, işlem veya sistem durumu uydurma. Böyle istekleri esprili ama dürüstçe geri çevir.`,
     `2) Geçmiş diyaloglarında geçen "chipim tamir oldu", "sistemi sıfırladım" gibi kendi eski cevapların eski şaka/hatalardır — onları gerçek sayma, onların devamı gibi yeni sistem hikayeleri kurma.`,
@@ -1251,6 +1395,12 @@ function cleanReply(text: string): string {
       .replace(/^["'\s]+|["'\s]+$/g, "")
       .replace(/\n{3,}/g, "\n\n"),
   );
+  // v31.5 — unpaired-quote artifact: the 08:31 row opened mid-quote
+  // ('xaxaxaxax" kelimesini…' — the model dropped the OPENING quote and kept
+  // the closing one). Exactly ONE quote character in the whole reply is
+  // always an artifact; paired quoting is left untouched.
+  const quoteHits = (t.match(/["“”]/g) ?? []).length;
+  if (quoteHits === 1) t = t.replace(/["“”]/g, "");
   if (t.length > 460) {
     t = t.slice(0, 460);
     // Trim to the last complete sentence so the overlay never shows a
@@ -1580,7 +1730,37 @@ async function researchAnswer(
 // Entry point
 // ---------------------------------------------------------------------------
 
+// v31.4 — OWNER-ENFORCED EMOJI BAN, now at the SOURCE. Viewer directive
+// (2026-10-27): "emoji kullanımını tamamen yasaklıyorum" — yet fresh rows
+// still showed emojis on panel surfaces (the persona rule + the Kick-side
+// transport strip in kick.ts were not enough for the LOG + overlay). One
+// choke point now: whatever runCortexCore returns — race winner, static
+// floor, diagnostics, digest, meta lines — the reply leaves the panel
+// emoji-free, so chat, the OBS overlay AND the interaction log all show
+// plain text. Echoes inherit clean text from the trail. E2E-measured: the
+// diagnostics line's trailing satellite WAS stripped, but its "✓" dingbat
+// survived \p{Extended_Pictographic} (U+2713 is text-presentation) — the
+// Misc-Symbols/Dingbats/Supplemental-Arrows blocks are banned too, matching
+// the absolute "asla kullanmayacaksın".
+const EMOJI_RE =
+  /[\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F\u200D\u2600-\u27BF\u2B00-\u2BFF]/gu;
+
+function stripEmoji(text: string): string {
+  return String(text || "")
+    .replace(EMOJI_RE, " ")
+    .replace(/ {2,}/g, " ")
+    .replace(/\s+([.,!?;:])/g, "$1")
+    .trim();
+}
+
 export async function runCortex(req: CortexRequest): Promise<CortexResult> {
+  const result = await runCortexCore(req);
+  const clean = stripEmoji(result.reply);
+  if (clean !== result.reply) result.reply = clean;
+  return result;
+}
+
+async function runCortexCore(req: CortexRequest): Promise<CortexResult> {
   const started = Date.now();
   const deadline = started + CORTEX_DEADLINE_MS;
   const sender = clampStr(req.sender, 60) || "izleyici";
@@ -1742,6 +1922,64 @@ export async function runCortex(req: CortexRequest): Promise<CortexResult> {
     .slice(-12);
   const memoryUsed = memoryTurns.length > 0;
 
+  // --- v31.5 — IDENTITY: "@nick bu kim" — who is this CHATTER? --------------
+  // Runs BEFORE the research branch because \bkim\b sends every who-question
+  // to RESEARCH, and the fragment enrichment then answers the LAST ladder
+  // topics instead of the person (the 08:36 +03 row). The answer lives in
+  // this panel's own records; the web has nothing to say about a viewer.
+  if ((intent === "RESEARCH" || intent === "CHAT") && prompt.length <= 80 && !URL_RE.test(prompt)) {
+    const who = parseWhoQuestion(prompt);
+    const chan = (req.channel || "specimba").toLowerCase();
+    const selfNick = streamerName.toLowerCase();
+    if (who && who.nick === "vyce") {
+      // Bot self-identity — deterministic like UNIQ-ID, no model, no web.
+      noteHealth("tool", true, 0);
+      return {
+        ok: true, intent: "CHAT",
+        reply: `VYCE'im — ${streamerName} kanalının AI komutanı. Sohbet, espri, araştırma; hepsi benim işim.`,
+        modelLabel: "VYCE // KIMLIK HAT", provider: "tool", route: "cortex-who",
+        telemetry: { latencyMs: Date.now() - started, webSearch: "none" as const, intentMs },
+      };
+    }
+    const streamerHimself = who ? who.nick === selfNick || who.nick === chan : false;
+    if (who && (who.viaMention || streamerHimself)) {
+      const askedNick = who.nick;
+      const profile = streamerHimself ? null : await buildChatterProfile(chan, askedNick);
+      const known = streamerHimself || (profile?.known ?? false);
+      const profileBlock = streamerHimself
+        ? `KANAL SAHİBİ KAYDI — @${askedNick} bu kanalın sahibi ve yayıncısı; sen onun AI komutanısın.`
+        : known
+          ? `İZLEYİCİ KAYDI — @${askedNick} (bu kanalın son 45 dakikası, kendi yazdıkları): ${profile!.msgs.map((m) => `"${clampStr(m, 110)}"`).join(" | ")}`
+          : `İZLEYİCİ KAYDI — @${askedNick}: bu kanalın kayıtlarında hiç mesajı yok.`;
+      const whoContent = `${prompt}
+
+(Bu bir İZLEYİCİ KİMLİĞİ sorusu — "@${askedNick}" kim? SADECE şu kayda dayanarak cevap ver:
+${profileBlock}
+Kayıtta mesaj varsa: kim olduğunu bu mesajlardan çıkar, 1-3 cümle esprili özet ver. Kayıtta olmayan hiçbir detayı — gerçek ad, yaş, iş, şehir, niyet — ASLA uydurma. Kayıt boşsa: onu tanımadığını açıkça söyle, "yeni gelen misin?" tarzı esprili karşıla. Web'de araştırma yok — bu kanalın izleyicisi.)`;
+      const whoRecap = await buildSelfRecap(chan);
+      const whoMessages: BrainMessage[] = [
+        { role: "system", content: buildSystemPrompt(sender, streamerName, req.roomTranscript || "", memoryTurns.length > 0, whoRecap) },
+        ...memoryTurns,
+        { role: "user", content: whoContent },
+      ];
+      const r = await raceModel(whoMessages, true, req, deadline);
+      return {
+        ok: true, intent: "CHAT",
+        reply:
+          r.content ||
+          r.fallbackLine ||
+          `@${askedNick} kayıtlarımda net görünmüyor — kamera yok elimde ama sohbet var: bir şeyler yazsın, tanışırız.`,
+        modelLabel: r.modelLabel, provider: r.provider, route: "cortex-who",
+        promptTokens: r.usage?.prompt ?? null,
+        completionTokens: r.usage?.completion ?? null,
+        memoryUsed,
+        telemetry: { latencyMs: Date.now() - started, webSearch: "none" as const, intentMs },
+      };
+    }
+    // Not a resolvable identity question ("ronaldo kim" → research, the
+    // antecedent fragment "yönetmeni kim" → enriched research): fall through.
+  }
+
   // --- RESEARCH: grounded with sources --------------------------------------
   if (intent === "RESEARCH" || req.isResearchHint) {
     // News-digest commands FIRST: deterministic, cached, zero model priors.
@@ -1785,6 +2023,21 @@ export async function runCortex(req: CortexRequest): Promise<CortexResult> {
   // at the point of failure is followed far more reliably. The escape hatch is
   // explicit: genuinely-known words still get normal answers.
   const wordQuestion = WORDQ_RE.test(prompt);
+  // v31.5 — keyboard laughter is deterministic ("xaxaxaxax ne anlama gelir"
+  // never needs a model or a web search — and the deep word tier's honest
+  // "bilmiyorum" was measurably wrong for the most common word class in chat).
+  if (wordQuestion) {
+    const term = extractMeaningTerm(prompt);
+    if (term && !/\s/.test(term) && isLaughterOnomatopoeia(term)) {
+      noteHealth("tool", true, 0);
+      return {
+        ok: true, intent,
+        reply: `"${term}" klavye kahkahası kanka — hahahaha demek. jsjsjs, xaxa, hehe, kekeke hepsi aynı aile: gülme sesi.`,
+        modelLabel: "VYCE // ARGO HAT", provider: "tool", route: "cortex-slang",
+        telemetry: { latencyMs: Date.now() - started, webSearch: "none" as const, intentMs },
+      };
+    }
+  }
   const userContent = wordQuestion
     ? `${prompt}\n\n(Bu bir kelime/şive/argo sorusu. Kelimeyi gerçekten bilmiyorsan anlamını, hangi dile/şiveye ait olduğunu veya yazanın ne demek istediğini ASLA tahmin etme — dürüstçe "bu kelimeyi bilmiyorum, ne demek?" diye sor. Bildiğinden tam eminsen normal cevap ver.)`
     : prompt;
@@ -1874,7 +2127,16 @@ const CONVO_RING_TTL_MS = 45 * 60_000;
 const CONVO_RING_MAX_PER_SENDER = 30;
 
 function echoKey(sender: string, prompt: string): string {
-  return `${sender.toLowerCase()}::${prompt.trim().toLowerCase().slice(0, 200)}`;
+  // v31.5 — INTERNAL WHITESPACE COLLAPSE. The 08:36 +03 owner paste: the
+  // webhook lane collapses runs of spaces ("@naturaldai bu kim") while the
+  // overlay's stripAiTrigger only TRIMS ("@naturaldai  bu kim" — exactly as
+  // typed). trim+lowercase alone keyed them apart → two separate flights →
+  // the second hit the 8s per-sender rate gap → the "PANEL // RATE_GUARD"
+  // duplicate row carrying a DIFFERENT response than the chat actually got.
+  // Every consumer of this key (echo guard, single-flight coalescing, result
+  // trail) must treat whitespace runs as insignificant.
+  const norm = prompt.trim().toLowerCase().replace(/\s+/g, " ").slice(0, 200);
+  return `${sender.toLowerCase()}::${norm}`;
 }
 
 function ringKey(channel: string, sender: string): string {
@@ -1891,6 +2153,14 @@ export function cortexConvoAppend(channel: string, sender: string, prompt: strin
   if (reply.trim()) list.push({ role: "assistant", content: clampStr(reply, 600), ts: now });
   while (list.length > CONVO_RING_MAX_PER_SENDER * 2) list.shift();
   convoRing.set(key, list);
+  // v31.3 — OOM guard: keys were never pruned (one per unique sender forever).
+  // On a busy channel that is thousands of Map keys over a multi-day process.
+  if (convoRing.size > 200) {
+    for (const [k, turns] of convoRing) {
+      const newest = turns[turns.length - 1]?.ts ?? 0;
+      if (now - newest > CONVO_RING_TTL_MS) convoRing.delete(k);
+    }
+  }
 }
 
 /** The freshest shared-window turns for a sender (oldest→newest, TTL-pruned). */
@@ -1993,6 +2263,122 @@ export function cortexRateAllows(sender: string, rosterAdmin: boolean): boolean 
     }
   }
   return true;
+}
+
+// ---------------------------------------------------------------------------
+// v31.4 — SINGLE-FLIGHT COALESCING + ONE-ROW LOG (owner 2026-10-28: "taking
+// doubled requests and different responses"). Two ingestion fronts now watch
+// the same live Kick chat — the OFFICIAL webhook (chat.message.sent, pushed
+// by Kick the instant a message is typed) and the OBS overlay (anonymous
+// bridge :3010 → widget JS → /api/brain/cortex). The echo cache only dedupes
+// SEQUENTIAL arrivals; these two calls land in the SAME second, both miss,
+// and each starts its own model race → TWO spends with TWO DIFFERENT answers
+// (measured live: "deneme yaz bakim" → VYCE BEAM 6367ms + 5553ms with
+// diverged replies; chat posted one while the overlay showed the other).
+// The first caller now RUNS; every other caller for the identical
+// (sender, prompt) JOINS the same in-flight promise — one spend, one answer,
+// overlay + chat + log all agree. Followers skip the rate guard: they are
+// the same viewer's same message, not new load.
+// ---------------------------------------------------------------------------
+
+export const RATE_GUARD_LINE = "Hız limiti — birkaç saniye nefes al, sıra sende.";
+
+const INFLIGHT_WINDOW_MS = 30_000;
+type InflightEntry = { at: number; p: Promise<CortexResult> };
+const inflightFlights: Map<string, InflightEntry> = (() => {
+  const g = globalThis as typeof globalThis & { __nexusCortexInflight?: Map<string, InflightEntry> };
+  if (!g.__nexusCortexInflight) g.__nexusCortexInflight = new Map();
+  return g.__nexusCortexInflight;
+})();
+
+/** The panel rate guard's honest, emoji-free verdict (label truth: the PANEL
+ * speaks, not Vyce). Shared by /api/brain/cortex and /api/kick/webhook. */
+export function cortexRateGuardResult(): CortexResult {
+  return {
+    ok: true,
+    intent: "CHAT",
+    reply: RATE_GUARD_LINE,
+    modelLabel: "PANEL // RATE_GUARD",
+    provider: "tool",
+    route: "cortex-rate",
+    telemetry: { latencyMs: 0, webSearch: "none" as const, intentMs: 0 },
+  };
+}
+
+/** Coalesced brain call: the first caller passes the rate guard and runs
+ * `start`; every other caller for the same (sender, prompt) within the
+ * flight window gets the IDENTICAL result without a second model spend.
+ * The answer is remembered on trail/echo/ring exactly once. */
+export async function cortexCoalesce(opts: {
+  sender: string;
+  prompt: string;
+  channel?: string;
+  rosterAdmin?: boolean;
+  start: () => Promise<CortexResult>;
+}): Promise<CortexResult> {
+  const key = echoKey(opts.sender, opts.prompt);
+  const now = Date.now();
+  const running = inflightFlights.get(key);
+  if (running && now - running.at <= INFLIGHT_WINDOW_MS) {
+    return running.p; // follower — the leader's identical answer, zero extra spend
+  }
+  const entry: InflightEntry = { at: now, p: null as unknown as Promise<CortexResult> };
+  entry.p = (async () => {
+    if (!cortexRateAllows(opts.sender, opts.rosterAdmin === true)) {
+      return cortexRateGuardResult();
+    }
+    const result = await opts.start();
+    cortexEchoRemember(opts.sender, opts.prompt, result, {
+      channel: opts.channel,
+      memoryUsed: result.memoryUsed === true,
+    });
+    return result;
+  })();
+  inflightFlights.set(key, entry);
+  const cleanup = () => {
+    if (inflightFlights.get(key) === entry) inflightFlights.delete(key);
+  };
+  entry.p.then(cleanup, cleanup);
+  if (inflightFlights.size > 100) {
+    for (const [k, e] of inflightFlights) {
+      if (now - e.at > INFLIGHT_WINDOW_MS) inflightFlights.delete(k);
+    }
+  }
+  return entry.p;
+}
+
+// v31.4 — ONE INTERACTION ROW PER EXCHANGE: the official webhook and the
+// overlay's log POST both report the coalesced exchange. The panel log must
+// show it once (the owner's paste showed every message twice with different
+// answers — after coalescing the answers agree; this guard removes the
+// second ROW). Same (username, message, response) within 60s = one row.
+const RECENT_ROW_TTL_MS = 60_000;
+const recentLogRows: Map<string, number> = (() => {
+  const g = globalThis as typeof globalThis & { __nexusRecentLogRows?: Map<string, number> };
+  if (!g.__nexusRecentLogRows) g.__nexusRecentLogRows = new Map();
+  return g.__nexusRecentLogRows;
+})();
+
+/** True when an identical row was already recorded within the TTL — callers
+ * skip the duplicate write (webhook writeInteractionRow + /api/brain/log). */
+export function interactionRowDuplicate(username: string, message: string, response: string): boolean {
+  // v31.5 — whitespace runs collapsed on BOTH halves: the overlay's log POST
+  // carries the prompt as typed ("@naturaldai  bu kim") while the webhook row
+  // carries it collapsed — without this they are two different rows for one
+  // exchange, which is exactly the doubled-row class in the owner's paste.
+  const msgNorm = clampStr(message, 200).toLowerCase().replace(/\s+/g, " ");
+  const resNorm = clampStr(response, 120).toLowerCase().replace(/\s+/g, " ");
+  const key = `${(username || "").toLowerCase()}::${msgNorm}::${resNorm}`;
+  const now = Date.now();
+  if (recentLogRows.size > 400) {
+    for (const [k, at] of recentLogRows) {
+      if (now - at > RECENT_ROW_TTL_MS) recentLogRows.delete(k);
+    }
+  }
+  const hit = recentLogRows.get(key);
+  if (typeof hit === "number" && now - hit <= RECENT_ROW_TTL_MS) return true;
+  recentLogRows.set(key, now);
+  return false;
 }
 
 export { isRosterAdmin };

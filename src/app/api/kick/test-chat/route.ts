@@ -29,12 +29,20 @@ export async function POST(req: Request) {
   const content =
     typeof body.content === "string" && body.content.trim()
       ? body.content.trim().slice(0, 480)
-      : "VYCE hattı canlı — Kick bağlantısı kuruldu 🛰";
+      : "VYCE hattı canlı — Kick bağlantısı kuruldu.";
 
   const res = await kickSendBotMessage(content);
   if (!res.ok) {
+    // Surface the REAL Kick rejection (e.g. "HTTP_422: chatroom_id required")
+    // instead of a bare label — the owner can act on it without log access.
     return NextResponse.json(
-      { ok: false, error: { code: res.code ?? "SEND_FAILED", message: "Kick did not accept the message." } },
+      {
+        ok: false,
+        error: {
+          code: res.code ?? "SEND_FAILED",
+          message: res.code ? `Kick did not accept the message (${res.code}).` : "Kick did not accept the message.",
+        },
+      },
       { status: 502 },
     );
   }

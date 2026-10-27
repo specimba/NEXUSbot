@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth";
 import { clientKey, rateLimit } from "@/lib/guard";
 import { getGroqSlotStatus, resolveVyceKeyFallback, type GroqSlotStatus } from "@/lib/ai/client";
+import { readVyceStatusCache, writeVyceStatusCache } from "@/lib/vyce-status-cache";
 import {
   computeTierAvailability,
   emptyTierMap,
@@ -41,6 +42,20 @@ export async function GET(req: Request) {
     );
   }
 
+  // v31.4 — PROBE CACHE (owner: "page giving OOM error freeze constantly").
+  // dev.log measured this route at 10-18s PER POLL (live 10-model probe)
+  // while the Connectors card polls every ~30s — the panel hung on every
+  // visit. The verdict is cached for 90s; key save/delete (see /api/vyce/key)
+  // invalidates instantly.
+  const hit = readVyceStatusCache();
+  if (hit) return NextResponse.json(hit);
+
+  const body = await computeVyceStatus();
+  writeVyceStatusCache(body);
+  return NextResponse.json(body);
+}
+
+async function computeVyceStatus() {
   // Additive Groq slot field — computed once, guarded so a Groq-side failure can
   // never disturb the Vyce payload contract (honest error inside the field).
   let groq: GroqSlotStatus | { error: { code: string; message: string } };
@@ -73,7 +88,7 @@ export async function GET(req: Request) {
       error: { code: "VAULT_UNREADABLE", message: "Stored Vyce key could not be decrypted — re-save it." },
       fallback: null,
     };
-    return NextResponse.json({ ok: true, status: payload, groq });
+    return { ok: true, status: payload, groq };
   }
 
   // --- Vault key present → probe with it.
@@ -125,7 +140,7 @@ export async function GET(req: Request) {
       } catch {
         fb.fallback = { available: false, reason: "fallback lookup failed" };
       }
-      return NextResponse.json({ ok: true, status: fb, groq });
+      return { ok: true, status: fb, groq };
     }
 
     const payload: VyceStatusPayload = {
@@ -143,7 +158,7 @@ export async function GET(req: Request) {
         : { code: probe.code, message: probe.message },
       fallback: null,
     };
-    return NextResponse.json({ ok: true, status: payload, groq });
+    return { ok: true, status: payload, groq };
   }
 
   // --- No vault key → report the Supabase edge-secret fallback state honestly.
@@ -165,7 +180,7 @@ export async function GET(req: Request) {
         error: probe.ok ? null : { code: probe.code, message: probe.message },
         fallback: { available: true, reason: null },
       };
-      return NextResponse.json({ ok: true, status: payload, groq });
+      return { ok: true, status: payload, groq };
     }
     fallback = { available: false, reason: fb.reason };
   } catch {
@@ -185,5 +200,5 @@ export async function GET(req: Request) {
     error: null,
     fallback,
   };
-  return NextResponse.json({ ok: true, status: payload, groq });
+  return { ok: true, status: payload, groq };
 }

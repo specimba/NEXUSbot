@@ -16,6 +16,7 @@ import {
   storeVyceBaseUrl,
   storeVyceKey,
 } from "@/lib/connectors/vyce";
+import { invalidateVyceStatusCache } from "@/lib/vyce-status-cache";
 
 /**
  * T-207 — Vyce key management (vault-backed, session-guarded).
@@ -78,6 +79,9 @@ export async function PUT(req: Request) {
     await storeVyceBaseUrl(normalizeVyceBaseUrl(body.baseUrl));
   }
   if (clearBaseUrl) await clearVyceBaseUrlOverride();
+  // v31.4 — the status card must probe with THIS key on its next poll, not
+  // serve the 90s cached verdict of the old one.
+  invalidateVyceStatusCache();
 
   // MEASURED probe with the just-stored credential, through the SAME egress
   // route the runtime uses (a key stored while routing sends Vyce through the
@@ -127,6 +131,8 @@ export async function DELETE(req: Request) {
   }
 
   const removed = await deleteVyceConfig();
+  // v31.4 — same rule on delete: the next status poll re-probes honestly.
+  invalidateVyceStatusCache();
   // Idempotent: removing an absent config is still a success.
   return NextResponse.json({ ok: true, removed });
 }

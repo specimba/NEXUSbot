@@ -71,12 +71,12 @@ function CopyRow({ value, label }: { value: string; label: string }) {
         variant="outline"
         size="sm"
         className="h-11 w-11 shrink-0"
-        aria-label={`${label} kopyala`}
+        aria-label={`Copy ${label}`}
         onClick={() => {
           void navigator.clipboard
             .writeText(value)
-            .then(() => toast.success("Kopyalandı", { description: label }))
-            .catch(() => toast.error("Kopyalanamadı", { description: "Panoya erişilemedi." }));
+            .then(() => toast.success("Copied", { description: label }))
+            .catch(() => toast.error("Copy failed", { description: "Clipboard unavailable." }));
         }}
       >
         <Copy className="h-4 w-4" />
@@ -114,11 +114,11 @@ export function KickCard() {
     const clean = params.toString();
     window.history.replaceState({}, "", `${window.location.pathname}${clean ? `?${clean}` : ""}`);
     if (flag === "connected") {
-      toast.success("Kick bağlandı", { description: "Hesap panel kasasında, tokenlar otomatik yenileniyor." });
+      toast.success("Kick connected", { description: "Account stored in the panel vault — tokens rotate automatically." });
       void queryClient.invalidateQueries({ queryKey: ["connector-kick-status"] });
     } else {
-      toast.error("Kick bağlantısı kurulamadı", {
-        description: "App bilgilerini ve redirect URL'ini Kick formuyla birebir kontrol et.",
+      toast.error("Kick connection failed", {
+        description: "Check the app credentials and that the redirect URL matches the Kick form exactly.",
       });
     }
   }, [queryClient]);
@@ -141,9 +141,9 @@ export function KickCard() {
       setClientSecret("");
       setSecretVisible(false);
       void queryClient.invalidateQueries({ queryKey: ["connector-kick-status"] });
-      toast.success("App bilgileri kasada", { description: "Client secret AES-256-GCM ile şifrelendi." });
+      toast.success("App credentials stored", { description: "Client secret encrypted with AES-256-GCM." });
     },
-    onError: (e: Error) => toast.error("Kaydedilemedi", { description: e.message }),
+    onError: (e: Error) => toast.error("Save failed", { description: e.message }),
   });
 
   const connect = useMutation({
@@ -156,10 +156,10 @@ export function KickCard() {
       return (await res.json()) as { authorizeUrl: string };
     },
     onSuccess: (data) => {
-      toast.info("Kick'e yönlendiriliyorsun", { description: "Yetki ekranında izin ver, paneye otomatik dönülür." });
+      toast.info("Redirecting to Kick", { description: "Approve on the consent screen — you return to the panel automatically." });
       window.location.href = data.authorizeUrl;
     },
-    onError: (e: Error) => toast.error("Bağlantı başlatılamadı", { description: e.message }),
+    onError: (e: Error) => toast.error("Could not start connection", { description: e.message }),
   });
 
   const disconnect = useMutation({
@@ -170,9 +170,9 @@ export function KickCard() {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["connector-kick-status"] });
-      toast.success("Hesap bağlantısı kesildi", { description: "App bilgileri duruyor — tek tıkla tekrar bağlanır." });
+      toast.success("Account disconnected", { description: "App credentials stay — reconnect with one click." });
     },
-    onError: (e: Error) => toast.error("Kesilemedi", { description: e.message }),
+    onError: (e: Error) => toast.error("Disconnect failed", { description: e.message }),
   });
 
   const deleteApp = useMutation({
@@ -183,9 +183,9 @@ export function KickCard() {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["connector-kick-status"] });
-      toast.success("Kick kasası temizlendi", { description: "App + token kayıtları silindi." });
+      toast.success("Kick vault cleared", { description: "App + token records deleted." });
     },
-    onError: (e: Error) => toast.error("Silinemedi", { description: e.message }),
+    onError: (e: Error) => toast.error("Delete failed", { description: e.message }),
   });
 
   const hookSetup = useMutation({
@@ -199,9 +199,9 @@ export function KickCard() {
     },
     onSuccess: (data) => {
       void queryClient.invalidateQueries({ queryKey: ["connector-kick-status"] });
-      toast.success("Webhook kaydedildi", { description: `chat.message.sent → ${data.url}` });
+      toast.success("Webhook registered", { description: `chat.message.sent → ${data.url}` });
     },
-    onError: (e: Error) => toast.error("Webhook kurulamadı", { description: e.message }),
+    onError: (e: Error) => toast.error("Webhook setup failed", { description: e.message }),
   });
 
   const hookTeardown = useMutation({
@@ -212,9 +212,9 @@ export function KickCard() {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["connector-kick-status"] });
-      toast.success("Webhook kaldırıldı");
+      toast.success("Webhook removed");
     },
-    onError: (e: Error) => toast.error("Kaldırılamadı", { description: e.message }),
+    onError: (e: Error) => toast.error("Removal failed", { description: e.message }),
   });
 
   const toggleReplies = useMutation({
@@ -228,7 +228,7 @@ export function KickCard() {
       return res.json();
     },
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["connector-kick-status"] }),
-    onError: (e: Error) => toast.error("Toggle hatası", { description: e.message }),
+    onError: (e: Error) => toast.error("Toggle failed", { description: e.message }),
   });
 
   const testChat = useMutation({
@@ -240,8 +240,8 @@ export function KickCard() {
       }
       return res.json();
     },
-    onSuccess: () => toast.success("Test mesajı Kick sohbetinde", { description: "kanalda kontrol et" }),
-    onError: (e: Error) => toast.error("Test gönderilemedi", { description: e.message }),
+    onSuccess: () => toast.success("Test message sent to Kick chat", { description: "check the channel" }),
+    onError: (e: Error) => toast.error("Test send failed", { description: e.message }),
   });
 
   const s = status.data?.status;
@@ -271,9 +271,9 @@ export function KickCard() {
             )}
           </div>
           <CardDescription>
-            Official Kick app (OAuth 2.1 + PKCE) — sohbet okuma zaten canlı (anonim köprü, port 3010). Bu bağlantı
-            yazma tarafını açar: VYCE cevaplarını canlı sohbete bot olarak yazar, imzalı webhook'larla !ai akışını
-            resmî hattan alır.
+            Official Kick app (OAuth 2.1 + PKCE) — chat reading is already live (anonymous bridge, port 3010). This
+            connection opens the WRITE side: VYCE posts replies into the live chat as a bot and receives the !ai flow
+            on the signed webhook lane.
           </CardDescription>
         </CardHeader>
 
@@ -289,19 +289,19 @@ export function KickCard() {
             <>
               {/* Step 0 — the exact URLs for the Kick Create-an-App form */}
               <div className="space-y-2">
-                <CopyRow label="Kick Create-an-App → Redirect URL (birebir yapıştır)" value={s.redirectUri} />
-                <CopyRow label="Kick Create-an-App → Webhooks URL (https zorunlu)" value={s.webhookUrl} />
+                <CopyRow label="Kick Create-an-App → Redirect URL (paste exactly)" value={s.redirectUri} />
+                <CopyRow label="Kick Create-an-App → Webhooks URL (https required)" value={s.webhookUrl} />
               </div>
 
               {!s.configured && (
                 <div className="space-y-3">
                   <div className="rounded-md border border-border bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground">
-                    kick.com → <span className="text-foreground">Ayarlar → Developer → Create an App</span>:
-                    Redirect URL ve Webhooks URL'e yukarıdaki iki değeri birebir yapıştır (eski
-                    <span className="font-mono text-foreground"> http://ws-ef-…fcapp.run</span> satırı hata
-                    verir — Kick yalnızca https kabul eder), şu kutucukları işaretle —{" "}
-                    {s.scopes.map((sc) => s.scopeHints[sc]).filter(Boolean).join(", ")} — sonra Client ID/Secret'i
-                    buraya gir.
+                    kick.com → <span className="text-foreground">Settings → Developer → Create an App</span>: paste the
+                    two values above into Redirect URL and Webhooks URL exactly (the old
+                    <span className="font-mono text-foreground"> http://ws-ef-…fcapp.run</span> line is what triggers
+                    the HTTPS error — Kick only accepts https), tick these boxes —{" "}
+                    {s.scopes.map((sc) => s.scopeHints[sc]).filter(Boolean).join(", ")} — then enter the Client ID/Secret
+                    here.
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="kick-client-id">Client ID</Label>
@@ -332,7 +332,7 @@ export function KickCard() {
                     onClick={() => saveApp.mutate()}
                   >
                     <PlugZap className="mr-2 h-4 w-4" aria-hidden />
-                    {saveApp.isPending ? "Kasaya yazılıyor…" : "App bilgilerini kaydet"}
+                    {saveApp.isPending ? "Saving to vault…" : "Save app credentials"}
                   </Button>
                 </div>
               )}
@@ -342,15 +342,15 @@ export function KickCard() {
                   <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                     <span className="font-mono">{s.app?.clientIdMasked}</span>
                     <span>·</span>
-                    <span>secret kasada ({s.app?.clientSecretMasked})</span>
+                    <span>secret in the vault ({s.app?.clientSecretMasked})</span>
                   </div>
                   <Button className="h-11 w-full sm:w-auto" disabled={connect.isPending} onClick={() => connect.mutate()}>
                     <PlugZap className="mr-2 h-4 w-4" aria-hidden />
-                    {connect.isPending ? "Yönlendiriliyor…" : "Connect with Kick"}
+                    {connect.isPending ? "Redirecting…" : "Connect with Kick"}
                   </Button>
                   <p className="text-xs text-muted-foreground">
-                    Yetki ekranı {new URL(s.redirectUri).host} üzerinden döner — Kick formundaki Redirect URL bu
-                    panelin adresiyle birebir aynı olmalı.
+                    The consent screen returns via {new URL(s.redirectUri).host} — the Redirect URL in the Kick form
+                    must match this panel's address exactly.
                   </p>
                   <Button
                     variant="outline"
@@ -359,7 +359,7 @@ export function KickCard() {
                     onClick={() => deleteApp.mutate()}
                   >
                     <Trash2 className="mr-2 h-4 w-4" aria-hidden />
-                    App kaydını sil
+                    Delete app record
                   </Button>
                 </div>
               )}
@@ -368,9 +368,9 @@ export function KickCard() {
                 <div className="space-y-4">
                   <div className="flex flex-wrap items-center gap-2 text-sm">
                     <Check className="h-4 w-4 text-primary" aria-hidden />
-                    <span className="font-medium">{s.account?.name ?? "bağlı hesap"}</span>
+                    <span className="font-medium">{s.account?.name ?? "connected account"}</span>
                     <span className="text-xs text-muted-foreground">
-                      {s.account ? `@${s.account.userId}` : ""} · tokenlar otomatik döner (rotating refresh)
+                      {s.account ? `@${s.account.userId}` : ""} · tokens rotate automatically (rotating refresh)
                     </span>
                   </div>
                   <div className="flex flex-wrap gap-1.5">
@@ -385,14 +385,14 @@ export function KickCard() {
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
                         <p className="text-sm font-medium flex items-center gap-2">
-                          <Webhook className="h-4 w-4" aria-hidden /> Resmî webhook akışı
+                          <Webhook className="h-4 w-4" aria-hidden /> Official webhook feed
                         </p>
                         <p className="text-xs text-muted-foreground truncate">
                           {s.webhooks.subs && s.webhooks.subs.length > 0
-                            ? `${s.webhooks.subs.length} abonelik canlı (chat.message.sent)`
+                            ? `${s.webhooks.subs.length} subscription live (chat.message.sent)`
                             : s.webhooks.error
-                              ? `abonelik listesi alınamadı: ${s.webhooks.error}`
-                              : "kayıtlı abonelik yok — kur, !ai akışı imzalı hattan gelsin"}
+                              ? `subscription list unavailable: ${s.webhooks.error}`
+                              : "no subscriptions yet — set it up so the !ai flow arrives on the signed lane"}
                         </p>
                       </div>
                       <div className="flex shrink-0 gap-2">
@@ -403,7 +403,7 @@ export function KickCard() {
                             disabled={hookTeardown.isPending}
                             onClick={() => hookTeardown.mutate()}
                           >
-                            Kaldır
+                            Remove
                           </Button>
                         ) : (
                           <Button
@@ -411,7 +411,7 @@ export function KickCard() {
                             disabled={hookSetup.isPending}
                             onClick={() => hookSetup.mutate()}
                           >
-                            {hookSetup.isPending ? "Kaydediliyor…" : "Webhook kur"}
+                            {hookSetup.isPending ? "Registering…" : "Set up webhook"}
                           </Button>
                         )}
                       </div>
@@ -419,15 +419,15 @@ export function KickCard() {
 
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="text-sm font-medium">Bot cevapları sohbette</p>
+                        <p className="text-sm font-medium">Bot replies in chat</p>
                         <p className="text-xs text-muted-foreground">
-                          webhook'tan gelen !ai mesajlarının cevabı canlı sohbete yazılır
+                          replies to !ai messages arriving on the webhook are posted into the live chat
                         </p>
                       </div>
                       <Switch
                         checked={s.chatReplies}
                         onCheckedChange={(v) => toggleReplies.mutate(v)}
-                        aria-label="Bot cevapları sohbette"
+                        aria-label="Bot replies in chat"
                         className={cn(s.chatReplies && "data-[state=checked]:bg-primary")}
                       />
                     </div>
@@ -439,7 +439,7 @@ export function KickCard() {
                       onClick={() => testChat.mutate()}
                     >
                       <Send className="mr-2 h-4 w-4" aria-hidden />
-                      {testChat.isPending ? "Gönderiliyor…" : "Test mesajı gönder"}
+                      {testChat.isPending ? "Sending…" : "Send test message"}
                     </Button>
                   </div>
 
@@ -451,7 +451,7 @@ export function KickCard() {
                       onClick={() => disconnect.mutate()}
                     >
                       <Link2Off className="mr-2 h-4 w-4" aria-hidden />
-                      Hesabı bağlantıdan çıkar
+                      Disconnect account
                     </Button>
                     <Button
                       variant="outline"
@@ -460,7 +460,7 @@ export function KickCard() {
                       onClick={() => deleteApp.mutate()}
                     >
                       <Trash2 className="mr-2 h-4 w-4" aria-hidden />
-                      Her şeyi sil
+                      Delete everything
                     </Button>
                   </div>
                 </div>
@@ -469,9 +469,9 @@ export function KickCard() {
               {!s.connected && (
                 <p className="flex items-start gap-2 text-xs text-muted-foreground">
                   <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-                  Client secret yalnızca kasada durur (AES-256-GCM), panele asla geri gösterilmez. Token yenileme
-                  otomatiktir; refresh token tek kullanımlık olduğu için her yenilemede yeni çift anında kasaya
-                  yazılır.
+                  The client secret lives only in the vault (AES-256-GCM) and is never shown in the panel again. Token
+                  renewal is automatic; refresh tokens are single-use, so every renewal immediately writes the fresh
+                  pair to the vault.
                 </p>
               )}
             </>

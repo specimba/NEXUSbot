@@ -3,9 +3,9 @@ import { db } from "@/lib/db";
 import { clampStr, redactSecrets } from "@/lib/brain/auth";
 import { clientKey, rateLimit } from "@/lib/guard";
 import {
+  cortexCoalesce,
   cortexEchoLookup,
-  cortexEchoRemember,
-  cortexRateAllows,
+  interactionRowDuplicate,
   runCortex,
   type CortexResult,
 } from "@/lib/brain/cortex";
@@ -31,7 +31,9 @@ export const maxDuration = 30;
 
 const AI_COMMAND_RE = /^!ai\b/i;
 const EMOTE_RE = /\[emote:\d+:[^\]]*\]/gi;
-const RATE_LINE = "Hız limiti — birkaç saniye nefes al, sıra sende. 🎛";
+// Emoji ban (owner directive 2026-10-27) — every bot-posted line is plain
+// text. v31.4 also strips at the runCortex choke point so the panel log and
+// the overlay are clean too.
 
 type ChatMessagePayload = {
   broadcaster?: { channel_slug?: string };
@@ -56,6 +58,18 @@ async function writeInteractionRow(opts: {
   const r = opts.result;
   const message = clampStr(redactSecrets(opts.prompt), 2000);
   const response = clampStr(redactSecrets(r?.reply ?? opts.forcedReply ?? ""), 2000);
+  // v31.4 — one row per exchange: the overlay's /api/brain/log already
+  // recorded the coalesced answer for this identical message; a second row
+  // with the same response is noise, not information.
+  if (
+    interactionRowDuplicate(
+      opts.sender.toLowerCase().replace(/[^a-z0-9_]/g, "") || "izleyici",
+      message,
+      response,
+    )
+  ) {
+    return;
+  }
   try {
     await db.interactionLog.create({
       data: {
@@ -117,20 +131,23 @@ async function processChatMessage(payload: ChatMessagePayload, messageId: string
 
   // Same-message dedupe across mounts: the OBS overlay widget already answers
   // this message via /api/brain/cortex (it reads the same chat through the
-  // anonymous bridge) — the echo guard hands us the IDENTICAL reply, no
-  // second model spend, chat gets exactly what the overlay shows. The lookup
-  // key matches the widget's contract: the !ai-stripped prompt text.
+  // anonymous bridge). The echo guard covers sequential arrivals; for the
+  // SAME-SECOND race (webhook pushed by Kick + overlay fetch land together —
+  // measured live: two VYCE spends with two DIFFERENT answers per message)
+  // v31.4 coalesces: the first caller runs, the other JOINS the same promise,
+  // so the chat post always matches what the overlay shows.
   const echo = cortexEchoLookup(sender, prompt);
   let result: CortexResult | null = echo ?? null;
 
   if (!result) {
-    if (!cortexRateAllows(sender, false)) {
-      await writeInteractionRow({ channel, sender, prompt, result: null, forcedReply: RATE_LINE, status: "busy" });
-      return; // chat stays clean — the overlay shows the rate line
-    }
     try {
-      result = await runCortex({ sender, prompt, channel, streamerName: channel });
-      cortexEchoRemember(sender, prompt, result, { channel, memoryUsed: result.memoryUsed === true });
+      result = await cortexCoalesce({
+        sender,
+        prompt,
+        channel,
+        rosterAdmin: false,
+        start: () => runCortex({ sender, prompt, channel, streamerName: channel }),
+      });
     } catch (e) {
       await writeInteractionRow({
         channel, sender, prompt, result: null,
@@ -140,7 +157,11 @@ async function processChatMessage(payload: ChatMessagePayload, messageId: string
     }
   }
 
-  await writeInteractionRow({ channel, sender, prompt, result, status: "ok" });
+  // Rate verdicts arrive as route "cortex-rate" (coalesced with the
+  // overlay's identical attempt): log the busy row, keep chat clean.
+  const busy = result.route === "cortex-rate";
+  await writeInteractionRow({ channel, sender, prompt, result, status: busy ? "busy" : "ok" });
+  if (busy) return;
   await noteEvent({ messageId, sender, channel, route: result.route, provider: result.provider });
 
   const oauth = await loadKickOAuth();
@@ -148,7 +169,7 @@ async function processChatMessage(payload: ChatMessagePayload, messageId: string
   if (!oauth || !repliesOn) return; // connected-only feature; toggle respected
 
   const reply = result.drawSubject
-    ? "Çizim overlay'de hazırlanıyor 🎨"
+    ? "Çizim overlay'de hazırlanıyor."
     : result.reply;
   if (!reply.trim()) return;
   await kickSendBotMessage(reply);
@@ -169,10 +190,23 @@ export async function POST(req: Request) {
 
   if (!verify.valid) {
     // Duplicates are SUCCESS for Kick (stop retrying); everything else is a
-    // rejected delivery. We never mark invalid deliveries as seen.
+    // rejected delivery. We never mark invalid deliveries as seen. Log the
+    // reason + header presence ONCE per minute (rate-limited) so a signature
+    // regression is diagnosable from dev.log without touching the hot path.
     if (verify.reason === "DUPLICATE") {
       return NextResponse.json({ ok: true, deduped: true });
     }
+    if (!rateLimit(`kick-hook-diag`, 1, 60_000)) {
+      return NextResponse.json({ ok: false, error: verify.reason }, { status: 401 });
+    }
+    console.warn(
+      `[kick-webhook] rejected reason=${verify.reason}` +
+        ` headers: id=${req.headers.has("kick-event-message-id")}` +
+        ` ts=${req.headers.has("kick-event-message-timestamp")}` +
+        ` sig=${req.headers.has("kick-event-signature")}` +
+        ` type=${req.headers.get("kick-event-type") ?? "-"}` +
+        ` bodyLen=${rawBody.length}`,
+    );
     return NextResponse.json({ ok: false, error: verify.reason }, { status: 401 });
   }
 

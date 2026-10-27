@@ -91,6 +91,8 @@ type KickRuntime = {
   publicKey: { pem: string | null; fetchedAt: number } | null;
   /** Idempotency for webhook deliveries (Kick-Event-Message-Id LRU). */
   seenEventIds: Map<string, number>;
+  /** chatroom_id of the connected broadcaster (stable; re-resolved on account change). */
+  chatroom: { userId: number; id: number; at: number } | null;
   lastChatSentAt: number;
   /** Serialized bot-send queue so bursts never violate the gap. */
   sendChain: Promise<unknown>;
@@ -104,6 +106,7 @@ const rt: KickRuntime =
     pkce: new Map(),
     publicKey: null,
     seenEventIds: new Map(),
+    chatroom: null,
     lastChatSentAt: 0,
     sendChain: Promise.resolve(),
   });
@@ -476,20 +479,94 @@ export async function getKickUser(): Promise<{ userId: number; name: string } | 
 }
 
 /**
- * Post a bot chat message. type:"bot" → sent to the channel attached to the
- * token. Content clamped to ≤480 graphemes / ≤2000 UTF-8 bytes (docs limits:
- * 500 / 2048). Serialized with a 1.5s floor so bursts stay polite.
+ * Resolve the connected broadcaster's chatroom_id (POST /public/v1/chat is
+ * REQUIRED to carry it — the pre-v31.3 body {content,type} was rejected with
+ * a 422 validation error, which the owner saw as "Kick did not accept the
+ * message"). The AUTHENTICATED /public/v1/channels payload does NOT include
+ * the chatroom id (measured live 2026-10-27), so this uses the same public
+ * kick.com/api/v2 channel endpoint the anonymous bridge (:3010) uses —
+ * verified live from this sandbox (chatroomId 3628172 for specimba).
+ * Cached per account; chatroom ids are stable for a channel.
+ */
+const KICK_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
+async function kickResolveChatroomId(userId: number, slug: string): Promise<number | null> {
+  if (rt.chatroom && rt.chatroom.userId === userId && Date.now() - rt.chatroom.at < 6 * 3600_000) {
+    return rt.chatroom.id;
+  }
+  const wantSlug = (slug || "specimba").toLowerCase();
+
+  // 1) PRIMARY — the kick-bridge mini service resolves the SAME channel from
+    // this sandbox with Bun's fetch (Node/undici gets Cloudflare 403 on
+    // kick.com — measured 2026-10-27: bun 200 / node 403 "Request blocked by
+    // security policy"). Its /health already carries the resolved chatroomId.
+  try {
+    const res = await fetch("http://127.0.0.1:3010/health", {
+      signal: AbortSignal.timeout(4_000),
+    });
+    if (res.ok) {
+      const j = (await res.json()) as { chatroomId?: number; channel?: string };
+      if (typeof j.chatroomId === "number" && j.chatroomId > 0 && (j.channel ?? "").toLowerCase() === wantSlug) {
+        rt.chatroom = { userId, id: j.chatroomId, at: Date.now() };
+        return j.chatroomId;
+      }
+    }
+  } catch {
+    /* bridge down — fall through */
+  }
+
+  // 2) FALLBACK — direct public channel API (works whenever egress allows).
+  try {
+    const res = await fetch(`https://kick.com/api/v2/channels/${encodeURIComponent(wantSlug)}`, {
+      headers: { "User-Agent": KICK_UA, Accept: "application/json" },
+      signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { chatroom?: { id?: number } };
+    const id = body.chatroom?.id;
+    if (typeof id !== "number" || id <= 0) return null;
+    rt.chatroom = { userId, id, at: Date.now() };
+    return id;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Owner directive (viewer-enforced, 2026-10-27): ZERO emojis in chat output.
+ * Stripped here at the transport level so EVERY lane (test message, !ai
+ * reply, rate-limit line) complies even when a model sneaks one past the
+ * persona rule. Also drops variation selectors/zero-width joiners so the
+ * grapheme count shrinks with the codepoints.
+ */
+const EMOJI_RE = /[\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F\u200D\u2600-\u27BF\u2B00-\u2BFF]/gu;
+
+/**
+ * Post a chat message AS the connected user. The measured Kick contract
+ * (probe matrix 2026-10-27) requires chatroom_id + broadcaster_user_id +
+ * type "user". chatroom_id is resolved via the kick-bridge (Node fetch gets
+ * Cloudflare 403 on kick.com). Content clamped to ≤480 graphemes / ≤2000
+ * UTF-8 bytes (docs limits: 500 / 2048), emojis stripped (owner ban).
+ * Serialized with a 1.5s floor so bursts stay polite. Returns the REAL Kick
+ * error text on rejection.
  */
 export async function kickSendBotMessage(content: string): Promise<{ ok: boolean; code?: string; messageId?: string }> {
   const oauth = await loadKickOAuth();
   if (!oauth) return { ok: false, code: "NOT_CONNECTED" };
+  const broadcasterUserId = oauth.account?.userId;
+  if (typeof broadcasterUserId !== "number") return { ok: false, code: "NO_ACCOUNT" };
 
   // Clamp to the API contract (docs: grapheme clusters, ≤2048 bytes).
   let text = content.replace(/\s*\n+\s*/g, " ").trim();
   while (text.length > 0 && (Array.from(text).length > 480 || Buffer.byteLength(text, "utf8") > 2000)) {
     text = Array.from(text).slice(0, Array.from(text).length - 20).join("").trim();
   }
+  text = text.replace(EMOJI_RE, " ").replace(/ {2,}/g, " ").trim();
   if (!text) return { ok: false, code: "EMPTY" };
+
+  const chatroomId = await kickResolveChatroomId(broadcasterUserId, oauth.account?.name ?? "");
+  if (!chatroomId) return { ok: false, code: "NO_CHATROOM" };
 
   const exec = async () => {
     // Gap enforcement (serialized through the same chain).
@@ -499,10 +576,24 @@ export async function kickSendBotMessage(content: string): Promise<{ ok: boolean
     try {
       const res = await kickApiFetch("/public/v1/chat", {
         method: "POST",
-        body: JSON.stringify({ content: text, type: "bot" }),
+        // Measured contract (probe matrix, 2026-10-27): chatroom_id ALONE →
+        // 400 "Invalid request"; type "bot" → 404; the ACCEPTED body carries
+        // chatroom_id + broadcaster_user_id + type "user" → 200 is_sent.
+        body: JSON.stringify({
+          chatroom_id: chatroomId,
+          broadcaster_user_id: broadcasterUserId,
+          content: text,
+          type: "user",
+        }),
       });
-      const body = (await res.json().catch(() => ({}))) as { data?: { is_sent?: boolean; message_id?: string }; message?: string };
-      if (!res.ok) return { ok: false, code: `HTTP_${res.status}` };
+      const body = (await res.json().catch(() => ({}))) as {
+        data?: { is_sent?: boolean; message_id?: string };
+        message?: string;
+      };
+      if (!res.ok) {
+        const detail = (body.message ?? "").slice(0, 160);
+        return { ok: false, code: detail ? `HTTP_${res.status}: ${detail}` : `HTTP_${res.status}` };
+      }
       if (body.data?.is_sent === false) return { ok: false, code: "NOT_SENT" };
       return { ok: true, messageId: body.data?.message_id };
     } catch (e) {
@@ -582,8 +673,13 @@ async function fetchKickPublicKey(force = false): Promise<string | null> {
       signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
     });
     if (!res.ok) return rt.publicKey?.pem ?? null;
-    const pem = (await res.text()).trim();
-    if (!pem.includes("BEGIN PUBLIC KEY")) return rt.publicKey?.pem ?? null;
+    // v31.3 — REAL PAYLOAD: the endpoint returns {"data":{"public_key":"PEM"}}
+    // (measured live 2026-10-27). The old code stored the RAW JSON BODY as the
+    // "PEM", so crypto.verify() threw on every delivery → permanent
+    // BAD_SIGNATURE → every webhook answered 401 (the 401 storm in dev.log).
+    const body = (await res.json().catch(() => null)) as { data?: { public_key?: string } } | null;
+    const pem = (body?.data?.public_key ?? "").trim();
+    if (!pem.startsWith("-----BEGIN PUBLIC KEY-----")) return rt.publicKey?.pem ?? null;
     rt.publicKey = { pem, fetchedAt: Date.now() };
     return pem;
   } catch {

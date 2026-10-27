@@ -47,7 +47,9 @@ export function StreamTab() {
       if (!res.ok) throw new Error("events unavailable");
       return res.json();
     },
-    refetchInterval: 2000,
+    // v31.3 — 2s polling churned the client CPU (and the server) for hours;
+    // 10s stays live-feeling without the render storm.
+    refetchInterval: 10_000,
   });
 
   const tokens = useQuery<{ tokens: IngestTokenRow[] }>({
@@ -272,7 +274,7 @@ export function StreamTab() {
             </p>
           ) : visible.length === 0 ? (
             <p className="py-10 text-center text-sm text-muted-foreground">
-              Waiting for events… (polling every 2s). Stream is honestly empty until something
+              Waiting for events… (polling every 10s). Stream is honestly empty until something
               reports in.
             </p>
           ) : (

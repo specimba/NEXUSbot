@@ -9,7 +9,7 @@ import {
 } from "@/lib/brain/auth";
 import { clientKey, rateLimit } from "@/lib/guard";
 import { mirrorInteraction, mirrorLesson } from "@/lib/brain/mirror";
-import { cortexResultPeek } from "@/lib/brain/cortex";
+import { cortexResultPeek, interactionRowDuplicate } from "@/lib/brain/cortex";
 
 /**
  * POST /api/brain/log — the pipeline catch (owner ask, v29.8).
@@ -96,6 +96,13 @@ export async function POST(req: Request) {
     if (finalLatencyMs === null && typeof s.telemetry?.latencyMs === "number") {
       finalLatencyMs = Math.min(600_000, Math.max(0, Math.round(s.telemetry.latencyMs)));
     }
+  }
+
+  // v31.4 — one row per exchange: when the official webhook already logged
+  // the coalesced answer for this identical (user, message, response), this
+  // POST is the overlay mount reporting the same exchange — skip the dupe.
+  if (interactionRowDuplicate(username, message, finalResponse)) {
+    return NextResponse.json({ ok: true, deduped: true });
   }
 
   const row = await db.interactionLog.create({

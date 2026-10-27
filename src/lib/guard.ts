@@ -7,6 +7,10 @@ const hits = new Map<string, { count: number; reset: number }>();
 
 export function rateLimit(key: string, limit = 10, windowMs = 60_000): boolean {
   const now = Date.now();
+  // Self-pruning (v31.3): pruneRateLimits() was only ever called from the
+  // login route, so the map grew with every unique key for the life of the
+  // process. Opportunistic sweep keeps it bounded from the hot path itself.
+  if (hits.size > 512) pruneRateLimits();
   const h = hits.get(key);
   if (!h || now > h.reset) {
     hits.set(key, { count: 1, reset: now + windowMs });

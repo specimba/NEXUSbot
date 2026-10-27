@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import { hasBrainAccess, clampStr, isRosterAdmin } from "@/lib/brain/auth";
 import {
+  cortexCoalesce,
   cortexEchoLookup,
-  cortexEchoRemember,
-  cortexRateAllows,
   runCortex,
 } from "@/lib/brain/cortex";
 
@@ -62,23 +61,6 @@ export async function POST(req: Request) {
     return NextResponse.json(echo, { status: 200 });
   }
 
-  if (!cortexRateAllows(sender, rosterAdmin)) {
-    return NextResponse.json(
-      {
-        ok: true,
-        intent: "CHAT",
-        reply: "Hız limiti — birkaç saniye nefes al, sıra sende. 🎛",
-        // v29.19 label truth: this line is spoken by the PANEL's rate guard,
-        // not by Vyce — same principle as the v29.17 STATIC floor fix.
-        modelLabel: "PANEL // RATE_GUARD",
-        provider: "tool",
-        route: "cortex-rate",
-        telemetry: { latencyMs: 0, webSearch: "none" as const, intentMs: 0 },
-      },
-      { status: 200 },
-    );
-  }
-
   const memoryTurns = Array.isArray(body.memoryTurns)
     ? (body.memoryTurns as Array<Record<string, unknown>>)
         .filter((t) => t && (t.role === "user" || t.role === "assistant") && typeof t.content === "string")
@@ -87,20 +69,28 @@ export async function POST(req: Request) {
     : [];
 
   const channel = clampStr(body.channel, 40).toLowerCase() || "specimba";
-  const result = await runCortex({
+
+  // v31.4 — single-flight with the OFFICIAL webhook lane: both fronts watch
+  // the same live chat; when the webhook is already answering this exact
+  // message, JOIN its in-flight run — identical answer, one model spend,
+  // overlay + chat always agree (the owner measured two diverged replies per
+  // message before this). Rate verdicts return as route "cortex-rate" with
+  // the same JSON shape the widget always received.
+  const result = await cortexCoalesce({
     sender,
     prompt,
-    streamerName: clampStr(body.streamerName, 60) || "specimba",
     channel,
-    memoryTurns,
-    roomTranscript: clampStr(body.roomTranscript, 1_200),
-    isResearchHint: body.isResearchHint === true,
-  });
-  // v29.20 — the trail carries channel (conversation ring write) + the
-  // truthful memoryUsed flag for the log route's enrichment.
-  cortexEchoRemember(sender, prompt, result, {
-    channel,
-    memoryUsed: result.memoryUsed === true,
+    rosterAdmin,
+    start: () =>
+      runCortex({
+        sender,
+        prompt,
+        streamerName: clampStr(body.streamerName, 60) || "specimba",
+        channel,
+        memoryTurns,
+        roomTranscript: clampStr(body.roomTranscript, 1_200),
+        isResearchHint: body.isResearchHint === true,
+      }),
   });
 
   return NextResponse.json(result, { status: 200 });
