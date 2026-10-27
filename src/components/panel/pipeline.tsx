@@ -259,7 +259,10 @@ function Row({
             <p className="whitespace-pre-wrap break-words text-foreground/90">{row.response || "(none)"}</p>
           </div>
           <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-[10px] text-muted-foreground">
-            <span>model: {row.modelId || row.model || "—"}</span>
+            {/* v31.6 — model: lane brand · engine: the RAW id that answered
+                (beam-1.0, glm-5.3-flash, …) or the honest non-model marker. */}
+            <span>model: {row.model || "—"}</span>
+            <span>engine: {row.modelId || "—"}</span>
             <span>provider: {row.provider || "—"}</span>
             <span>route: {row.route || "—"}</span>
             <span>tokens: {row.promptTokens ?? "—"}/{row.completionTokens ?? "—"}</span>

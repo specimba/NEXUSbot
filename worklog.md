@@ -1498,3 +1498,41 @@ Stage Summary:
 - Bot replies now post as the App's BOT account (NEXUSspecimbaBOT), never the streamer identity — owner question answered with doc ground truth + a live probe; guaranteed user fallback retained for resilience.
 - Snapshot chain re-unified with the remote via a ff-only graft (no force push); durability lane unblocks on the next push.
 - Files: src/lib/connectors/kick.ts (identity ladder), src/app/api/kick/test-chat/route.ts (+identity), src/components/panel/connectors/kick-card.tsx (toast). No schema changes.
+
+---
+Task ID: 32
+Agent: Z.ai Code (main)
+Task: Owner question "Why does every answer come from Cortex, and which model is it actually? This still feels dumb." — explain the routing + make the panel answer the question itself (engine truth), plus close the pending bot-identity deep-search with live evidence.
+
+Work Log:
+- Diagnosed the confusion from fresh InteractionLog rows (DB query, last 30): every row showed route "panel-cortex/cortex-chat" while InteractionLog.modelId was HARDCODED "" (webhook leg line: modelId: "") — the panel literally could not answer which engine replied; the label (VYCE // BEAM 1.0 / EDGE // NEXUS-CORTEX / STATIC // NEXUS-CORTEX) was the only signal.
+- Explained the architecture: "Cortex" is the panel's flight controller (src/lib/brain/cortex.ts) — ONE brain, many lanes (tool lanes, Exa web, Vyce gateway model race, owner's Supabase edge lane, static floor). Lane labels: banter primary = beam-1.0, deep = claude-sonnet-4-6, backups glm-5.3-flash / deepseek-v4.1, groq = openai/gpt-oss-120b, edge = nexus-cortex function (own model race, reports activeModelId), STATIC = canned, zero model.
+- v31.6 ENGINE TRUTH: added modelId to CortexResult + RaceAttempt; tryChat carries chatComplete's resolved model id; groq lane hardcodes openai/gpt-oss-120b; edgeChatAttempt now parses the edge's activeModelId ("fallback" excluded); static floor/empty greeting carry "static-floor"; all tool lanes carry "tool:*" markers (kronos/diagnostics/ledger/cutoff-note/channel-id/identity/lexicon/rate-guard); exa lanes "exa:answer"/"exa:digest"; draw = "grok-imagine-2".
+- Both log legs wired: /api/kick/webhook writeInteractionRow writes r.modelId (was ""); /api/brain/log accepts body.modelId AND server-authoritatively overrides from the panel's own result trail (cortexResultPeek) like provider/route/tokens already did.
+- Pipeline UI: detail row now shows "model:" (lane brand) AND "engine:" (raw id) side by side (was modelId || model conflation).
+- Live probe (session-auth curl): {"modelLabel":"VYCE // BEAM 1.0","modelId":"beam-1.0","provider":"vyce","route":"cortex-chat"} — engine truth verified end-to-end; reply coherent (RE4 Remake answer).
+- Kick bot identity (pending deep-search, CLOSED with evidence): kick.ts identity ladder already answers bot-first per docs.kick.com (type:"bot" → bot+chatroom → user last resort); owner's own chat paste shows replies arriving from @NEXUSspecimbaBOT — replies are NOT posted from specimba's personal account. Added send-identity observability to the webhook (warn on failure or USER-identity fallback).
+- "Feels dumb" root cause in tonight's paste: Vyce gateway was flapping (dev.log: /api/vyce/status probes 15-17.5s, key DELETE/PUT cycles) — flights where primary+backups died fell to EDGE (11-15s, weaker persona) or the STATIC canned line (the 15.0s "bilmiyorum" row = full race outage, not the model's voice). After the owner's key rotation the last cortex calls measure 2.4-8.0s with beam-1.0 winning. Engine truth now makes this correlation VISIBLE per row.
+- Files: src/lib/brain/cortex.ts, src/app/api/kick/webhook/route.ts, src/app/api/brain/log/route.ts, src/components/panel/pipeline.tsx.
+
+Stage Summary:
+- tsc 0 errors, eslint clean. Panel /api/brain/cortex probe returns raw engine id; live verification of the pipeline "engine:" column via browser next.
+- InteractionLog rows from now on carry the real engine; historical rows keep modelId "" (UI shows "—").
+- GitHub backup still blocked on the REMOTE main divergence (owner decision: inspect/reset 7780fc41888b); agent correctly refuses force-push per directive §8.
+
+---
+Task ID: cron-20261028-0025
+Agent: cron harness review (Job 476363)
+Task: Autonomous 4h root-cause review. Health green (panel 200, kick-bridge ok/upstream live chatroom 3628172, RAM 1783MB avail, webhook 200s 6-8ms, no 401/422 storms, no doubles/emojis, no slow-route storms).
+
+Work Log:
+- REAL DEFECT FOUND (mem-watchdog): the sustained-RSS respawn path was DEAD CODE. respawn()'s grace-window liveness gate ran on it too, but a LIVE server is the precondition of the RSS path — every attempt aborted ("server came back during grace window, kill aborted"; measured in watchdog.log: 40+ min of sustained >1400MB readings, exactly one attempt reached the gate and aborted, everything else "cooldown active" silence). A genuine leak would have run to kernel-OOM unguarded.
+- SECOND HALF OF THE ROOT CAUSE: RSS_LIMIT_MB=1400 sat BELOW the measured steady-state footprint (1586-1611MB stable for hours; the header's own 2026-10-27 note saw 1744MB on a HEALTHY server) — with a working gate it would bounce a healthy server every 10min. Both bugs canceled into silence.
+- FIX (both halves together): grace gate scoped to the DEATH path only (opts.graceCheck, RSS path passes false — bouncing a live server is its intent); RSS_LIMIT_MB 1400→2200 (calibrated: +37% over steady state, >1.2GB box headroom). Current RSS 1585MB → quiet, no churn.
+- VERIFIED: bun build parse ok, panel tsc 0 + lint clean; watchdog restarted detached (new pid 10052, "started … limit 2200MB … rss-grace death-path-only" line), panel 200 throughout, dev server untouched. Golden path browser-verified: login → Connectors renders (Kick CONNECTED) → /api/kick/status 200, zero page errors.
+
+Stage Summary:
+- Watchdog's primary guarantee (RSS-bloat bounce) is real again; no restart churn on the healthy 1.6GB steady state. Death-path grace semantics preserved.
+- Owner threads unchanged: GitHub token dead + remote main diverged (backup lane owner-blocked); Kick OAuth CONNECTED (bot identity live, NEXUSspecimbaBOT).
+- RSI / routing-upgrade candidates: (1) watchdog threshold drift — any recalibration should read a measured steady-state file, not hardcode; (2) bench-cadence arena.ai kinds ×5 PARSE_FAILED (upstream format drift, recurring since cron-20261027-2025); (3) dev.sh boot still lacks the panic-aware turbo-cache heal (watchdog has it).
+- Files: mini-services/mem-watchdog/index.ts only.

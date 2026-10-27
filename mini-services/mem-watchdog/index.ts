@@ -7,8 +7,20 @@
  * every process and the boot path (ensure-dev) does not always fire, leaving
  * the panel dead with no self-healing. This watchdog:
  *   - polls the next-server tree RSS every 30s
- *   - 2 consecutive readings > 1400MB  -> kill tree + detached respawn (10-min cooldown)
+ *   - 2 consecutive readings > RSS_LIMIT_MB -> kill tree + detached respawn
+ *     (10-min cooldown). LIMIT IS 2200MB — calibrated ABOVE the measured
+ *     steady-state footprint (1586-1611MB stable for hours; the header's own
+ *     2026-10-27 measurement saw 1744MB on a HEALTHY server). The old 1400MB
+ *     sat below steady state: the watchdog permanently wanted to kill.
  *   - server dead (:3000 refused)      -> detached respawn (same cooldown)
+ *
+ * 2026-10-28 fix (cron-20261028-0025): the RSS-sustained path was DEAD CODE —
+ * respawn()'s grace-window liveness gate ran on it too, but a LIVE server is
+ * the precondition of the RSS path, so every attempt aborted with "server came
+ * back during grace window" (measured: 40+ min of sustained RSS, zero kills,
+ * while the cooldown silence hid the dead guarantee). The grace gate now
+ * guards ONLY the death path (where an external actor may have raced the
+ * double-probe); the RSS path explicitly intends to bounce a live server.
  * Respawn uses the canonical .zscripts/dev.sh path (bun install/db:push are
  * no-ops when warm) with the V8 old-space cap that prevents the bloat itself.
  *
@@ -31,7 +43,12 @@ import fs from "node:fs";
 const PROJECT = "/home/z/my-project";
 const LOG = `${import.meta.dir}/watchdog.log`;
 const PORT = 3000;
-const RSS_LIMIT_MB = 1400;
+// Calibrated 2026-10-28: steady state measured 1586-1611MB (stable, not a
+// leak — Turbopack dev holds ~1.6GB native+heap legitimately). 1400MB was
+// below steady state AND hidden by the grace-gate bug. 2200MB = +37% over
+// steady state, still >1.2GB box headroom on the 4GB no-swap host — a real
+// bloat crosses it well before the kernel OOM-killer's danger zone.
+const RSS_LIMIT_MB = 2200;
 const STRIKES_NEEDED = 2;
 const POLL_MS = 30_000;
 const COOLDOWN_MS = 10 * 60_000;
@@ -160,17 +177,20 @@ function killTree() {
   }
 }
 
-async function respawn(reason: string) {
+async function respawn(reason: string, opts: { graceCheck?: boolean } = {}) {
   const now = Date.now();
   if (now - lastActionAt < COOLDOWN_MS) {
     log(`${reason}: cooldown active, skipping respawn`);
     return;
   }
   lastActionAt = now;
-  // FINAL liveness gate: an external actor (harness, human, another restart)
-  // may have brought the server back during the grace window — never kill a
-  // server that answers at this instant.
-  if (await portUp()) {
+  // FINAL liveness gate — DEATH PATH ONLY (opts.graceCheck !== false): there,
+  // an external actor (harness, human, another restart) may have brought the
+  // server back during the double-probe window — never kill a server that
+  // answers at this instant. The RSS path MUST NOT pass here: a live server
+  // is its whole reason to fire (measured 2026-10-28: the unconditional gate
+  // turned the sustained-RSS kill into dead code for 40+ minutes).
+  if (opts.graceCheck !== false && (await portUp())) {
     log(`${reason}: server came back during grace window, kill aborted`);
     return;
   }
@@ -233,7 +253,9 @@ async function tick() {
     log(`RSS ${rss}MB > ${RSS_LIMIT_MB}MB (strike ${strikes}/${STRIKES_NEEDED})`);
     if (strikes >= STRIKES_NEEDED) {
       strikes = 0;
-      await respawn(`RSS ${rss}MB sustained`);
+      // graceCheck:false — a LIVE server is the precondition of this path;
+      // the liveness gate would always abort it (dead-code bug, fixed above).
+      await respawn(`RSS ${rss}MB sustained`, { graceCheck: false });
     }
   } else {
     if (strikes > 0) log(`RSS ${rss}MB back under limit, strikes reset`);
@@ -241,6 +263,6 @@ async function tick() {
   }
 }
 
-log(`mem-watchdog started (limit ${RSS_LIMIT_MB}MB x${STRIKES_NEEDED}, poll ${POLL_MS / 1000}s, cooldown ${COOLDOWN_MS / 60000}min)`);
+log(`mem-watchdog started (limit ${RSS_LIMIT_MB}MB x${STRIKES_NEEDED}, poll ${POLL_MS / 1000}s, cooldown ${COOLDOWN_MS / 60000}min, rss-grace death-path-only)`);
 setInterval(tick, POLL_MS);
 tick();

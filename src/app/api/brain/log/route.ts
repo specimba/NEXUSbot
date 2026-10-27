@@ -78,6 +78,10 @@ export async function POST(req: Request) {
   let memoryUsed = body.memoryUsed === true;
   let provider = clampStr(body.provider, 24).toLowerCase();
   let route = clampStr(body.route, 80);
+  // v31.6 — engine truth rides the same server-authoritative enrichment:
+  // the widget may post a stale/empty modelId, the panel's own result trail
+  // is the truth for rows it produced.
+  let finalModelId = clampStr(body.modelId, 120);
   let finalResponse = response;
   let finalLatencyMs = latencyMs;
   if (stored) {
@@ -89,6 +93,7 @@ export async function POST(req: Request) {
     );
     if (s.provider) provider = clampStr(s.provider, 24).toLowerCase();
     if (s.route) route = clampStr(`panel-cortex/${s.route}`, 80);
+    if (s.modelId) finalModelId = clampStr(s.modelId, 120);
     if (typeof stored.memoryUsed === "boolean") memoryUsed = stored.memoryUsed;
     if (!finalResponse.trim() && s.reply) {
       finalResponse = clampStr(redactSecrets(s.reply), 2000);
@@ -114,7 +119,7 @@ export async function POST(req: Request) {
       message,
       response: finalResponse,
       model: clampStr(body.model, 80),
-      modelId: clampStr(body.modelId, 120),
+      modelId: finalModelId,
       provider,
       route,
       status,

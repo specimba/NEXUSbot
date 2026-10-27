@@ -80,7 +80,9 @@ async function writeInteractionRow(opts: {
         message,
         response,
         model: clampStr(r?.modelLabel ?? "VYCE // KICK WEBHOOK", 80),
-        modelId: "",
+        // v31.6 — engine truth: the raw model id that actually answered
+        // (beam-1.0 / glm-5.3-flash / …) or the honest non-model marker.
+        modelId: clampStr(r?.modelId ?? "", 120),
         provider: clampStr(r?.provider ?? "none", 24).toLowerCase(),
         route: clampStr(r ? `panel-cortex/${r.route}` : "kick/webhook", 80),
         status: clampStr(opts.status, 24),
@@ -172,7 +174,16 @@ async function processChatMessage(payload: ChatMessagePayload, messageId: string
     ? "Çizim overlay'de hazırlanıyor."
     : result.reply;
   if (!reply.trim()) return;
-  await kickSendBotMessage(reply);
+  // v31.6 — send-identity observability: the ladder answers bot-first; a
+  // USER-identity win or a failure is diagnosable from dev.log instead of
+  // being silently swallowed (owner ask: replies must come from the BOT,
+  // never the streamer's own identity).
+  const send = await kickSendBotMessage(reply);
+  if (!send.ok) {
+    console.warn(`[kick-webhook] bot send failed code=${send.code ?? "?"}`);
+  } else if (send.identity === "user") {
+    console.warn(`[kick-webhook] bot send fell back to USER identity — bot lanes failed (code=${send.code ?? "n/a"})`);
+  }
 }
 
 export async function POST(req: Request) {

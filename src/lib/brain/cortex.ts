@@ -8,7 +8,17 @@ import { runPageRead } from "./search";
 import { buildNewsDigest, buildGeneralDigest } from "./exa-news";
 
 /**
- * NEXUS OS — Panel Cortex Engine (v31.5).
+ * NEXUS OS — Panel Cortex Engine (v31.6).
+ *
+ * v31.6 — ENGINE TRUTH (owner: "Why does every answer come from Cortex, and
+ * which model is it actually?"). Every row said route "panel-cortex/…" and
+ * InteractionLog.modelId was hardcoded "" — the panel could not answer WHICH
+ * engine produced a reply. Now every CortexResult carries modelId: the raw
+ * gateway model id for model lanes (beam-1.0 / glm-5.3-flash /
+ * deepseek-v4.1 / claude-sonnet-4-6 / openai/gpt-oss-120b / the edge's own
+ * activeModelId) or an honest non-model marker ("tool:kronos", "exa:answer",
+ * "static-floor"). Both log legs store it; the pipeline detail shows
+ * "model:" (lane brand) + "engine:" (raw id) side by side.
  *
  * v31.5 (owner paste 2026-10-29 08:28-08:36 +03 — fresh chat + interaction
  * log evidence, four failure classes in nine minutes):
@@ -248,6 +258,14 @@ export type CortexResult = {
   modelLabel: string;
   provider: string; // tool | vyce | groq | zai | static
   route: string;
+  // v31.6 — ENGINE TRUTH (owner: "which model is it actually?"). The RAW
+  // model id that actually produced the reply — beam-1.0, glm-5.3-flash,
+  // claude-sonnet-4-6, openai/gpt-oss-120b, the edge lane's own
+  // activeModelId — or an honest non-model marker ("tool:kronos",
+  // "exa:answer", "static-floor"). modelLabel is the lane brand; modelId is
+  // the engine. InteractionLog.modelId stores it verbatim so the panel can
+  // answer the question instead of hiding behind the label.
+  modelId?: string;
   // v29.18 — the winner's real token usage for the interaction log's token
   // columns. null/undefined = no chat model involved (tool / Exa-answer /
   // digest rows stay honestly —/—).
@@ -1018,6 +1036,7 @@ async function edgeChatAttempt(
   reply: string;
   usage: { prompt: number | null; completion: number | null } | null;
   edgeWebSearch: "exa-answer" | "web-fallback" | null;
+  modelId?: string;
 } | null> {
   const vars = await loadEdgeVars();
   if (!vars) return null;
@@ -1063,6 +1082,9 @@ async function edgeChatAttempt(
     const data = (await res.json()) as {
       ok?: boolean;
       reply?: string;
+      // v31.6 — the edge function reports the model that actually answered
+      // (nexus-cortex Win.activeModelId; "fallback" on its canned leg).
+      activeModelId?: string;
       usage?: { prompt?: number; completion?: number; prompt_tokens?: number; completion_tokens?: number } | null;
       telemetry?: { webSearch?: string; webSearchProvider?: string };
     };
@@ -1091,7 +1113,20 @@ async function edgeChatAttempt(
           ? "exa-answer"
           : "web-fallback"
         : null;
-    return usable ? { reply: cleanReply(reply), usage, edgeWebSearch } : null;
+    return usable
+      ? {
+          reply: cleanReply(reply),
+          usage,
+          edgeWebSearch,
+          // v31.6 — engine truth for edge wins: the edge's own raw model id
+          // (same Vyce catalog). "fallback" = the edge's canned leg, already
+          // excluded by the usable gate — never surface it as an engine.
+          modelId:
+            data.activeModelId && data.activeModelId !== "fallback" && data.activeModelId !== "EDGE // CORTEX FALLBACK"
+              ? data.activeModelId
+              : undefined,
+        }
+      : null;
   } catch {
     noteHealth("edge", false, Date.now() - started);
     return null;
@@ -1140,6 +1175,8 @@ type RaceAttempt = {
   modelLabel: string;
   content: string | null;
   latencyMs: number;
+  // v31.6 — the winning lane's raw model id (see CortexResult.modelId).
+  modelId?: string;
   // v29.18 — winner's usage (token columns) + the edge lane's web truth.
   usage?: { prompt: number | null; completion: number | null } | null;
   edgeWebSearch?: "exa-answer" | "web-fallback" | null;
@@ -1170,6 +1207,9 @@ async function raceModel(
         ? {
             provider,
             modelLabel: label,
+            // v31.6 — the exact model id the gateway answered with (chatComplete
+            // echoes the resolved id back) — beam-1.0, glm-5.3-flash, etc.
+            modelId: r.model,
             content: cleanReply(content),
             latencyMs: Date.now() - started,
             usage: r.usage ? { prompt: r.usage.prompt, completion: r.usage.completion } : null,
@@ -1240,7 +1280,14 @@ async function raceModel(
       (c) =>
         resolveGroq(
           c
-            ? { provider: "groq", modelLabel: "VYCE // GROQ OSS", content: cleanReply(c.content), latencyMs: 0, usage: c.usage }
+            ? {
+                provider: "groq",
+                modelLabel: "VYCE // GROQ OSS",
+                modelId: "openai/gpt-oss-120b",
+                content: cleanReply(c.content),
+                latencyMs: 0,
+                usage: c.usage,
+              }
             : null,
         ),
       () => resolveGroq(null),
@@ -1317,7 +1364,15 @@ async function raceModel(
   const edgeP = edgeChatAttempt(req, messages, Math.min(15_000, Math.max(4_000, remaining()))).then(
     (e): RaceAttempt | null =>
       e
-        ? { provider: "edge", modelLabel: "EDGE // NEXUS-CORTEX", content: e.reply, latencyMs: 0, usage: e.usage, edgeWebSearch: e.edgeWebSearch }
+        ? {
+            provider: "edge",
+            modelLabel: "EDGE // NEXUS-CORTEX",
+            modelId: e.modelId,
+            content: e.reply,
+            latencyMs: 0,
+            usage: e.usage,
+            edgeWebSearch: e.edgeWebSearch,
+          }
         : null,
   );
 
@@ -1383,6 +1438,7 @@ async function raceModel(
   return {
     provider: "static",
     modelLabel: STATIC_FLOOR_LABEL,
+    modelId: "static-floor", // v31.6 — honest marker: NO model answered
     content: null,
     latencyMs: 0,
     fallbackLine: pickStaticFloorLine(),
@@ -1428,7 +1484,7 @@ async function urlAnswer(
   url: string,
   deadline: number,
   selfRecap: SelfRecap | null = null,
-): Promise<{ reply: string; sources: CortexSource[]; webSearch: CortexResult["telemetry"]["webSearch"]; provider: string; modelLabel: string; usage?: { prompt: number | null; completion: number | null } | null } | null> {
+): Promise<{ reply: string; sources: CortexSource[]; webSearch: CortexResult["telemetry"]["webSearch"]; provider: string; modelLabel: string; modelId?: string; usage?: { prompt: number | null; completion: number | null } | null } | null> {
   const question = clampStr(req.prompt.replace(URL_RE, "").replace(/\s{2,}/g, " ").trim(), 300) || "Bu sayfada ne var, kısaca özetle";
 
   // BOTH readers in parallel — first usable page wins. MEASURED 02:10 +03:
@@ -1587,6 +1643,7 @@ async function urlAnswer(
       webSearch: "page-read",
       provider: "exa",
       modelLabel: "VYCE // PAGE READ",
+      modelId: "page-read", // v31.6 — verbatim quote path, no engine
       usage: null,
     };
   }
@@ -1596,6 +1653,7 @@ async function urlAnswer(
     webSearch: "page-read",
     provider: r.provider,
     modelLabel: r.modelLabel,
+    modelId: r.modelId, // v31.6 engine truth
     usage: r.usage ?? null,
   };
 }
@@ -1636,7 +1694,7 @@ async function researchAnswer(
   // lanes read the same window as chat lanes, so follow-ups ("evet isterim",
   // "peki o zaman") keep their antecedent when research falls to a model.
   ladder: Array<{ role: "user" | "assistant"; content: string }> = [],
-): Promise<{ reply: string; sources: CortexSource[]; webSearch: CortexResult["telemetry"]["webSearch"]; provider: string; modelLabel: string; usage?: { prompt: number | null; completion: number | null } | null; ladderUsed?: boolean }> {
+): Promise<{ reply: string; sources: CortexSource[]; webSearch: CortexResult["telemetry"]["webSearch"]; provider: string; modelLabel: string; modelId?: string; usage?: { prompt: number | null; completion: number | null } | null; ladderUsed?: boolean }> {
   // URL prompts get the fetch-first path — never a blind prior answer.
   const selfRecap = await buildSelfRecap(req.channel || "specimba");
   const urlHit = req.prompt.match(URL_RE);
@@ -1683,7 +1741,7 @@ async function researchAnswer(
     if (ans.ok && ans.answer) {
       noteHealth("exa", true, Date.now() - started);
       const sources = (ans.citations ?? []).slice(0, 3).map((c) => ({ title: c.title ?? "", url: c.url ?? "" }));
-      return { reply: cleanReply(ans.answer), sources, webSearch: "exa-answer", provider: "exa", modelLabel: "EXA / ANSWER", usage: null };
+      return { reply: cleanReply(ans.answer), sources, webSearch: "exa-answer", provider: "exa", modelLabel: "EXA / ANSWER", modelId: "exa:answer", usage: null };
     }
     noteHealth("exa", false, Date.now() - started);
   }
@@ -1709,6 +1767,7 @@ async function researchAnswer(
       webSearch: "web-fallback",
       provider: r.provider,
       modelLabel: r.content ? r.modelLabel : "VYCE // EXA RESEARCH",
+      modelId: r.content ? r.modelId : "web-fallback",
       usage: r.usage ?? null,
       ladderUsed: ladder.length > 0,
     };
@@ -1723,7 +1782,7 @@ async function researchAnswer(
     { role: "user", content: `${query}\n\n(Not: şu an canlı web doğrulaması yapamıyorsun — bildiğin kadarıyla net cevap ver, emin değilsen bunu açıkça söyle.)` },
   ];
   const r = await raceModel(messages, true, req, Math.min(deadline, Date.now() + CORTEX_DEADLINE_MS));
-  return { reply: r.content || r.fallbackLine || "Bu soruda canlı kaynak şu an kapalı — bildiğim kadarıyla cevap veremem ama birkaç dakika sonra tekrar dene.", sources: [], webSearch: "skipped", provider: r.provider, modelLabel: r.content ? r.modelLabel : STATIC_FLOOR_LABEL, usage: r.usage ?? null, ladderUsed: ladder.length > 0 };
+  return { reply: r.content || r.fallbackLine || "Bu soruda canlı kaynak şu an kapalı — bildiğim kadarıyla cevap veremem ama birkaç dakika sonra tekrar dene.", sources: [], webSearch: "skipped", provider: r.provider, modelLabel: r.content ? r.modelLabel : STATIC_FLOOR_LABEL, modelId: r.content ? r.modelId : "static-floor", usage: r.usage ?? null, ladderUsed: ladder.length > 0 };
 }
 
 // ---------------------------------------------------------------------------
@@ -1773,6 +1832,7 @@ async function runCortexCore(req: CortexRequest): Promise<CortexResult> {
       intent: "CHAT",
       reply: "Buradayım çete, hatlar açık — sorunu net yaz, hemen bakıyorum. 🎙",
       modelLabel: STATIC_FLOOR_LABEL,
+      modelId: "static-floor", // v31.6 — canned greeting, no engine behind it
       provider: "tool",
       route: "cortex-empty",
       telemetry: { latencyMs: Date.now() - started, webSearch: "none", intentMs: 0 },
@@ -1825,7 +1885,7 @@ async function runCortexCore(req: CortexRequest): Promise<CortexResult> {
     const reply = answerTime(prompt, sender);
     noteHealth("tool", true, 0);
     return {
-      ok: true, intent, reply, modelLabel: "VYCE // KRONOS", provider: "tool", route: "cortex-time",
+      ok: true, intent, reply, modelLabel: "VYCE // KRONOS", modelId: "tool:kronos", provider: "tool", route: "cortex-time",
       telemetry: { latencyMs: Date.now() - started, webSearch: "none", intentMs },
     };
   }
@@ -1834,7 +1894,7 @@ async function runCortexCore(req: CortexRequest): Promise<CortexResult> {
   if (intent === "STATUS") {
     const reply = await answerStatus(sender);
     return {
-      ok: true, intent, reply, modelLabel: "VYCE // DIAGNOSTICS", provider: "tool", route: "cortex-status",
+      ok: true, intent, reply, modelLabel: "VYCE // DIAGNOSTICS", modelId: "tool:diagnostics", provider: "tool", route: "cortex-status",
       telemetry: { latencyMs: Date.now() - started, webSearch: "none", intentMs },
     };
   }
@@ -1845,7 +1905,7 @@ async function runCortexCore(req: CortexRequest): Promise<CortexResult> {
     return {
       ok: true, intent,
       reply: subject ? "" : "Ne çizmemi istiyorsun? Örnek: '!ai bana bir kedi çiz' 🎨",
-      modelLabel: "VYCE // GROK-IMAGINE-2", provider: "tool", route: "cortex-draw",
+      modelLabel: "VYCE // GROK-IMAGINE-2", modelId: "grok-imagine-2", provider: "tool", route: "cortex-draw",
       drawSubject: subject || undefined,
       telemetry: { latencyMs: Date.now() - started, webSearch: "none", intentMs },
     };
@@ -1861,7 +1921,7 @@ async function runCortexCore(req: CortexRequest): Promise<CortexResult> {
     noteHealth("tool", true, 0);
     return {
       ok: true, intent, reply: recapChatReply(rec),
-      modelLabel: "VYCE // KAYIT HAT", provider: "tool", route: "cortex-recap",
+      modelLabel: "VYCE // KAYIT HAT", modelId: "tool:ledger", provider: "tool", route: "cortex-recap",
       telemetry: { latencyMs: Date.now() - started, webSearch: "none", intentMs },
     };
   }
@@ -1877,7 +1937,7 @@ async function runCortexCore(req: CortexRequest): Promise<CortexResult> {
     noteHealth("tool", true, 0);
     return {
       ok: true, intent, reply,
-      modelLabel: "VYCE // KAYNAK HAT", provider: "tool", route: "cortex-meta",
+      modelLabel: "VYCE // KAYNAK HAT", modelId: "tool:cutoff-note", provider: "tool", route: "cortex-meta",
       telemetry: { latencyMs: Date.now() - started, webSearch: "none" as const, intentMs },
     };
   }
@@ -1893,7 +1953,7 @@ async function runCortexCore(req: CortexRequest): Promise<CortexResult> {
     noteHealth("tool", true, 0);
     return {
       ok: true, intent, reply,
-      modelLabel: "VYCE // KIMLIK HAT", provider: "tool", route: "cortex-identity",
+      modelLabel: "VYCE // KIMLIK HAT", modelId: "tool:channel-id", provider: "tool", route: "cortex-identity",
       telemetry: { latencyMs: Date.now() - started, webSearch: "none" as const, intentMs },
     };
   }
@@ -1937,7 +1997,7 @@ async function runCortexCore(req: CortexRequest): Promise<CortexResult> {
       return {
         ok: true, intent: "CHAT",
         reply: `VYCE'im — ${streamerName} kanalının AI komutanı. Sohbet, espri, araştırma; hepsi benim işim.`,
-        modelLabel: "VYCE // KIMLIK HAT", provider: "tool", route: "cortex-who",
+        modelLabel: "VYCE // KIMLIK HAT", modelId: "tool:identity", provider: "tool", route: "cortex-who",
         telemetry: { latencyMs: Date.now() - started, webSearch: "none" as const, intentMs },
       };
     }
@@ -1969,7 +2029,7 @@ Kayıtta mesaj varsa: kim olduğunu bu mesajlardan çıkar, 1-3 cümle esprili �
           r.content ||
           r.fallbackLine ||
           `@${askedNick} kayıtlarımda net görünmüyor — kamera yok elimde ama sohbet var: bir şeyler yazsın, tanışırız.`,
-        modelLabel: r.modelLabel, provider: r.provider, route: "cortex-who",
+        modelLabel: r.modelLabel, modelId: r.modelId, provider: r.provider, route: "cortex-who",
         promptTokens: r.usage?.prompt ?? null,
         completionTokens: r.usage?.completion ?? null,
         memoryUsed,
@@ -1988,7 +2048,7 @@ Kayıtta mesaj varsa: kim olduğunu bu mesajlardan çıkar, 1-3 cümle esprili �
       if (n) {
         return {
           ok: true, intent: "RESEARCH", reply: n.reply,
-          modelLabel: "VYCE // EXA DIGEST", provider: "exa", route: "cortex-news", sources: n.sources,
+          modelLabel: "VYCE // EXA DIGEST", modelId: "exa:digest", provider: "exa", route: "cortex-news", sources: n.sources,
           memoryUsed: false,
           telemetry: { latencyMs: Date.now() - started, webSearch: "exa-answer", intentMs },
         };
@@ -2000,6 +2060,7 @@ Kayıtta mesaj varsa: kim olduğunu bu mesajlardan çıkar, 1-3 cümle esprili �
     return {
       ok: true, intent: "RESEARCH", reply: r.reply,
       modelLabel: exaUsed ? "VYCE // EXA ANSWER" : r.modelLabel,
+      modelId: exaUsed ? "exa:answer" : r.modelId, // v31.6 engine truth
       provider: exaUsed ? "exa" : r.provider,
       route: "cortex-research", sources: r.sources,
       promptTokens: r.usage?.prompt ?? null,
@@ -2033,7 +2094,7 @@ Kayıtta mesaj varsa: kim olduğunu bu mesajlardan çıkar, 1-3 cümle esprili �
       return {
         ok: true, intent,
         reply: `"${term}" klavye kahkahası kanka — hahahaha demek. jsjsjs, xaxa, hehe, kekeke hepsi aynı aile: gülme sesi.`,
-        modelLabel: "VYCE // ARGO HAT", provider: "tool", route: "cortex-slang",
+        modelLabel: "VYCE // ARGO HAT", modelId: "tool:lexicon", provider: "tool", route: "cortex-slang",
         telemetry: { latencyMs: Date.now() - started, webSearch: "none" as const, intentMs },
       };
     }
@@ -2052,7 +2113,7 @@ Kayıtta mesaj varsa: kim olduğunu bu mesajlardan çıkar, 1-3 cümle esprili �
   const r = await raceModel(messages, deep, req, deadline);
   return {
     ok: true, intent, reply: r.content || r.fallbackLine || "Hat bir an karıştı — tekrar at, toparlıyorum. 🎧",
-    modelLabel: r.modelLabel, provider: r.provider, route: "cortex-chat",
+    modelLabel: r.modelLabel, modelId: r.modelId, provider: r.provider, route: "cortex-chat",
     promptTokens: r.usage?.prompt ?? null,
     completionTokens: r.usage?.completion ?? null,
     memoryUsed,
@@ -2299,6 +2360,7 @@ export function cortexRateGuardResult(): CortexResult {
     intent: "CHAT",
     reply: RATE_GUARD_LINE,
     modelLabel: "PANEL // RATE_GUARD",
+    modelId: "tool:rate-guard", // v31.6 — deterministic, no engine
     provider: "tool",
     route: "cortex-rate",
     telemetry: { latencyMs: 0, webSearch: "none" as const, intentMs: 0 },
