@@ -59,11 +59,14 @@ export type BrainAnswerResponse = {
 export type ResearchEffort = "low" | "medium" | "high" | "xhigh" | "ultra";
 
 export const RESEARCH_EFFORTS: ReadonlyArray<{ value: ResearchEffort; label: string }> = [
-  { value: "low", label: "low · $0.50 cap" },
-  { value: "medium", label: "medium · $1 cap" },
-  { value: "high", label: "high · $3 cap" },
-  { value: "xhigh", label: "xhigh · $5 cap" },
-  { value: "ultra", label: "ultra · $10 cap" },
+  // v33 — labels switched to MEASURED costs (live probe runs 2026-10-27:
+  // low ≈ $0.03/15s/3 searches, medium ≈ $0.15/60s/12 searches,
+  // high ≈ $0.50/160s/60 searches; xhigh/ultra scale up from high).
+  { value: "low", label: "low · ~$0.03 / ~15s" },
+  { value: "medium", label: "medium · ~$0.15 / ~60s" },
+  { value: "high", label: "high · ~$0.50 / ~3min" },
+  { value: "xhigh", label: "xhigh · ~$1+ / ~5min" },
+  { value: "ultra", label: "ultra · ~$2+ / ~10min" },
 ];
 
 /** Row shape from GET /api/exa/research (list) and POST /api/exa/research (launch) */

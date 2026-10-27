@@ -2,6 +2,7 @@
 
 import { CustomProvidersCard } from "@/components/panel/connectors/custom-providers-card";
 import { ExaCard } from "@/components/panel/connectors/exa-card";
+import { ExaResearchCard } from "@/components/panel/connectors/exa-research-card";
 import { GitHubCard } from "@/components/panel/connectors/github-card";
 import { HyperbrowserCard } from "@/components/panel/connectors/hyperbrowser-card";
 import { KickCard } from "@/components/panel/connectors/kick-card";
@@ -32,6 +33,11 @@ export function ConnectorsTab() {
         <WebshareCard />
         <GitHubCard />
       </div>
+      {/* v33 — MOUNTED (was dead code since 15-b): the Deep Research card is
+       * the panel lane of the same Exa Agent engine the chat now uses —
+       * launch a run, watch the ledger, read the AI News Radar. Sits between
+       * the connector grid and the custom providers, full-width. */}
+      <ExaResearchCard />
       <CustomProvidersCard />
     </div>
   );

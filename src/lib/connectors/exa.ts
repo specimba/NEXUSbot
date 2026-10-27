@@ -150,7 +150,7 @@ export type ExaUsage = {
 const USAGE_KEY = "exa.usage";
 const BUDGET_KEY = "exa.budget";
 /** Aggressive-by-design defaults — expiring credits are wasted credits. */
-export const EXA_BUDGET_DEFAULTS = { dailySearch: 150, dailyAnswer: 80, dailyContents: 200 } as const;
+export const EXA_BUDGET_DEFAULTS = { dailySearch: 150, dailyAnswer: 80, dailyContents: 200, dailyAgent: 20 } as const;
 
 function todayUtc(): string {
   return new Date().toISOString().slice(0, 10);
@@ -214,7 +214,7 @@ export async function bumpExaUsage(
   return u;
 }
 
-export type ExaBudget = { dailySearch: number; dailyAnswer: number; dailyContents: number };
+export type ExaBudget = { dailySearch: number; dailyAnswer: number; dailyContents: number; dailyAgent: number };
 
 export async function getExaBudget(): Promise<ExaBudget> {
   const row = await db.setting.findUnique({ where: { key: BUDGET_KEY } }).catch(() => null);
@@ -225,6 +225,8 @@ export async function getExaBudget(): Promise<ExaBudget> {
         dailySearch: Number(p.dailySearch ?? EXA_BUDGET_DEFAULTS.dailySearch),
         dailyAnswer: Number(p.dailyAnswer ?? EXA_BUDGET_DEFAULTS.dailyAnswer),
         dailyContents: Number(p.dailyContents ?? EXA_BUDGET_DEFAULTS.dailyContents),
+        // v33 — agent runs budget (Exa Agent /agent/runs ledger, kind "agent")
+        dailyAgent: Number(p.dailyAgent ?? EXA_BUDGET_DEFAULTS.dailyAgent),
       };
     } catch {
       /* fall through to defaults */
@@ -239,6 +241,7 @@ export async function setExaBudget(patch: Partial<ExaBudget>): Promise<ExaBudget
     dailySearch: Math.max(0, Math.min(1000, Math.round(patch.dailySearch ?? cur.dailySearch))),
     dailyAnswer: Math.max(0, Math.min(1000, Math.round(patch.dailyAnswer ?? cur.dailyAnswer))),
     dailyContents: Math.max(0, Math.min(2000, Math.round(patch.dailyContents ?? cur.dailyContents))),
+    dailyAgent: Math.max(0, Math.min(60, Math.round(patch.dailyAgent ?? cur.dailyAgent))),
   };
   await db.setting
     .upsert({
@@ -251,10 +254,14 @@ export async function setExaBudget(patch: Partial<ExaBudget>): Promise<ExaBudget
 }
 
 /** Honest gate — the caller decides how to degrade when false. */
-export async function exaBudgetAllows(kind: "search" | "answer" | "contents"): Promise<boolean> {
+export async function exaBudgetAllows(
+  kind: "search" | "answer" | "contents" | "agent",
+): Promise<boolean> {
   const [usage, budget] = await Promise.all([getExaUsage(), getExaBudget()]);
   if (kind === "search") return usage.search < budget.dailySearch;
   if (kind === "answer") return usage.answers < budget.dailyAnswer;
+  // v33 — Exa Agent runs (high-compute research); measured ~$0.10-0.50/run.
+  if (kind === "agent") return usage.agentRuns < budget.dailyAgent;
   return usage.contentsPages < budget.dailyContents;
 }
 
@@ -646,4 +653,220 @@ export async function readWebhookInbox(): Promise<ExaWebhookItem[]> {
   } catch {
     return [];
   }
+}
+
+// ---------------------------------------------------------------------------
+// Agent runs (v33) — Exa's high-compute research agent with frontier-LLM
+// synthesis and structured data sources (Polymarket, Pyth, …).
+//
+// MEASURED with the live vault key, 2026-10-27 19:2x +03 (probe series
+// temp-exa-agent-probe*.ts):
+//   POST https://api.exa.ai/agent/runs  {query, effort, outputSchema?, dataSources?}
+//     → 200 {id:"agent_run_…", object:"agent_run", status:"queued"|"running",
+//            request:{…}, output:{text, structured, grounding[]},
+//            usage:{agentComputeUnits, searches, dataSources:{polymarket:N}},
+//            costDollars:{total, agentCompute, search, dataSources:{}},
+//            stopReason, createdAt, completedAt}
+//     → 400 INVALID_REQUEST  (zod detail: query string required; effort enum
+//          minimal|low|base|medium|high|xhigh|ultra|auto)
+//     → 400 INVALID_DATA_SOURCE {unknown:[…]} for bad provider strings
+//   GET  /agent/runs/{id}      → same object; status "completed"|"failed",
+//          stopReason "schema_satisfied", completedAt set
+//   GET  /agent/runs/{id}/events → {object:"list", data:[…]} (streaming; unused)
+//   COST (real runs):  effort low ≈ $0.025 / ~15s / 3 searches
+//                      effort medium ≈ $0.10-0.16 / ~60s / 12 searches
+//                      effort high ≈ $0.50 / ~160s / 60 searches
+//   DATA SOURCE STRINGS (validated live): polymarket, financial_datasets,
+//     particle, pyth, fiber, baselayer, affiliate.
+// ---------------------------------------------------------------------------
+
+export type ExaAgentEffort = "low" | "medium" | "high" | "xhigh" | "ultra";
+
+export type ExaAgentRunOpts = {
+  query: string;
+  effort: ExaAgentEffort;
+  /** e.g. [{provider:"polymarket"}] — validated strings in the header. */
+  dataSources?: Array<{ provider: string }>;
+  /** JSON schema; the agent returns output.structured matching it. */
+  outputSchema?: Record<string, unknown>;
+  /** Wall-clock poll budget; on expiry the run is NOT cancelled (cost may
+   *  still land at Exa) — the caller just stops waiting. */
+  pollBudgetMs?: number;
+};
+
+export type ExaAgentCitation = { title: string; url: string };
+
+export type ExaAgentRunOutcome =
+  | {
+      ok: true;
+      runId: string;
+      status: "completed" | "failed";
+      answer: string;
+      keyFacts: string[];
+      confidence: string;
+      asOf: string;
+      citations: ExaAgentCitation[];
+      structured: Record<string, unknown> | null;
+      rawText: string;
+      costUsd: number | null;
+      tookMs: number;
+      effort: string;
+      stopReason: string | null;
+    }
+  | { ok: false; error: string; tookMs: number; runId?: string };
+
+/** Effort → wall-clock poll budget default (measured latencies + margin). */
+const AGENT_POLL_BUDGET_MS: Record<ExaAgentEffort, number> = {
+  low: 60_000,
+  medium: 150_000,
+  high: 300_000,
+  xhigh: 420_000,
+  ultra: 600_000,
+};
+
+function agentCitations(
+  grounding: Array<{ citations?: Array<{ url?: string; title?: string }> }>,
+): ExaAgentCitation[] {
+  const out: ExaAgentCitation[] = [];
+  const seen = new Set<string>();
+  for (const g of grounding ?? []) {
+    for (const c of g.citations ?? []) {
+      const url = clampStr(c.url ?? "", 300);
+      if (!url || seen.has(url)) continue;
+      seen.add(url);
+      out.push({ title: clampStr(c.title ?? "", 140), url });
+      if (out.length >= 6) return out;
+    }
+  }
+  return out;
+}
+
+/**
+ * Create an agent run and poll it to completion. The structured output
+ * contract the brain uses everywhere (Turkish chat answers):
+ *   {answer, confidence, keyFacts[], asOf} — prefer output.structured,
+ *   fall back to parsing output.text as JSON (measured on runs where the
+ *   text field carried the schema string), then raw text.
+ */
+export async function exaAgentRun(opts: ExaAgentRunOpts): Promise<ExaAgentRunOutcome> {
+  const started = Date.now();
+  const query = clampStr(opts.query, 2_000).trim();
+  if (!query) return { ok: false, error: "empty query", tookMs: 0 };
+
+  if (!(await exaBudgetAllows("agent"))) {
+    return { ok: false, error: "budget exhausted (daily agent-run cap)", tookMs: Date.now() - started };
+  }
+  const key = await getExaKey();
+  if (!key) return { ok: false, error: "EXA_API_KEY not configured", tookMs: Date.now() - started };
+
+  const body: Record<string, unknown> = { query, effort: opts.effort };
+  if (opts.outputSchema) body.outputSchema = opts.outputSchema;
+  if (opts.dataSources?.length) body.dataSources = opts.dataSources.slice(0, 5);
+
+  const create = await exaFetch<{
+    id?: string;
+    status?: string;
+    output?: { text?: string; structured?: Record<string, unknown> | null; grounding?: Array<{ citations?: Array<{ url?: string; title?: string }> }> };
+    costDollars?: { total?: number };
+    error?: unknown;
+  }>("/agent/runs", body);
+  if (!create.ok) {
+    await bumpExaUsage("agent", 0, { error: create.error });
+    return { ok: false, error: create.error, tookMs: Date.now() - started };
+  }
+  const runId = create.data.id ?? "";
+  if (!runId) return { ok: false, error: "agent run created without id", tookMs: Date.now() - started };
+
+  // Poll loop — interval scaled to the expected latency (2.5s for chat-fit
+  // efforts, 5s for the long ones). Budget measured per effort + margin.
+  const pollEvery = opts.effort === "low" || opts.effort === "medium" ? 2_500 : 5_000;
+  const budget = opts.pollBudgetMs ?? AGENT_POLL_BUDGET_MS[opts.effort];
+  let last: {
+    status?: string;
+    stopReason?: string | null;
+    output?: { text?: string; structured?: Record<string, unknown> | null; grounding?: Array<{ citations?: Array<{ url?: string; title?: string }> }> };
+    costDollars?: { total?: number };
+    error?: unknown;
+  } = create.data;
+
+  while (Date.now() - started < budget) {
+    if (last.status === "completed" || last.status === "failed") break;
+    await new Promise((r) => setTimeout(r, pollEvery));
+    const poll = await exaFetch<typeof last>(`/agent/runs/${encodeURIComponent(runId)}`, null, EXA_TIMEOUT_MS, "GET");
+    if (poll.ok) {
+      last = poll.data;
+      continue;
+    }
+    // Transient poll error — keep polling while budget remains.
+  }
+
+  const tookMs = Date.now() - started;
+  if (last.status !== "completed" && last.status !== "failed") {
+    await bumpExaUsage("agent", 1, { estCostUsd: last.costDollars?.total ?? 0.1 });
+    return {
+      ok: false,
+      runId,
+      error: `agent still ${last.status ?? "running"} after ${Math.round(budget / 1000)}s (run continues at Exa; result not collected)`,
+      tookMs,
+    };
+  }
+  if (last.status === "failed") {
+    const errText =
+      typeof last.error === "string"
+        ? last.error
+        : last.error && typeof last.error === "object"
+          ? clampStr(JSON.stringify(last.error), 200)
+          : "agent run failed";
+    await bumpExaUsage("agent", 1, { error: clampStr(errText, 200), estCostUsd: last.costDollars?.total ?? 0 });
+    return { ok: false, runId, error: errText, tookMs };
+  }
+
+  // Completed — prefer structured, then JSON-string-in-text, then raw text.
+  const out = last.output ?? {};
+  let answer = "";
+  let keyFacts: string[] = [];
+  let confidence = "";
+  let asOf = "";
+  let structured = out.structured ?? null;
+  if (!structured && out.text) {
+    const t = out.text.trim();
+    if (t.startsWith("{")) {
+      try {
+        structured = JSON.parse(t) as Record<string, unknown>;
+      } catch {
+        /* plain markdown text — fall through */
+      }
+    }
+  }
+  if (structured) {
+    answer = typeof structured.answer === "string" ? structured.answer : "";
+    confidence = typeof structured.confidence === "string" ? structured.confidence : "";
+    asOf = typeof structured.asOf === "string" ? structured.asOf : "";
+    if (Array.isArray(structured.keyFacts)) {
+      keyFacts = structured.keyFacts.filter((f): f is string => typeof f === "string").slice(0, 5);
+    }
+  }
+  if (!answer) answer = out.text ?? "";
+  if (!answer.trim()) {
+    await bumpExaUsage("agent", 1, { error: "completed with empty output", estCostUsd: last.costDollars?.total ?? 0 });
+    return { ok: false, runId, error: "agent completed with empty output", tookMs };
+  }
+
+  await bumpExaUsage("agent", 1, { estCostUsd: last.costDollars?.total ?? 0.1 });
+  return {
+    ok: true,
+    runId,
+    status: "completed",
+    answer: clampStr(answer, 4_000),
+    keyFacts: keyFacts.map((f) => clampStr(f, 220)),
+    confidence,
+    asOf,
+    citations: agentCitations(out.grounding ?? []),
+    structured,
+    rawText: clampStr(out.text ?? "", 4_000),
+    costUsd: last.costDollars?.total ?? null,
+    tookMs,
+    effort: opts.effort,
+    stopReason: last.stopReason ?? null,
+  };
 }

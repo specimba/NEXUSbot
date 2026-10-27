@@ -10,6 +10,7 @@ import {
   type CortexResult,
 } from "@/lib/brain/cortex";
 import { getKickChatReplies, kickSendBotMessage, loadKickOAuth, verifyKickWebhook } from "@/lib/connectors/kick";
+import { queueDeepResearch, type DeepResearchKind } from "@/lib/brain/deep-research";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -169,6 +170,28 @@ async function processChatMessage(payload: ChatMessagePayload, messageId: string
   const oauth = await loadKickOAuth();
   const repliesOn = await getKickChatReplies();
   if (!oauth || !repliesOn) return; // connected-only feature; toggle respected
+
+  // v33 — the holding line promised a grounded follow-up: arm the background
+  // agent run (Exa Agent + HyperAgent ladder, budgets inside the module —
+  // single-flight + 120s cooldown keep chat spam from burning credits). The
+  // reply below (holding line) posts FIRST; the follow-up posts when the
+  // agent lanes finish, with its own InteractionLog row (engine truth:
+  // exa:agent:medium / hyper:agent:*). Replies toggle OFF ⇒ no credits burn.
+  // The ECHO route is included: when the overlay's flight finished first the
+  // webhook receives the replay copy (route cortex-echo) — the chat STILL
+  // needs the promised follow-up armed (measured same-second race class,
+  // v31.4's coalesce/echo machinery). queueDeepResearch's own single-flight
+  // + cooldown make double-arming harmless.
+  const deepEchoArm =
+    result.route === "cortex-echo" && result.deepResearch ? result.deepResearch : null;
+  const deepArm = result.route === "cortex-deep-queued" && result.deepResearch ? result.deepResearch : deepEchoArm;
+  if (deepArm) {
+    const kind = (deepArm.kind === "poll" || deepArm.kind === "market" ? deepArm.kind : "news") as DeepResearchKind;
+    const effort = ["low", "medium", "high", "xhigh", "ultra"].includes(deepArm.effort)
+      ? (deepArm.effort as "low" | "medium" | "high" | "xhigh" | "ultra")
+      : "medium";
+    void queueDeepResearch({ channel, sender, prompt, kind, effort }).catch(() => undefined);
+  }
 
   const reply = result.drawSubject
     ? "Çizim overlay'de hazırlanıyor."

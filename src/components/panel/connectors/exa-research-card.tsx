@@ -361,8 +361,11 @@ export function ExaResearchCard() {
           Exa Deep Research
         </CardTitle>
         <CardDescription>
-          Async Exa Agent runs — exhaustive multi-source research with citations. Effort sets the
-          per-run cost cap: low $0.50 · medium $1 · high $3 · xhigh $5 · ultra $10.
+          Async Exa Agent runs — exhaustive multi-source research with citations and live
+          data sources (Polymarket for polls/odds, Pyth for prices). Measured per-run
+          cost: low ~$0.03/15s · medium ~$0.15/60s · high ~$0.50/3min · ultra ~$2+/10min.
+          Polls and live-data questions in the chat now trigger the same engine
+          automatically with a follow-up message.
         </CardDescription>
       </CardHeader>
 

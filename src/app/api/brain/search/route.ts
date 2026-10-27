@@ -27,7 +27,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
 
-  let body: { query?: unknown; url?: unknown; num?: unknown; recencyDays?: unknown; answer?: unknown };
+  let body: { query?: unknown; url?: unknown; num?: unknown; recencyDays?: unknown; answer?: unknown; mode?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -52,7 +52,11 @@ export async function POST(req: Request) {
   }
   const num = typeof body.num === "number" ? body.num : undefined;
   const recencyDays = typeof body.recencyDays === "number" ? body.recencyDays : undefined;
-  const wantAnswer = body.answer === true;
+  // v33 — the Deep Research card sends {mode:"answer"} (its declared
+  // contract); the overlay widget sends {answer:true}. Accept both so the
+  // card's Grounded-answer section actually gets /answer (it silently fell
+  // to snippet-search since 15-b shipped).
+  const wantAnswer = body.answer === true || body.mode === "answer";
 
   // 1) Exa answer — grounded synthesis with citations.
   if (wantAnswer) {
@@ -72,6 +76,9 @@ export async function POST(req: Request) {
           : ans.answer,
         tookMs: ans.tookMs,
         estCostUsd: ans.estCostUsd,
+        // v33 — the card's declared contract reads costDollars (exa-api.ts);
+        // estCostUsd alone left the cost line blank since 15-b.
+        costDollars: ans.estCostUsd,
       });
     }
     // fall through to search ladder on failure — answer mode is best-effort

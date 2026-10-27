@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { chatComplete, type BrainMessage } from "@/lib/ai/client";
 import { loadGroqKey } from "@/lib/ai/groq";
 import { exaAnswer, exaContents, getExaKey } from "@/lib/connectors/exa";
+import { classifyDeepResearch, deepResearchAvailable } from "@/lib/brain/deep-research";
 import { runPageRead } from "./search";
 import { buildNewsDigest, buildGeneralDigest } from "./exa-news";
 
@@ -276,6 +277,11 @@ export type CortexResult = {
   memoryUsed?: boolean;
   drawSubject?: string;
   sources?: CortexSource[];
+  // v33 — DEEP RESEARCH dispatch. Present only on the holding-line result
+  // (route "cortex-deep-queued"): the webhook reads it to arm the
+  // background agent run (Exa Agent + HyperAgent ladder) that posts the
+  // grounded follow-up into the chat.
+  deepResearch?: { kind: string; effort: string };
   telemetry: {
     latencyMs: number;
     webSearch: "none" | "exa-answer" | "page-read" | "web-fallback" | "skipped";
@@ -2038,6 +2044,46 @@ Kayıtta mesaj varsa: kim olduğunu bu mesajlardan çıkar, 1-3 cümle esprili �
     }
     // Not a resolvable identity question ("ronaldo kim" → research, the
     // antecedent fragment "yönetmeni kim" → enriched research): fall through.
+  }
+
+  // --- v33 DEEP RESEARCH: live-data questions (polls, odds, live prices,
+  // breaking developments) get the agent lanes — Exa Agent with structured
+  // data sources (Polymarket/Pyth) + HyperAgent browser fallback — while a
+  // holding line covers the measured ~60s latency. The follow-up message is
+  // posted by the webhook leg; the panel/overlay display the same holding
+  // line, then the follow-up lands as its own InteractionLog row (engine
+  // truth: exa:agent:medium / hyper:agent:*). Runs for BOTH intents: "anket"
+  // questions classify as CHAT (not RESEARCH_RE) and still deserve the
+  // agent. Falls through to the normal ladder whenever the lanes are
+  // unavailable (no key / budget / cooldown) — a holding line is never
+  // promised without a follow-up behind it.
+  const deepCls = NEWS_RE.test(prompt)
+    ? { deep: false, kind: "news" as const, effort: "medium" as const, dataSources: [] as Array<{ provider: string }> }
+    : classifyDeepResearch(prompt);
+  if (deepCls.deep) {
+    const avail = await deepResearchAvailable(deepCls);
+    if (avail.ok) {
+      noteHealth("tool", true, 0);
+      const laneBits =
+        (deepCls.kind === "poll" ? " + Polymarket" : "") +
+        (deepCls.kind === "market" ? " + canlı fiyat hatları" : "") +
+        (avail.hyper ? " + tarayıcı yedeği" : "");
+      return {
+        ok: true, intent: "RESEARCH",
+        reply: clampStr(
+          `Böyle canlı veri soruları derin araştırma istiyor @${sender} — ajan hattını açtım${laneBits}. Kaynaklı net cevabı 1-2 dk içinde atıyorum.`,
+          500,
+        ),
+        modelLabel: "EXA AGENT // DISPATCH",
+        modelId: "exa:agent:queued",
+        provider: "exa",
+        route: "cortex-deep-queued",
+        deepResearch: { kind: deepCls.kind, effort: deepCls.effort },
+        telemetry: { latencyMs: Date.now() - started, webSearch: "none", intentMs },
+      };
+    }
+    // unavailable (no key / budget exhausted / another run in flight /
+    // cooldown) — silently fall through to the fast grounded ladder below.
   }
 
   // --- RESEARCH: grounded with sources --------------------------------------

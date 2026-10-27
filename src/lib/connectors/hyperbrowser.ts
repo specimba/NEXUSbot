@@ -249,3 +249,138 @@ export async function probeHyperbrowser(apiKey: string): Promise<HyperbrowserPro
   }
   return { ok: false, kind: r.kind, status: r.kind === "http" || r.kind === "parse" ? r.status : undefined, error: r.error };
 }
+
+// ---------------------------------------------------------------------------
+// HyperAgent tasks (v33) — browser deep-research lane.
+//
+// MEASURED with the live vault key, 2026-10-27 19:27 +03 (temp-hb-agent-probe):
+//   POST /api/task/hyper-agent  {version:"1.1.0", task, llm, maxSteps}
+//     → 200 {jobId, liveUrl, liveDomain}
+//   GET  /api/task/hyper-agent/{jobId}
+//     → 200 {jobId, status:"running"|"completed"|"failed", createdAt, finishedAt,
+//            data:{steps:[…], finalResult:"…"},
+//            metadata:{inputTokens, outputTokens, numTaskStepsCompleted},
+//            error:null, liveUrl, jobParams:{…}}
+//   PUT  /api/task/hyper-agent/{jobId}/stop   (docs; stop-before-complete)
+//   MEASURED: gemini-3-flash-preview, 2-step read task → ~11s end-to-end.
+//   llm options (docs): gpt-4o, gpt-5.2, claude-sonnet-4-6, claude-haiku-5-5,
+//     gemini-3-flash-preview, …
+// The 8s HYPERBROWSER_TIMEOUT_MS is for session reads; task create + detail
+// fetches use their own longer budget (below) — a cloud browser step can
+// legitimately take tens of seconds, and the poll loop carries the wait.
+// ---------------------------------------------------------------------------
+
+export type HyperAgentLlm = "gemini-3-flash-preview" | "claude-sonnet-4-6" | "claude-haiku-5-5" | "gpt-4o" | "gpt-5.2";
+
+export type HyperAgentRunOpts = {
+  /** Clear, specific task description (the docs' #1 best practice — vague
+   *  tasks wander; the owner's "random wasting browser" complaint). */
+  task: string;
+  llm?: HyperAgentLlm;
+  maxSteps?: number;
+  /** Wall-clock wait budget; the session closes at completion either way. */
+  pollBudgetMs?: number;
+};
+
+export type HyperAgentRunOutcome =
+  | {
+      ok: true;
+      jobId: string;
+      finalResult: string;
+      status: string;
+      stepsCompleted: number | null;
+      tookMs: number;
+      llm: string;
+    }
+  | { ok: false; error: string; tookMs: number; jobId?: string; status?: string };
+
+const AGENT_FETCH_TIMEOUT_MS = 20_000;
+
+/**
+ * Run one HyperAgent task to completion (create → poll → finalResult).
+ * Grounded-browser lane for questions the search agent misses: the task
+ * template must name the exact question + require the agent to cite what it
+ * actually saw — no free-roaming.
+ */
+export async function hbAgentRun(opts: HyperAgentRunOpts): Promise<HyperAgentRunOutcome> {
+  const started = Date.now();
+  const keyLoad = await loadHyperbrowserKey();
+  if (!keyLoad.ok) {
+    return { ok: false, error: keyLoad.reason === "missing" ? "HYPERBROWSER_API_KEY not configured" : "stored key unreadable", tookMs: 0 };
+  }
+  const task = opts.task.trim().slice(0, 4_000);
+  if (!task) return { ok: false, error: "empty task", tookMs: 0 };
+
+  const llm: HyperAgentLlm = opts.llm ?? "gemini-3-flash-preview";
+  const maxSteps = Math.min(40, Math.max(4, opts.maxSteps ?? 20));
+  const budget = opts.pollBudgetMs ?? 120_000;
+
+  // Create (route MEASURED; 200 shape {jobId, liveUrl}).
+  let jobId = "";
+  try {
+    const res = await fetch(`${hyperbrowserBaseUrl()}/api/task/hyper-agent`, {
+      method: "POST",
+      headers: { "x-api-key": keyLoad.key, "content-type": "application/json" },
+      body: JSON.stringify({ version: "1.1.0", task, llm, maxSteps }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(AGENT_FETCH_TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      const detail = (await res.text().catch(() => "")).slice(0, 200);
+      return { ok: false, error: `HyperAgent create HTTP ${res.status}${detail ? `: ${detail}` : ""}`, tookMs: Date.now() - started };
+    }
+    const j = (await res.json()) as { jobId?: string; id?: string };
+    jobId = j.jobId ?? j.id ?? "";
+  } catch (err) {
+    const name = err instanceof Error ? err.name : "";
+    return { ok: false, error: name === "TimeoutError" || name === "AbortError" ? "HyperAgent create timed out" : `HyperAgent create failed: ${name}`, tookMs: Date.now() - started };
+  }
+  if (!jobId) return { ok: false, error: "HyperAgent create returned no jobId", tookMs: Date.now() - started };
+
+  // Poll the DETAIL endpoint (status + data together; 5s interval).
+  let lastStatus = "running";
+  let finalResult = "";
+  let steps: number | null = null;
+  while (Date.now() - started < budget) {
+    await new Promise((r) => setTimeout(r, 5_000));
+    try {
+      const res = await fetch(`${hyperbrowserBaseUrl()}/api/task/hyper-agent/${encodeURIComponent(jobId)}`, {
+        headers: { "x-api-key": keyLoad.key },
+        cache: "no-store",
+        signal: AbortSignal.timeout(AGENT_FETCH_TIMEOUT_MS),
+      });
+      if (!res.ok) continue; // transient — keep polling inside the budget
+      const j = (await res.json()) as {
+        status?: string;
+        data?: { finalResult?: string };
+        metadata?: { numTaskStepsCompleted?: number };
+      };
+      lastStatus = j.status ?? lastStatus;
+      steps = j.metadata?.numTaskStepsCompleted ?? steps;
+      if (lastStatus === "completed" || lastStatus === "failed") {
+        finalResult = j.data?.finalResult ?? "";
+        break;
+      }
+    } catch {
+      /* transient poll failure — loop continues while budget remains */
+    }
+  }
+
+  const tookMs = Date.now() - started;
+  if (lastStatus === "completed") {
+    if (!finalResult.trim()) {
+      return { ok: false, jobId, status: lastStatus, error: "HyperAgent completed with empty result", tookMs };
+    }
+    return { ok: true, jobId, finalResult: finalResult.slice(0, 4_000), status: lastStatus, stepsCompleted: steps, tookMs, llm };
+  }
+  return {
+    ok: false,
+    jobId,
+    status: lastStatus,
+    error:
+      lastStatus === "failed"
+        ? "HyperAgent task failed"
+        : `HyperAgent still ${lastStatus} after ${Math.round(budget / 1000)}s (session closes at provider; result not collected)`,
+    tookMs,
+  };
+}
