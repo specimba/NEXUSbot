@@ -86,16 +86,22 @@ export async function POST(req: Request) {
         .map((t) => ({ role: String(t.role), content: clampStr(t.content, 600) }))
     : [];
 
+  const channel = clampStr(body.channel, 40).toLowerCase() || "specimba";
   const result = await runCortex({
     sender,
     prompt,
     streamerName: clampStr(body.streamerName, 60) || "specimba",
-    channel: clampStr(body.channel, 40).toLowerCase() || "specimba",
+    channel,
     memoryTurns,
     roomTranscript: clampStr(body.roomTranscript, 1_200),
     isResearchHint: body.isResearchHint === true,
   });
-  cortexEchoRemember(sender, prompt, result);
+  // v29.20 — the trail carries channel (conversation ring write) + the
+  // truthful memoryUsed flag for the log route's enrichment.
+  cortexEchoRemember(sender, prompt, result, {
+    channel,
+    memoryUsed: result.memoryUsed === true,
+  });
 
   return NextResponse.json(result, { status: 200 });
 }

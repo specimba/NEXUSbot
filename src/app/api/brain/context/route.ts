@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { hasBrainAccess, clampStr } from "@/lib/brain/auth";
 import { clientKey, rateLimit } from "@/lib/guard";
+import { cortexConvoTurns } from "@/lib/brain/cortex";
 
 /**
  * GET /api/brain/context?user=<handle>&channel=<channel>&turns=<n>
@@ -33,7 +34,11 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const channel = (url.searchParams.get("channel") || "specimba").toLowerCase().slice(0, 40);
   const user = (url.searchParams.get("user") || "").toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 60);
-  const turns = Math.min(10, Math.max(2, Math.round(Number(url.searchParams.get("turns")) || 8)));
+  // v29.20 — widened shared window: a FLOOR of 10 exchanges even when an
+  // older widget generation asks for 8 (rapid-fire senders burned the old
+  // 8-row window in ~2-3 minutes → the "iki dk önce söylediğini inkar"
+  // class), cap 14.
+  const turns = Math.min(14, Math.max(10, Math.round(Number(url.searchParams.get("turns")) || 10)));
 
   const cutoffKey = `brain.memory.cutoff.${channel}`;
   const cutoffRow = await db.setting.findUnique({ where: { key: cutoffKey } });
@@ -56,7 +61,7 @@ export async function GET(req: Request) {
   // viewer is never mistaken for the channel's loudest voice again.
   const userTurns: Array<{ role: "user" | "assistant"; content: string; name?: string; ts: string }> = [];
   if (user) {
-    const own = rows.filter((r) => String(r.username || "").toLowerCase() === user).slice(0, 8).reverse();
+    const own = rows.filter((r) => String(r.username || "").toLowerCase() === user).slice(0, 12).reverse();
     for (const row of own) {
       if (row.message.trim()) {
         userTurns.push({ role: "user", content: `@${row.displayHandle || row.username}: ${row.message.slice(0, 320)}`, name: row.displayHandle || row.username, ts: row.createdAt.toISOString() });
@@ -66,7 +71,37 @@ export async function GET(req: Request) {
       }
     }
   }
-  const trimmedLadder = userTurns.slice(-turns * 2);
+
+  // v29.20 — merge the fresh in-memory CONVERSATION RING (written at ANSWER
+  // time in /api/brain/cortex — no InteractionLog write race: on a rapid-
+  // fire stream the next message arrives before the previous widget log POST
+  // lands, so the ring is the only race-free source of the latest turns) with
+  // the persisted rows. Ring wins on freshness, DB wins on depth; content-keyed
+  // dedup keeps the ladder free of doubles (DB user turns carry the display
+  // handle's case, the ring the lowercase sender — keys compare lowercased).
+  const ringTurns = cortexConvoTurns(channel, user, turns);
+  const seenKeys = new Set<string>();
+  const keyOf = (role: string, content: string) => `${role}:${content.slice(0, 100).toLowerCase()}`;
+  const merged: Array<{ role: "user" | "assistant"; content: string; ts: number; name?: string }> = [];
+  for (const t of userTurns) {
+    const k = keyOf(t.role, t.content);
+    if (seenKeys.has(k)) continue;
+    seenKeys.add(k);
+    merged.push({ role: t.role, content: t.content, ts: Date.parse(t.ts), name: t.name });
+  }
+  for (const t of ringTurns) {
+    const k = keyOf(t.role, t.content);
+    if (seenKeys.has(k)) continue;
+    seenKeys.add(k);
+    merged.push({ role: t.role, content: t.content, ts: t.ts });
+  }
+  merged.sort((a, b) => a.ts - b.ts);
+  const trimmedLadder = merged.slice(-turns * 2).map((t) => ({
+    role: t.role,
+    content: t.content,
+    ...(t.name ? { name: t.name } : {}),
+    ts: new Date(t.ts).toISOString(),
+  }));
 
   const lessons = await db.securityLesson.findMany({
     orderBy: { lastSeenAt: "desc" },

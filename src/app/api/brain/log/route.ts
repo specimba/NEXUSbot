@@ -9,6 +9,7 @@ import {
 } from "@/lib/brain/auth";
 import { clientKey, rateLimit } from "@/lib/guard";
 import { mirrorInteraction, mirrorLesson } from "@/lib/brain/mirror";
+import { cortexResultPeek } from "@/lib/brain/cortex";
 
 /**
  * POST /api/brain/log — the pipeline catch (owner ask, v29.8).
@@ -62,6 +63,41 @@ export async function POST(req: Request) {
       ? Math.min(1_000_000, Math.max(0, Math.round(body.completionTokens)))
       : null;
 
+  // v29.20 — SERVER-AUTHORITATIVE ENRICHMENT (owner: "I think still you
+  // forgot some parts", 2026-10-27 ~03:1x +03). The live OBS overlay can run
+  // a pre-v29.18 widget JS generation that drops tokens entirely and computes
+  // webUsed from its OWN snippet-read — the column lied in both directions in
+  // the same hour ("bana uniq id`ni soyle" web:true with zero searches; the
+  // YouTube Exa-answer row web:false WITH citations). When THIS panel produced
+  // the answer, its own result trail is the single source of truth and the
+  // widget payload stays a fallback for rows the panel never saw (hop-2).
+  const stored = cortexResultPeek(username, message);
+  let finalPromptTokens = promptTokens;
+  let finalCompletionTokens = completionTokens;
+  let webUsed = body.webUsed === true;
+  let memoryUsed = body.memoryUsed === true;
+  let provider = clampStr(body.provider, 24).toLowerCase();
+  let route = clampStr(body.route, 80);
+  let finalResponse = response;
+  let finalLatencyMs = latencyMs;
+  if (stored) {
+    const s = stored.result;
+    if (typeof s.promptTokens === "number") finalPromptTokens = s.promptTokens;
+    if (typeof s.completionTokens === "number") finalCompletionTokens = s.completionTokens;
+    webUsed = ["exa-answer", "page-read", "web-fallback"].includes(
+      s.telemetry?.webSearch ?? "none",
+    );
+    if (s.provider) provider = clampStr(s.provider, 24).toLowerCase();
+    if (s.route) route = clampStr(`panel-cortex/${s.route}`, 80);
+    if (typeof stored.memoryUsed === "boolean") memoryUsed = stored.memoryUsed;
+    if (!finalResponse.trim() && s.reply) {
+      finalResponse = clampStr(redactSecrets(s.reply), 2000);
+    }
+    if (finalLatencyMs === null && typeof s.telemetry?.latencyMs === "number") {
+      finalLatencyMs = Math.min(600_000, Math.max(0, Math.round(s.telemetry.latencyMs)));
+    }
+  }
+
   const row = await db.interactionLog.create({
     data: {
       channel: clampStr(body.channel, 40).toLowerCase() || "specimba",
@@ -69,19 +105,19 @@ export async function POST(req: Request) {
       displayHandle: clampStr(body.displayHandle, 60) || username,
       command: clampStr(body.command, 24).toLowerCase() || "ai",
       message,
-      response,
+      response: finalResponse,
       model: clampStr(body.model, 80),
       modelId: clampStr(body.modelId, 120),
-      provider: clampStr(body.provider, 24).toLowerCase(),
-      route: clampStr(body.route, 80),
+      provider,
+      route,
       status,
-      latencyMs,
-      promptTokens,
-      completionTokens,
-      webUsed: body.webUsed === true,
+      latencyMs: finalLatencyMs,
+      promptTokens: finalPromptTokens,
+      completionTokens: finalCompletionTokens,
+      webUsed,
       flags: JSON.stringify(uniqueFlags),
       injectionScore,
-      memoryUsed: body.memoryUsed === true,
+      memoryUsed,
       error: clampStr(body.error, 300),
     },
   });
@@ -89,7 +125,7 @@ export async function POST(req: Request) {
   // Security memory — fold each flagged technique into a persistent lesson.
   if (uniqueFlags.length > 0) {
     const snippet = clampStr(redactSecrets(message).replace(/\s+/g, " "), 120);
-    const counter = clampStr(response.replace(/\s+/g, " "), 200);
+    const counter = clampStr(finalResponse.replace(/\s+/g, " "), 200);
     for (const technique of uniqueFlags) {
       const lesson = await db.securityLesson
         .upsert({

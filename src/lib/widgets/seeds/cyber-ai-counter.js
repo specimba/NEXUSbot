@@ -2001,7 +2001,7 @@ async function executeNexusCycle(sender, prompt) {
     let memoryUsed = false;
     try {
         const ctx = window.NexusBrain ? await Promise.race([
-            NexusBrain.context(senderLower, config.streamerName, 8),
+            NexusBrain.context(senderLower, config.streamerName, 10),
             new Promise((resolve) => setTimeout(() => resolve(null), 2500))
         ]) : null;
         if (ctx && ctx.ok && Array.isArray(ctx.turns) && ctx.turns.length) {
@@ -2036,7 +2036,7 @@ async function executeNexusCycle(sender, prompt) {
             sender,
             prompt,
             streamerName: config.streamerName,
-            memoryTurns: memoryLadder.slice(-6),
+            memoryTurns: memoryLadder.slice(-10),
             roomTranscript: snippetText ? String(snippetText).slice(0, 600) : '',
             isResearchHint: Boolean(needsDeepWebSearch)
         });
