@@ -367,20 +367,31 @@ const ZAI_PRIMARY_GRACE_MS = 600;
 const CORTEX_DEADLINE_MS = 16_000;
 
 // ---------------------------------------------------------------------------
-// STATIC FLOOR (v29.17) — the honest last resort. These lines are spoken by
-// the PANEL itself, not by any model, so they must NEVER wear a VYCE badge.
-// The "VYCE // TURBO HAT" incident (2026-10-26 live): the floor line carried
-// a hardcoded VYCE label while vyceai.com was black-holing requests — viewers
-// saw "VYCE routed" on answers that never left the machine, and the SAME
-// sentence repeated four times in a row. Rotating bank + no-immediate-repeat.
+// STATIC FLOOR (v29.17 → v36.1) — the honest last resort. These lines are
+// spoken by the PANEL itself, not by any model, so they must NEVER wear a
+// VYCE badge. The "VYCE // TURBO HAT" incident (2026-10-26 live): the floor
+// line carried a hardcoded VYCE label while vyceai.com was black-holing
+// requests — viewers saw "VYCE routed" on answers that never left the
+// machine, and the SAME sentence repeated four times in a row. Rotating
+// bank + no-immediate-repeat.
+//
+// v36.1 (2026-10-28, owner: "attitude" complaint on the failure path): the
+// honesty stays, the infrastructure leaks go. The old bank told viewers the
+// machine's truth ("hatlar kesik", "cereyan", "üretemiyorum") — accurate, but
+// machine-speak, not NEXUS. A viewer-facing line must NEVER carry infra
+// vocabulary (hatlar/bağlantı/sunucu/cereyan/üreteme…); the floor now owns
+// the miss IN PERSONA — confident, warm, invites a retry — and still never
+// fabricates an answer (no model answered; the line says so by NOT
+// answering). Guard: scripts/cron-failure-attitude-audit.ts fails the cron
+// lane if a template ever carries infra vocabulary again.
 // ---------------------------------------------------------------------------
 const STATIC_FLOOR_LABEL = "STATIC // NEXUS-CORTEX";
 const STATIC_FLOOR_LINES = [
-  "Cevap hatları şu an kesik — uydurmak bana yakışmaz, gerçek cevabı birazdan veririm.",
-  "Beynim bu soruya sağlıklı cevap üretemiyor şu an — boş konuşmak istemem. Az sonra tekrar at.",
-  "Hat değil, hatlar KAPALI — bu soruya şimdilik dürüst cevabım: bilmiyorum, sonra dene.",
-  "Şu an tek cereyanla çalışıyorum ve bu soruya yeterli gücüm yok — birazdan toparlarız.",
-  "Dürüst mod: bu soruya şu an cevap üretemiyorum. Soruyu bırakma, hatlar dönünce buradayım.",
+  "Bir an kafam dağıldı, toparlayayım — sor tekrar, bu sefer tam yerinden cevaplarım.",
+  "Dur bir saniye, o soruya hazır cevabım yok — uydurmak bana yakışmaz; az sonra tekrar sor.",
+  "Kafam bir karıştı şimdi — soruyu bırakma, yeniden sor, düzelteyim.",
+  "Şu an bu soruya sağlam cevabım yok — boş laf etmem; birazdan tekrar sor, tamamım.",
+  "Bir tuhaf oldum, kelimeyi kaçırdım — sor tekrar, keskin cevabı vereyim.",
 ];
 let lastStaticFloorIdx = -1;
 function pickStaticFloorLine(): string {
