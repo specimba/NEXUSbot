@@ -1,0 +1,164 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns="http://www.w3.org/2005/Atom">
+  <id>https://arxiv.org/api/gUXoWb+Dsb28RVc+WB9/qVKy61c</id>
+  <title>arXiv Query: search_query=ti:"meta-harness"&amp;id_list=&amp;start=0&amp;max_results=5</title>
+  <updated>2026-10-27T21:30:50Z</updated>
+  <link href="https://arxiv.org/api/query?search_query=ti:%22meta-harness%22&amp;start=0&amp;max_results=5&amp;id_list=" type="application/atom+xml"/>
+  <opensearch:itemsPerPage>5</opensearch:itemsPerPage>
+  <opensearch:totalResults>4</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+  <entry>
+    <id>http://arxiv.org/abs/2603.28052v1</id>
+    <title>Meta-Harness: End-to-End Optimization of Model Harnesses</title>
+    <updated>2026-03-30T05:33:50Z</updated>
+    <link href="https://arxiv.org/abs/2603.28052v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2603.28052v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>The performance of large language model (LLM) systems depends not only on model weights, but also on their harness: the code that determines what information to store, retrieve, and present to the model. Yet harnesses are still designed largely by hand, and existing text optimizers are poorly matched to this setting because they compress feedback too aggressively. We introduce Meta-Harness, an outer-loop system that searches over harness code for LLM applications. It uses an agentic proposer that accesses the source code, scores, and execution traces of all prior candidates through a filesystem. On online text classification, Meta-Harness improves over a state-of-the-art context management system by 7.7 points while using 4x fewer context tokens. On retrieval-augmented math reasoning, a single discovered harness improves accuracy on 200 IMO-level problems by 4.7 points on average across five held-out models. On agentic coding, discovered harnesses surpass the best hand-engineered baselines on TerminalBench-2. Together, these results show that richer access to prior experience can enable automated harness engineering.</summary>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-03-30T05:33:50Z</published>
+    <arxiv:primary_category term="cs.AI"/>
+    <author>
+      <name>Yoonho Lee</name>
+    </author>
+    <author>
+      <name>Roshen Nair</name>
+    </author>
+    <author>
+      <name>Qizheng Zhang</name>
+    </author>
+    <author>
+      <name>Kangwook Lee</name>
+    </author>
+    <author>
+      <name>Omar Khattab</name>
+    </author>
+    <author>
+      <name>Chelsea Finn</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2608.13560v1</id>
+    <title>AutoDesign: Meta-Harness Optimization for Long-Horizon Agentic Design</title>
+    <updated>2026-08-13T17:59:57Z</updated>
+    <link href="https://arxiv.org/abs/2608.13560v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2608.13560v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Transforming multimodal sources into condensed and structured media outputs can be fundamentally conceptualized as a long-horizon agentic process centered on a model-harness system. While an ideal harness system should align with human design priors and accumulate reusable experience through empirical exploration to drive recursive self-improvement, existing paradigms remain static and fall short of this capability. In this paper, we present AutoDesign, a framework that aligns with human design priors, where a meta-harness optimizer guides a code agent to recursively improve harness based on rollout feedback. To instantiate and evaluate this framework, we focus on the academic paper-to-poster generation task and introduce PosterBench, comprising a 100-paper Main Track spanning five disciplines and PosterBench-mini, a shared 10-paper subset for controlled evaluation. On the PosterBench Main Track, AutoDesign achieves the highest score of 78.32, surpassing the closed-source commercial system Claude Design by 7.45 points. Across seven controlled code-agent-model configurations, integrating the learned DesignHarness consistently improves performance, increasing the average PosterBench Score from 54.99 to 67.39 (+12.4%). In a fully autonomous long-horizon loop, it executes 253 tool calls and 11 editing turns within 40 minutes for under $3, reaching average conference-poster quality in human evaluation. A system-blind human study further demonstrates that AutoDesign achieves the highest human preference among evaluated systems.</summary>
+    <category term="cs.CV" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-08-13T17:59:57Z</published>
+    <arxiv:comment>Tech Report. Code at: https://github.com/Yaxin9Luo/AutoDesign</arxiv:comment>
+    <arxiv:primary_category term="cs.CV"/>
+    <author>
+      <name>Yaxin Luo</name>
+    </author>
+    <author>
+      <name>Haobin Jiang</name>
+    </author>
+    <author>
+      <name>Jialv Zou</name>
+    </author>
+    <author>
+      <name>Xu Huang</name>
+    </author>
+    <author>
+      <name>Wenhao Yan</name>
+    </author>
+    <author>
+      <name>Haodong Li</name>
+    </author>
+    <author>
+      <name>Zhengrong Yue</name>
+    </author>
+    <author>
+      <name>Jing Li</name>
+    </author>
+    <author>
+      <name>Xiaofu Chen</name>
+    </author>
+    <author>
+      <name>Xiaohan Zhao</name>
+    </author>
+    <author>
+      <name>Jiacheng Liu</name>
+    </author>
+    <author>
+      <name>Jiacheng Cui</name>
+    </author>
+    <author>
+      <name>Zhiqiang Shen</name>
+    </author>
+    <author>
+      <name>Xiaotong Li</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2106.00615v1</id>
+    <title>Meta-HAR: Federated Representation Learning for Human Activity Recognition</title>
+    <updated>2021-05-31T11:04:39Z</updated>
+    <link href="https://arxiv.org/abs/2106.00615v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2106.00615v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Human activity recognition (HAR) based on mobile sensors plays an important role in ubiquitous computing. However, the rise of data regulatory constraints precludes collecting private and labeled signal data from personal devices at scale. Federated learning has emerged as a decentralized alternative solution to model training, which iteratively aggregates locally updated models into a shared global model, therefore being able to leverage decentralized, private data without central collection. However, the effectiveness of federated learning for HAR is affected by the fact that each user has different activity types and even a different signal distribution for the same activity type. Furthermore, it is uncertain if a single global model trained can generalize well to individual users or new users with heterogeneous data. In this paper, we propose Meta-HAR, a federated representation learning framework, in which a signal embedding network is meta-learned in a federated manner, while the learned signal representations are further fed into a personalized classification network at each user for activity prediction. In order to boost the representation ability of the embedding network, we treat the HAR problem at each user as a different task and train the shared embedding network through a Model-Agnostic Meta-learning framework, such that the embedding network can generalize to any individual user. Personalization is further achieved on top of the robustly learned representations in an adaptation procedure. We conducted extensive experiments based on two publicly available HAR datasets as well as a newly created HAR dataset. Results verify that Meta-HAR is effective at maintaining high test accuracies for individual users, including new users, and significantly outperforms several baselines, including Federated Averaging, Reptile and even centralized learning in certain cases.</summary>
+    <category term="eess.SP" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2021-05-31T11:04:39Z</published>
+    <arxiv:primary_category term="eess.SP"/>
+    <author>
+      <name>Chenglin Li</name>
+    </author>
+    <author>
+      <name>Di Niu</name>
+    </author>
+    <author>
+      <name>Bei Jiang</name>
+    </author>
+    <author>
+      <name>Xiao Zuo</name>
+    </author>
+    <author>
+      <name>Jianming Yang</name>
+    </author>
+    <arxiv:doi>10.1145/3442381.3450006</arxiv:doi>
+    <link rel="related" href="https://doi.org/10.1145/3442381.3450006" title="doi"/>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2608.23473v2</id>
+    <title>MetaCaster: Meta-Harness-Optimized Agent for End-to-End Few-Shot Learning of Lightweight Time Series Forecasters</title>
+    <updated>2026-09-03T18:53:47Z</updated>
+    <link href="https://arxiv.org/abs/2608.23473v2" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2608.23473v2" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Time series forecasting (TSF) is evolving toward multimodal and agentic settings, yet using foundation models remains uneconomical in resource-constrained scenarios, where compact, specialized forecasters are more desirable. However, lightweight forecasters typically require substantial training data, limiting their use in domains with scarce, slowly accumulated, or privacy-sensitive time series. To address this dilemma, we investigate the challenging problem of few-shot learning for lightweight forecasters. We propose MetaCaster, a meta-harness-optimized multi-agent framework that uses agentic data generation to automatically train specialized lightweight forecasters from only a few examples and textual contexts. Our work highlights a new TSF paradigm in which agents act not as forecasters but as intermediary engineers that prepare efficient, task-specific forecasters for deployment. Experiments on 18 datasets, 23 state-of-the-art lightweight forecasters, and 14 baselines demonstrate that MetaCaster achieves both data efficiency and computational efficiency while maintaining high-quality TSF performance.</summary>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-08-24T16:40:25Z</published>
+    <arxiv:comment>Accepted by EMNLP 2026</arxiv:comment>
+    <arxiv:primary_category term="cs.LG"/>
+    <author>
+      <name>ChengAo Shen</name>
+    </author>
+    <author>
+      <name>Wenchao Yu</name>
+    </author>
+    <author>
+      <name>Fangyu Wu</name>
+    </author>
+    <author>
+      <name>Dongjin Song</name>
+    </author>
+    <author>
+      <name>Hanghang Tong</name>
+    </author>
+    <author>
+      <name>Dongsheng Luo</name>
+    </author>
+    <author>
+      <name>Wei Cheng</name>
+    </author>
+    <author>
+      <name>Haifeng Chen</name>
+    </author>
+    <author>
+      <name>Jingchao Ni</name>
+    </author>
+  </entry>
+</feed>

@@ -3,6 +3,18 @@
 All notable changes to NEXUS OS are documented here. Format: Keep-a-Changelog-lite;
 versions map to milestone gates. Dates are 2026 sandbox time.
 
+## [v35.0] — 2026-10-29 — RSI Lab (experimental): L3 eval suites + L4 evolution cycles
+
+### Added
+- Eval tab unlocked (G6 opened by owner directive 2026-10-29) → RSI Lab: Overview / Research / Suites & Runs / Cycles.
+- 8 Prisma models (RsiPaper, RsiSuite, RsiTask, RsiPlugin, RsiCycle, RsiCycleEvent, RsiRun, RsiImprovementEdge) + `/api/rsi/*` routes (session-gated, rate-limited).
+- Engine `src/lib/rsi/`: 9-stage cycle spine, gates G1/G2/G3/G5/G7/G8 (G4/G6 honest PENDING), hash-chained audit events, frozen judge rubric via z-ai SDK, daily call budget with loud aborts.
+- 5 frozen suites / 23 tasks seeded from the research contracts, configHash-sealed; paper library (48 owner-curated papers, arXiv-verified) with lazy seed; deep-research launcher reuses the Exa job lane.
+- Research provenance: `rsi-lab-research/` (evolution-engine.json, eval-design.json, curation-papers.json).
+
+### Notes
+- Promotion = owner human gate inside the cycle; edge deploy remains a separate manual action. No improvement claims until the first full cycle [UNVERIFIED].
+
 ## [0.3.0-M2-wave2] — 2026-10-22 — full connector fleet + stream contract
 
 ### Added

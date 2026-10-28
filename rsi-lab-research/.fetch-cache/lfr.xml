@@ -1,0 +1,92 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns="http://www.w3.org/2005/Atom">
+  <id>https://arxiv.org/api/JP/eeynYczX6i/y+JWtD6qzRHp0</id>
+  <title>arXiv Query: search_query=ti:"Learning from Research"&amp;id_list=&amp;start=0&amp;max_results=4</title>
+  <updated>2026-10-27T21:31:08Z</updated>
+  <link href="https://arxiv.org/api/query?search_query=ti:%22Learning+from+Research%22&amp;start=0&amp;max_results=4&amp;id_list=" type="application/atom+xml"/>
+  <opensearch:itemsPerPage>4</opensearch:itemsPerPage>
+  <opensearch:totalResults>3</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+  <entry>
+    <id>http://arxiv.org/abs/2609.40169v1</id>
+    <title>Learning from Research: Toward Lifelong Agent Harness Evolution</title>
+    <updated>2026-09-30T17:00:38Z</updated>
+    <link href="https://arxiv.org/abs/2609.40169v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2609.40169v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Language agents are expected to solve increasingly complex tasks, creating a growing need for continual improvement. One promising approach is to evolve the agent harness, the software that governs tool use, memory management, and task execution, while keeping the underlying language model fixed. Recent methods automate this process by using a meta coding agent to modify the harness based on execution feedback. However, relying on that agent's existing knowledge and observed failures can restrict exploration and make adaptation reactive. Inspired by how human experts learn from the research literature for new solutions, we introduce ScholarEvolve, a framework that automatically draws on state-of-the-art research to guide harness evolution. ScholarEvolve organizes the harness evolution directions into functional modules and uses topic modeling to identify distinct improvement strategies for each module. It implements these strategies and evaluates their combinations to improve task performance. Moreover, the framework is designed to incorporate new publications over time, allowing research advances to drive proactive lifelong evolution. Experiments demonstrate improvements on AppWorld and Tau2-Bench. ScholarEvolve raises Qwen3.5-27B task goal completion from 49.6% to 63.6% on AppWorld Challenge, and raises GPT-5.4-mini pass@1 from 72.7% to 81.9% on Tau2-Bench Telecom.</summary>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-09-30T17:00:38Z</published>
+    <arxiv:primary_category term="cs.AI"/>
+    <author>
+      <name>Jingbo Yang</name>
+    </author>
+    <author>
+      <name>Kwei-Herng Lai</name>
+    </author>
+    <author>
+      <name>Xiaowen Wang</name>
+    </author>
+    <author>
+      <name>Yaar Harari</name>
+    </author>
+    <author>
+      <name>Evgeniy Gabrilovich</name>
+    </author>
+    <author>
+      <name>Shiyu Chang</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/1903.07381v1</id>
+    <title>What software engineering can learn from research on affect in social psychology</title>
+    <updated>2019-03-18T12:13:39Z</updated>
+    <link href="https://arxiv.org/abs/1903.07381v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/1903.07381v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Social psychology researchers have, traditionally, focused on the construct of thinking rather than on feeling. Since the beginning of the 21st century, social science researchers have, however, increasingly explored the effects of affect. Their work has repeatedly recognized that affects play a crucial role in determining people's behavior. In this short paper, we argue that software engineering studies on affect would benefit from using more of the knowledge that social science researchers have acquired. Without accounting for their findings, we risk re-inventing the wheel. Also, without a profound understanding of the complex interplay between social context and affect, we risk creating overly simplistic solutions that might have considerable long-term adverse effects for software engineers.</summary>
+    <category term="cs.SE" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.HC" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2019-03-18T12:13:39Z</published>
+    <arxiv:primary_category term="cs.SE"/>
+    <author>
+      <name>Lucas Gren</name>
+    </author>
+    <author>
+      <name>Per Lenberg</name>
+    </author>
+    <author>
+      <name>Karolina Ljungberg</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2606.20568v1</id>
+    <title>Handling Interoperability Issues in 6G ORAN: Lessons Learned from Research Lab-based Integrations</title>
+    <updated>2026-04-21T22:18:06Z</updated>
+    <link href="https://arxiv.org/abs/2606.20568v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2606.20568v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>As 6G networks continue to evolve, the Open Radio Access Network (ORAN) framework is gaining prominence for its promise of network flexibility, vendor-neutral architecture, and enhanced service delivery. However, achieving true interoperability across diverse hardware and software components from multiple vendors remains a critical challenge. This research focuses on identifying and addressing interoperability issues within 6G ORAN environments, leveraging insights from research lab-based integrations. By systematically analysing lab-based case studies, the study aims to uncover the root causes of integration failures, propose solutions to ensure smooth multi-vendor compatibility, and establish a set of best practices for future deployments. This work will contribute to developing robust guidelines for 6G ORAN ecosystems, accelerating seamless and scalable deployments in real-world networks.</summary>
+    <category term="cs.NI" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.DC" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.ET" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-04-21T22:18:06Z</published>
+    <arxiv:comment>7 pages, 4 figures</arxiv:comment>
+    <arxiv:primary_category term="cs.NI"/>
+    <author>
+      <name>Poonam Yadav</name>
+    </author>
+    <author>
+      <name>Yifan Liu</name>
+    </author>
+    <author>
+      <name>Mohit Bidikar</name>
+    </author>
+    <author>
+      <name>Rana M. Sohaib</name>
+    </author>
+    <author>
+      <name>Yi Chu</name>
+    </author>
+    <author>
+      <name>David Grace</name>
+    </author>
+  </entry>
+</feed>

@@ -100,3 +100,13 @@ Finding F-1 (oldest-window slices on "Latest" surfaces) was fixed in the same se
 - Routes: /api/events, /api/jobs, /api/artifacts (+ UI overview/pipeline call sites) now read newest-first server-side; bogus order → 400 [VERIFIED].
 - Re-verification: t105/t107/t108/t110 all exit 0; browser pass confirms "Latest artifacts" shows #272→#268 (1–12 min old, not 2 h) and Pipeline events #1872→#1869 newest-first; screenshots agent-ctx/verify-lead/11–14.
 - Stream tab's earlier tail-read buffer (5-f) remains as-is (works; simplification deferred to M2).
+
+## Addendum — G6 opened by owner directive (2026-10-29): RSI Lab v35.0 (experimental)
+
+The owner directed the eval modules to start (RSI harness evolution, smart upgrade cycles). The Eval tab is now the RSI Lab: L3 frozen suites + L4 gated cycles.
+
+- L3: 5 frozen suites (persona-tr, research-grounding, safety-refusal, reliability-latency, harness-discipline; 23 single-shot tasks) seeded from `src/data/rsi/eval-design.json` (research contract `nexus-rsi-eval-v1`), each sealed with a sha256 `configHash` at seed time; the AUDIT stage re-verifies the hashes (tamper evidence per 2609.00069).
+- L4: cycle spine scout→thesis→synthesize→shadow-eval→pareto-gate→canary→promote→audit→record with gates G1 non-regression, G2 Pareto, G3 regularization (RRSI 2609.24972), G5 abstention, G7 budget (daily call cap, loud `budget_exceeded`), G8 hash-chain audit. G4 counterfactual registry and G6 judge anchor battery are **PENDING** until authored — reported honestly in gate output, never faked.
+- Promotion requires an explicit owner confirm in the panel; deploy to the edge cortex remains a separate manual owner action.
+- All run metrics are live-measured (real provider-ladder calls, engine truth recorded per task); failures are stored as failures; no improvement claims until the first full cycle completes [UNVERIFIED].
+- Design provenance: `rsi-lab-research/` (evolution-engine.json `nexus-rsi-engine-v1`, eval-design.json, curation-papers.json — 48 owner-curated papers, arXiv-abstract-verified).

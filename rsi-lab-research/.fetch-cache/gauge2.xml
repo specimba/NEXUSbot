@@ -1,0 +1,86 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns="http://www.w3.org/2005/Atom">
+  <id>https://arxiv.org/api/n9FbYjSwAMvxO9QKs27Qw5dhRX4</id>
+  <title>arXiv Query: search_query=ti:GAUGE AND abs:judge&amp;id_list=&amp;start=0&amp;max_results=4</title>
+  <updated>2026-10-27T21:31:08Z</updated>
+  <link href="https://arxiv.org/api/query?search_query=ti:GAUGE+AND+abs:judge&amp;start=0&amp;max_results=4&amp;id_list=" type="application/atom+xml"/>
+  <opensearch:itemsPerPage>4</opensearch:itemsPerPage>
+  <opensearch:totalResults>7</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+  <entry>
+    <id>http://arxiv.org/abs/hep-th/9702179v1</id>
+    <title>More on N=1 Self-Dualities and Exceptional Gauge Groups</title>
+    <updated>1997-02-25T15:27:14Z</updated>
+    <link href="https://arxiv.org/abs/hep-th/9702179v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/hep-th/9702179v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>  Starting from a generalization of a recent result on self-duality we systematically analyze self-dual models. We find a criterion to judge whether a given model is self-dual or not. With this tool we construct some new self-dual pairs, focussing on examples with exceptional gauge groups.</summary>
+    <category term="hep-th" scheme="http://arxiv.org/schemas/atom"/>
+    <published>1997-02-25T15:27:14Z</published>
+    <arxiv:comment>10 pages, LaTeX2e, using utarticle.cls (included)</arxiv:comment>
+    <arxiv:primary_category term="hep-th"/>
+    <arxiv:journal_ref>Phys.Lett. B405 (1997) 280-286</arxiv:journal_ref>
+    <author>
+      <name>Andreas Karch</name>
+    </author>
+    <arxiv:doi>10.1016/S0370-2693(97)00604-7</arxiv:doi>
+    <link rel="related" href="https://doi.org/10.1016/S0370-2693(97)00604-7" title="doi"/>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2609.12191v1</id>
+    <title>GAUGE: When Not to Trust LLM-as-a-Judge in User-Simulated Evaluation of Task-Oriented Agents</title>
+    <updated>2026-09-10T20:29:28Z</updated>
+    <link href="https://arxiv.org/abs/2609.12191v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2609.12191v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Comparing and selecting task-oriented LLM agents increasingly relies on a low-cost offline evaluation gate: persona-driven LLM user-simulators converse with each candidate, an LLM-as-a-judge scores the transcripts, and the higher-scoring agent is promoted. We introduce GAUGE, a reusable offline protocol that measures whether this gate's ranking matches a grounded verifiable reward across 25 agents from six providers on the $τ^2$-bench and SimulatorArena benchmarks, separating two kinds of evaluation validity that release practices conflate: ranking validity and construct validity. First, a satisfaction-success gap: satisfaction carries essentially no information about task success, as conversations rated satisfied by our blind panel are decorrelated from actual success, with 57.5% of them failing the customer's task, a pattern consistent across five rater populations, both benchmarks, and every subjective dimension we rated. Second, while the gate's ranking is robust across the broad capability span, it loses resolution among the near-equal strong agents: this decision-disagreement rate jumps from $&lt;$1% on wide-reward pairs to 31% on close pairs. The gate is thus human-validated yet mis-anchored. As a remedy, we propose a calibrate-then-trust cadence in which a judge-free completion bit is a zero-cost tripwire for truncation regressions.</summary>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-09-10T20:29:28Z</published>
+    <arxiv:comment>Accepted to EMNLP 2026 (Industry Track)</arxiv:comment>
+    <arxiv:primary_category term="cs.CL"/>
+    <author>
+      <name>Umesh Bodhwani</name>
+    </author>
+    <author>
+      <name>Thanh Tran</name>
+    </author>
+    <author>
+      <name>Kai Wei</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2409.07977v2</id>
+    <title>Mass hierarchies in gauge theory with two index symmetric representation matter</title>
+    <updated>2024-12-10T08:59:04Z</updated>
+    <link href="https://arxiv.org/abs/2409.07977v2" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2409.07977v2" rel="related" type="application/pdf" title="pdf"/>
+    <summary>In gauge theories, the running of the anomalous dimension of a fermion bilinear operator is believed to lead to chiral symmetry breaking when gamma=1. Naively using perturbative results to judge when gamma=1 leads to the possibility of large dynamically generated mass hierarchies in models with both two index symmetric representation and fundamental representation fermions. In this paper we study a holographic model of this physics to predict the separation in scales in the meson spectrum. We study SU(Nc) theories at different Nc with one flavour of two index symmetric representation as a function of the number of fundamental fermion flavours NfF. The largest hierarchy we find is for Nc=7 and NfF=22 where the rho mesons made of the two different representations are separated in scale by a factor of 13. For general Nc the hierarchy can be made greater than 7 by tuning NfF. We display the hierarchy as a function of NfF and investigate the quark mass dependence. These predictions do depend on the extrapolation of gamma from the perturbative regime - even in a pessimistic scenario a distinct gap can be achieved.</summary>
+    <category term="hep-ph" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="hep-lat" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="hep-th" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2024-09-12T12:20:16Z</published>
+    <arxiv:comment>10 pages, 9 figures, added comments and references</arxiv:comment>
+    <arxiv:primary_category term="hep-ph"/>
+    <author>
+      <name>Anja Alfano</name>
+    </author>
+    <author>
+      <name>Nick Evans</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/1012.0988v1</id>
+    <title>Constraining String Gauge Field by Planet Perihelion Precession and Galaxy Rotation Curves</title>
+    <updated>2010-12-05T11:27:17Z</updated>
+    <link href="https://arxiv.org/abs/1012.0988v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/1012.0988v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>We performed various tests on a cosmological model in which the string gauge field, and its coupling to matter, is used to explain the rotation dynamics of stars in a galaxy. Observations used include perihelion precession and galaxy rotation curves. We solved precession motions for perturbations of 1) a Lorenz-like force and 2) a general power law central force. For the latter case, a simple rule judging pro/retrograde motions is derived. We attributed the precession of solar system planets to the force due to the string field and calculated the field strengths. We then fitted the resultant field strengths with a profile consisting one part generated by the Sun and another background due to other matter in the Milky Way. We used the Milky Way rotation curve to estimate the field strength and compared it with the one found by precession. The field strengths in another 22 galaxies are also analyzed. The strengths form a range that spans 2 orders of magnitude and contains the value found for the Milky Way. We also deduced from the model a relation between field strength, galaxy size and luminosity and verified it with data of the 22 galaxies.</summary>
+    <category term="gr-qc" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="hep-th" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2010-12-05T11:27:17Z</published>
+    <arxiv:comment>9 pages</arxiv:comment>
+    <arxiv:primary_category term="gr-qc"/>
+    <author>
+      <name>Feng Xu</name>
+    </author>
+  </entry>
+</feed>

@@ -1,0 +1,248 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns="http://www.w3.org/2005/Atom">
+  <id>https://arxiv.org/api/KjtTIKAQPPP4uzutYAXLqNHF8DI</id>
+  <title>arXiv Query: search_query=ti:"harness evolution"&amp;id_list=&amp;start=0&amp;max_results=8</title>
+  <updated>2026-10-27T21:31:32Z</updated>
+  <link href="https://arxiv.org/api/query?search_query=ti:%22harness+evolution%22&amp;start=0&amp;max_results=8&amp;id_list=" type="application/atom+xml"/>
+  <opensearch:itemsPerPage>8</opensearch:itemsPerPage>
+  <opensearch:totalResults>27</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+  <entry>
+    <id>http://arxiv.org/abs/2610.28815v1</id>
+    <title>Forging More Tasks into Better Harnesses: Agentic Harness Evolution via Successive Scale Racing</title>
+    <updated>2026-10-20T18:36:33Z</updated>
+    <link href="https://arxiv.org/abs/2610.28815v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.28815v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Agentic harness evolution optimizes an agent's instructions, tools, and control flow by using its task execution experiences as evolving evidence. While more evolution tasks should intuitively improve performance, our preliminary study reveals a paradoxical failure mode: the performance of existing methods degrades as the task pool expands. Our further analysis demonstrates that this degradation stems from suboptimal evidence selection during optimization, as different evidence combinations lead to substantially different evolution outcomes. To address this issue, we propose Successive Scale Racing (SSR), a framework that adaptively searches for optimal evidence combinations in each evolution round. SSR constructs diverse evidence combinations based on the corresponding task quality and coverage, and efficiently races the resulting candidate harnesses under a small compute budget. Empirically, across three distinct benchmarks, SSR achieves state-of-the-art results in all six configurations. Notably, as the task pool grows from 40 to 200, SSR steadily improves the pass rate from 64.3% to 68.3%, while the baselines' performances all drop. Furthermore, its racing mechanism identifies near-optimal candidates while reducing validation executions by 60%.</summary>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-20T18:36:33Z</published>
+    <arxiv:primary_category term="cs.AI"/>
+    <author>
+      <name>Jingzhe Liu</name>
+    </author>
+    <author>
+      <name>Jiliang Tang</name>
+    </author>
+    <author>
+      <name>Tong Zhao</name>
+    </author>
+    <author>
+      <name>Neil Shah</name>
+    </author>
+    <author>
+      <name>Clark Mingxuan Ju</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.22466v1</id>
+    <title>Harness-Delta Attribution: Dissecting Gains From Harness Evolution</title>
+    <updated>2026-10-15T17:39:38Z</updated>
+    <link href="https://arxiv.org/abs/2610.22466v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.22466v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Harness evolution automatically optimizes the prompts, skills, tools, and orchestration code around a fixed-weight model, offering a way to improve agentic systems without updating model weights. The agent harness is iteratively optimized to achieve higher performance on the search set. But how much of this gain reflects benchmark-specific overfitting or additional inference-time compute, and how much may generalize beyond the search set? In this work, we introduce Harness-Delta Attribution (HDA), an evaluation protocol that dissects an evolution gain into artifact-driven overfitting, gains explained by test-time scaling, and the remainder, which gives an upper bound on residual generalizable improvement. We apply HDA to 11 executor models and three harness-evolution frameworks across math, coding, creativity, and agentic tasks. In 21 of these settings that show statistically significant search-set gains, we find that a large share of the improvement is explained by overfitting or test-time scaling. Specifically, among these 21 settings, overfitting and test-time scaling account for 54% and 14% of the gain on average; their combined share exceeds 50% in 14 settings. The residual and held-out transfer vary substantially across tasks, models, and frameworks. Importantly, search-set gains often fail to transfer to held-out tasks, and provide limited evidence that they will persist under practical distribution shifts. Moreover, validation-based signals are insufficient to prevent overfitting. These results motivate attribution-aware evaluation in future harness evolution research.</summary>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-15T17:39:38Z</published>
+    <arxiv:primary_category term="cs.AI"/>
+    <author>
+      <name>Wenxuan Ding</name>
+    </author>
+    <author>
+      <name>Qin Lu</name>
+    </author>
+    <author>
+      <name>Changlong Yu</name>
+    </author>
+    <author>
+      <name>Sha Li</name>
+    </author>
+    <author>
+      <name>Shuowei Jin</name>
+    </author>
+    <author>
+      <name>Xin Liu</name>
+    </author>
+    <author>
+      <name>Zhenyu Shi</name>
+    </author>
+    <author>
+      <name>Greg Durrett</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.15221v1</id>
+    <title>HarnessNet: Feedback-driven Hierarchical Joint Harness Evolution for Multi-agent Systems</title>
+    <updated>2026-10-10T23:28:24Z</updated>
+    <link href="https://arxiv.org/abs/2610.15221v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.15221v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>AI agents can evolve by using environment feedback to revise their harnesses, the software managing model inputs, tool use, memory, and execution, while keeping foundation models frozen. Existing studies focus on single agents, leaving joint harness evolution in multi-agent systems (MAS) underexplored. A single global optimizer faces growing context and workload as the system scales, while access restrictions may prevent sharing agent internals or system-wide feedback. We propose HarnessNet, a framework for hierarchical harness evolution in MAS. Its basic unit, Agentron, comprises an evolvable forward harness, a foundation model, and a local optimizer that can observe and modify only that harness. Agentrons form a layered graph through which environment feedback propagates backward, with upstream optimizers receiving node-specific feedback from the downstream layer. This decomposes joint harness evolution into smaller, coordinated tasks with separate contexts, reducing individual optimizers' context and workload while keeping access local. Optimizers need not access all agent trajectories or raw environment feedback. Experiments on AgentBench with multiple foundation models demonstrate the feasibility of training HarnessNet. Compared with a single global optimizer, HarnessNet achieves comparable performance gains while respecting local privacy and requiring fewer tokens and less time per optimizer call. A migration study shows that the evolved harnesses remain jointly effective after replacing the foundation models, suggesting transferability across models.</summary>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-10T23:28:24Z</published>
+    <arxiv:comment>A novel method for multi-agent system harness joint evolution</arxiv:comment>
+    <arxiv:primary_category term="cs.AI"/>
+    <author>
+      <name>Zhaoyuan Qiu</name>
+    </author>
+    <author>
+      <name>Sachith Seneviratne</name>
+    </author>
+    <author>
+      <name>Yu Xia</name>
+    </author>
+    <author>
+      <name>Saman Halgamuge</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.14977v1</id>
+    <title>EnactOpt: Diagnosis-Guided Harness Evolution for Embodied Agents</title>
+    <updated>2026-10-10T14:51:25Z</updated>
+    <link href="https://arxiv.org/abs/2610.14977v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.14977v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Embodied agents built on foundation models rely on an execution harness to organize observations, guide actions, and incorporate execution feedback into subsequent decisions. Failures can arise not only from limited model capabilities, but also from how the harness presents evidence and guides its use. These model-external mechanisms provide an adaptation target without updating model parameters, but task-specific interaction experience can be costly to collect. Task-level outcomes alone do not reveal whether relevant evidence was missing from the model input or was available but inadequately used. Moreover, these two aspects are coupled: effective action guidance may require evidence that the current context omits, while exposing that evidence alone does not ensure an appropriate response. We introduce EnactOpt, which uses limited execution feedback to jointly evolve reusable textual skills and context-construction code while keeping the underlying models and runtime fixed. It diagnoses adjacent decisions by relating action feedback to the actual model input and subsequent action. Structured episode summaries guide joint revisions through prompt-level edit operators, and candidate harnesses undergo compatibility checks and validation-based retention. Across VLABench, ALFWorld, and Embodied Agent Interface (EAI), EnactOpt improves task success by approximately 10-27 percentage points over the initial harnesses and outperforms the evaluated GEPA, TextGrad, and Trace2Skill baselines. These gains extend to task conditions not used for harness evolution or candidate selection. The results support a complementary route to embodied adaptation: turning limited execution experience into reusable behavioral improvements by jointly refining how evidence is presented and acted upon.</summary>
+    <category term="cs.RO" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-10T14:51:25Z</published>
+    <arxiv:comment>30 pages, 5 figures, 5 tables; includes appendices</arxiv:comment>
+    <arxiv:primary_category term="cs.RO"/>
+    <author>
+      <name>ZhiYuan Feng</name>
+    </author>
+    <author>
+      <name>Zhuoshi Pan</name>
+    </author>
+    <author>
+      <name>Zhaolu Kang</name>
+    </author>
+    <author>
+      <name>Zhongxia Chen</name>
+    </author>
+    <author>
+      <name>Shuo Yang</name>
+    </author>
+    <author>
+      <name>Sen Ye</name>
+    </author>
+    <author>
+      <name>Heng Wang</name>
+    </author>
+    <author>
+      <name>Han Li</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.11655v1</id>
+    <title>Harness Evolution Hits a Ceiling: When Weight Training Should Begin</title>
+    <updated>2026-10-08T10:33:29Z</updated>
+    <link href="https://arxiv.org/abs/2610.11655v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.11655v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Improving a long-horizon LLM agent means evolving the harness around a frozen model or training its weights. We let a self-evolving harness make the system stronger first, then cross seed and evolved harnesses with base and trained weights to learn which gains the trained model keeps and which still need the runtime. We show that the right lever can be read off the agent's failure composition: labelling failed trajectories by the first signal that fires separates process failures (blocked calls, loops, exhausted step budgets) from content failures (a delivered plan that is poor). Harness evolution repairs the former, the behaviour it instils can be trained into the weights, and content failures are what weight training is for. On DeepPlanning, a self-evolving harness loop lifts the held-out score of Qwen3.5-4B from 0.16 to 0.30 and of Qwen3.5-9B from 0.32 to 0.44; for 4B, held-out delivery rises from 55% to 90% while content failures are left for the weights. LoRA adapters trained on evolved-harness trajectories internalise the gain: under the original harness they add +0.13 on held-out tasks for both sizes; on 4B they stack with the harness to more than double the held-out score, and on 9B the adapter alone matches the full evolution line, cutting content failures from a quarter of trajectories to one in twenty. A placebo adapter trained on answer-shuffled trajectories falls below the base model. The loop transfers to WebArena-Lite (+0.09 on 117 unseen tasks), where the gain lives in what the model sees and adapters do not add to it. The result is a diagnose-then-intervene rule applied twice: read the failure composition to choose between harness and weights, then read what the accepted edits changed to decide which gains to train in. Scores are four-rollout means against fresh anchors, same-night except where marked, across eight models from six families and two benchmarks.</summary>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-08T10:33:29Z</published>
+    <arxiv:comment>21 pages, 7 figures, 15 tables</arxiv:comment>
+    <arxiv:primary_category term="cs.AI"/>
+    <author>
+      <name>Yuan Tian</name>
+    </author>
+    <author>
+      <name>Bing Hu</name>
+    </author>
+    <author>
+      <name>Hao Wang</name>
+    </author>
+    <author>
+      <name>Binghang Lu</name>
+    </author>
+    <author>
+      <name>Fang Wu</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.00948v1</id>
+    <title>GUI-HARVEST: Self-Improving GUI Agents through Evidence-Driven Harness Evolution</title>
+    <updated>2026-10-01T02:31:20Z</updated>
+    <link href="https://arxiv.org/abs/2610.00948v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.00948v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>The executable harness surrounding a GUI model determines how observations are assembled, actions are executed, and verification, recovery, and termination are controlled. Compared with harness optimization for non-GUI agents, automatically optimizing this harness poses three coupled challenges: reconciling model intent with observed visual effects, diagnosing failures under variable execution outcomes, and identifying recurrent failure patterns across tasks and translating them into reusable runtime changes. We introduce GUI-HARVEST, an automatic harness optimizer that enables self-improving GUI agents with frozen backbone models. First, to ground diagnosis in observed action effects, it aligns model outputs and executed actions with before-and-after screenshots, tying findings to specific interface transitions. Second, to account for execution variability, it treats repeated runs of the same task as a joint evidence unit, using within-task comparisons to locate outcome-relevant behavioral differences. Third, it consolidates verified findings across tasks into recurring failure patterns, maps them to bounded source-code edits with predictions recorded before evaluation, and checks the predicted behavioral effects alongside task performance through repeated execution. Experiments on OSWorld-Verified show consistent held-out gains across six general-purpose open, GUI-specialized open, and proprietary backbone models; Qwen3-VL-32B-Instruct gains 12.33 points on the full suite. Frozen-harness transfer improves GPT-5 by 13.87 percentage points on WindowsAgentArena at 50 steps without further optimization. With the same backbone and initial harness, GUI-HARVEST outperforms Self-Harness and Meta-Harness, suggesting that GUI-specific diagnosis and validation help harness improvements generalize to unseen tasks. The code is available at https://github.com/GaryYang12345/GUI-HARVEST.</summary>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-01T02:31:20Z</published>
+    <arxiv:comment>Preprint</arxiv:comment>
+    <arxiv:primary_category term="cs.LG"/>
+    <author>
+      <name>Geyi Yang</name>
+    </author>
+    <author>
+      <name>Zikun Qu</name>
+    </author>
+    <author>
+      <name>Xiang Li</name>
+    </author>
+    <author>
+      <name>Zhiyong Wang</name>
+    </author>
+    <author>
+      <name>Min Zhang</name>
+    </author>
+    <author>
+      <name>Shipei Zeng</name>
+    </author>
+    <author>
+      <name>Zhongxiang Dai</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2609.40169v1</id>
+    <title>Learning from Research: Toward Lifelong Agent Harness Evolution</title>
+    <updated>2026-09-30T17:00:38Z</updated>
+    <link href="https://arxiv.org/abs/2609.40169v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2609.40169v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Language agents are expected to solve increasingly complex tasks, creating a growing need for continual improvement. One promising approach is to evolve the agent harness, the software that governs tool use, memory management, and task execution, while keeping the underlying language model fixed. Recent methods automate this process by using a meta coding agent to modify the harness based on execution feedback. However, relying on that agent's existing knowledge and observed failures can restrict exploration and make adaptation reactive. Inspired by how human experts learn from the research literature for new solutions, we introduce ScholarEvolve, a framework that automatically draws on state-of-the-art research to guide harness evolution. ScholarEvolve organizes the harness evolution directions into functional modules and uses topic modeling to identify distinct improvement strategies for each module. It implements these strategies and evaluates their combinations to improve task performance. Moreover, the framework is designed to incorporate new publications over time, allowing research advances to drive proactive lifelong evolution. Experiments demonstrate improvements on AppWorld and Tau2-Bench. ScholarEvolve raises Qwen3.5-27B task goal completion from 49.6% to 63.6% on AppWorld Challenge, and raises GPT-5.4-mini pass@1 from 72.7% to 81.9% on Tau2-Bench Telecom.</summary>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-09-30T17:00:38Z</published>
+    <arxiv:primary_category term="cs.AI"/>
+    <author>
+      <name>Jingbo Yang</name>
+    </author>
+    <author>
+      <name>Kwei-Herng Lai</name>
+    </author>
+    <author>
+      <name>Xiaowen Wang</name>
+    </author>
+    <author>
+      <name>Yaar Harari</name>
+    </author>
+    <author>
+      <name>Evgeniy Gabrilovich</name>
+    </author>
+    <author>
+      <name>Shiyu Chang</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2609.39304v4</id>
+    <title>Scale and Selection: What Makes Automatic Harness Evolution Work for Visual-Interface Robot Agents</title>
+    <updated>2026-10-22T09:11:25Z</updated>
+    <link href="https://arxiv.org/abs/2609.39304v4" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2609.39304v4" rel="related" type="application/pdf" title="pdf"/>
+    <summary>When an off-the-shelf coding agent is used directly as a robot policy, observing a browser-based 3D interface through screenshots and acting by posing a virtual target gripper through a few tools, the agent's harness, its prompts, tools, and control rules, largely determines success, and until now it has been written by hand. We show that this harness can be improved automatically by another coding agent, the optimizer agent, and report two findings about what makes it work. First, the number of rollouts the optimizer agent sees per round governs whether the evolved harness generalizes: with rounds fixed, held-out success rises as the training batch grows from 5 to 100 rollouts, while small batches overfit the training tasks. Second, the optimizer agent must not be given free rein. Accepting every revision it proposes degrades the harness within a few rounds; a simple Champion-Challenger rule that promotes a revision only if it beats the incumbent on the same fixed cases turns the same loop into one that raises held-out success on LIBERO tasks from 51% to 67% over 30 rounds. The evolved harness is also a natural place to attach a pretrained policy, through one tool that hands it control. Distilling the rollouts of that combination back into the policy with multi-teacher on-policy distillation yields a standalone policy at 62.2% on RoboCasa365 under the official protocol, 4.8 points above its starting point with no harness at inference; the evolved harness on top of the distilled policy reaches 71.2% on the RoboCasa365 leaderboard benchmark, 13.1 points above the best published entry, and the loop closes when harness evolution resumes on the stronger policy. Automatic harness evolution for visual-interface robot agents is thus feasible, but its gains hinge on the rollout scale behind each decision and on how the optimizer agent's revisions are selected.</summary>
+    <category term="cs.RO" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-09-30T08:46:38Z</published>
+    <arxiv:comment>15 pages, 5 figures</arxiv:comment>
+    <arxiv:primary_category term="cs.RO"/>
+    <author>
+      <name>Zhijie Wei</name>
+    </author>
+    <author>
+      <name>Ferris Tan</name>
+    </author>
+    <author>
+      <name>Jinghui Wang</name>
+    </author>
+    <author>
+      <name>Hao Zhou</name>
+    </author>
+  </entry>
+</feed>

@@ -1,0 +1,95 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns="http://www.w3.org/2005/Atom">
+  <id>https://arxiv.org/api/DOgyK2nKkQwbvCHJFHYsB/F4jcw</id>
+  <title>arXiv Query: search_query=all:"JIT agent"&amp;id_list=&amp;start=0&amp;max_results=5</title>
+  <updated>2026-10-27T21:30:50Z</updated>
+  <link href="https://arxiv.org/api/query?search_query=all:%22JIT+agent%22&amp;start=0&amp;max_results=5&amp;id_list=" type="application/atom+xml"/>
+  <opensearch:itemsPerPage>5</opensearch:itemsPerPage>
+  <opensearch:totalResults>2</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+  <entry>
+    <id>http://arxiv.org/abs/2608.25593v2</id>
+    <title>JIT-Agent: Scaling Harness Intelligence via Just-in-Time Harness Evolution</title>
+    <updated>2026-09-03T15:46:32Z</updated>
+    <link href="https://arxiv.org/abs/2608.25593v2" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2608.25593v2" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Agent capability is not determined by the model alone. The agent harness, encompassing memory management, planning strategy, action protocol, and tool/skill orchestration, can dominate the contribution of the underlying foundation model. Yet harness design remains manual, task-specific, and fundamentally unscalable. We present JIT-Agent, a harness intelligence model trained to synthesize task-adaptive agent harnesses on the fly for arbitrary off-the-shelf agentic LLMs. We formalize the agent harness as a composable, machine-generatable artifact governed by a fixed four-module protocol, and train JIT-Agent to customize harnesses for a given task at hand, repair harnesses for stable and reliable execution, and self-evolve by distilling performance signals from an expanding archive of prior harness configurations. Equipped with JIT-Agent as a harness helper, DeepSeek-V4-Flash surpasses GPT-5.6 on DeepSearchQA (+9.1) and OdysseyBench (+4.3), while the already strong GLM-5.2 gains up to +20.2 points. Across controlled evaluations, JIT-Agent-generated harnesses are performance-competitive with mature agent runtimes such as OpenCode and Claude Code and consistently improve multi-scale model families of DeepSeek V4, Mimo-V2.5, and Qwen3.6. To our knowledge, JIT-Agent is the first model purpose-built for just-in-time harness generation, establishing harness intelligence as a trainable, transferable, and compounding dimension of agent capability orthogonal to model scaling.</summary>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-08-26T10:05:33Z</published>
+    <arxiv:primary_category term="cs.CL"/>
+    <author>
+      <name>Guibin Zhang</name>
+    </author>
+    <author>
+      <name>Leo Lu</name>
+    </author>
+    <author>
+      <name>Fangzhou Xie</name>
+    </author>
+    <author>
+      <name>Kang Zhu</name>
+    </author>
+    <author>
+      <name>Junhao Wang</name>
+    </author>
+    <author>
+      <name>Zhifei Xie</name>
+    </author>
+    <author>
+      <name>Zhaochen Yu</name>
+    </author>
+    <author>
+      <name>Zihang Liu</name>
+    </author>
+    <author>
+      <name>Zhongxiang Sun</name>
+    </author>
+    <author>
+      <name>Qiankun Li</name>
+    </author>
+    <author>
+      <name>Yue Liao</name>
+    </author>
+    <author>
+      <name>Heng Chang</name>
+    </author>
+    <author>
+      <name>Xiaobin Hu</name>
+    </author>
+    <author>
+      <name>Qibing Ren</name>
+    </author>
+    <author>
+      <name>Wangchunshu Zhou</name>
+    </author>
+    <author>
+      <name>Chuanrui Hu</name>
+    </author>
+    <author>
+      <name>Yafeng Deng</name>
+    </author>
+    <author>
+      <name>Shuicheng Yan</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2609.10248v1</id>
+    <title>A-JIT: Agentic Just-In-Time Software Construction</title>
+    <updated>2026-09-09T14:36:51Z</updated>
+    <link href="https://arxiv.org/abs/2609.10248v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2609.10248v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Traditional software delivery assumes a static paradigm: code is constructed prior to execution and deployed as a fixed artifact. We present Agentic Just-In-Time Software Construction (A-JIT), a paradigm that replaces static binaries with dynamic, software systems that can perpetually evolve to meet changing demands. In A-JIT, an application is an integrated assembly comprising code, a runtime harness, and an embedded AI agent that continuously observes system usage and live execution traces. Much like a traditional JIT compiler specializes machine code to runtime execution paths, A-JIT specializes software logic, workflows, and tool interfaces to meet the specific needs of the end-user. By integrating synthesis directly into the ambient application lifecycle, A-JIT enables applications to dynamically construct missing implementations, generate new capabilities on the fly, and continuously adapt to end-user behavior. We demonstrate how this model supports trace-driven human-AI co-construction and opens a new design space for adaptive, self-evolving software.</summary>
+    <category term="cs.SE" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-09-09T14:36:51Z</published>
+    <arxiv:comment>Technical report for presentation at VMIL 2026</arxiv:comment>
+    <arxiv:primary_category term="cs.SE"/>
+    <author>
+      <name>Mark Marron</name>
+    </author>
+    <author>
+      <name>Earl T. Barr</name>
+    </author>
+  </entry>
+</feed>

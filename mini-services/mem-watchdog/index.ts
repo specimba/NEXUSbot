@@ -33,6 +33,19 @@
  * .zscripts/watchdog-precrash.log BEFORE any kill — respawns truncate dev.log).
  */
 import { spawn } from "node:child_process";
+import fs from "node:fs";
+
+// 2026-10-28 cron-20261028-0825 — SILENT-DEATH FIX. Both dev.sh-launched
+// instances were SIGTERM'd (measured in .zscripts/mini-service-mem-watchdog.log:
+// "terminated by signal SIGTERM" x2) and the manual nohup respawn (pid 5043)
+// later vanished with ZERO trace — watchdog.log kept saying "started" while the
+// OOM guardian was dead for hours (found by the next cron pass: 3 sibling
+// mini-services alive, watchdog gone). Two guards now close the blind spot:
+//   1. signal/exit handlers append a "stopped" line — the next cron pass can
+//      date every death instead of finding silent silence;
+//   2. pidfile (.zscripts/mem-watchdog.pid) single-instance guard — a second
+//      launch exits immediately instead of two cooldown-independent instances
+//      racing killTree/respawn against each other.
 
 // WHY curl, not node:http/fetch: bun's socket layer cannot reach loopback in
 // this sandbox (measured — connection refused to 127.0.0.1 from bun runtime
@@ -109,6 +122,71 @@ function log(line: string) {
   const ts = new Date().toISOString();
   fs.appendFileSync(LOG, `[${ts}] ${line}\n`);
 }
+
+const PID_FILE = `${PROJECT}/.zscripts/mem-watchdog.pid`;
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0); // signal 0 = liveness probe, no side effect
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function watchdogAlive(pid: number): boolean {
+  // cmdline is just "bun index.ts" (dev.sh execs) — the reliable identity is
+  // the process CWD pointing at this service directory.
+  try {
+    const cwd = fs.readlinkSync(`/proc/${pid}/cwd`);
+    return cwd.endsWith("/mini-services/mem-watchdog");
+  } catch {
+    return false;
+  }
+}
+
+function acquireSingleInstance(): boolean {
+  try {
+    const prev = parseInt(fs.readFileSync(PID_FILE, "utf8").trim(), 10);
+    if (Number.isFinite(prev) && prev !== process.pid && pidAlive(prev) && watchdogAlive(prev)) {
+      log(`second launch refused: pid ${prev} already guarding — exiting`);
+      return false;
+    }
+  } catch {
+    /* no/stale pidfile — proceed */
+  }
+  try {
+    fs.writeFileSync(PID_FILE, String(process.pid));
+  } catch {
+    /* best-effort; single-instance is a guard, not a dependency */
+  }
+  return true;
+}
+
+// Death must be LOUD (see header). appendFileSync is synchronous — safe in
+// signal handlers; every branch ends in a real exit so bun never lingers.
+for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"] as const) {
+  process.on(sig, () => {
+    log(`mem-watchdog stopped (signal ${sig})`);
+    try {
+      if (fs.readFileSync(PID_FILE, "utf8").trim() === String(process.pid)) fs.unlinkSync(PID_FILE);
+    } catch {
+      /* best-effort */
+    }
+    process.exit(0);
+  });
+}
+process.on("exit", () => {
+  try {
+    fs.appendFileSync(LOG, `[${new Date().toISOString()}] mem-watchdog exited (code ${process.exitCode ?? 0})\n`);
+  } catch {
+    /* cannot log during exit — ignore */
+  }
+});
+process.on("uncaughtException", (err) => {
+  log(`mem-watchdog CRASH (uncaught): ${err instanceof Error ? err.stack ?? err.message : String(err)}`);
+  process.exit(1);
+});
 
 function getRssMb(): number | null {
   // Sum RSS across the next-server process tree (bun run dev -> next dev -> next-server).
@@ -263,6 +341,7 @@ async function tick() {
   }
 }
 
-log(`mem-watchdog started (limit ${RSS_LIMIT_MB}MB x${STRIKES_NEEDED}, poll ${POLL_MS / 1000}s, cooldown ${COOLDOWN_MS / 60000}min, rss-grace death-path-only)`);
+if (!acquireSingleInstance()) process.exit(0);
+log(`mem-watchdog started pid=${process.pid} (limit ${RSS_LIMIT_MB}MB x${STRIKES_NEEDED}, poll ${POLL_MS / 1000}s, cooldown ${COOLDOWN_MS / 60000}min, rss-grace death-path-only)`);
 setInterval(tick, POLL_MS);
 tick();

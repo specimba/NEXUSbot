@@ -1,0 +1,35 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns="http://www.w3.org/2005/Atom">
+  <id>https://arxiv.org/api/tk8NCCo0j6KEdynUE+ZxhUgrf90</id>
+  <title>arXiv Query: search_query=all:GAUGE AND all:"judge calibration"&amp;id_list=&amp;start=0&amp;max_results=5</title>
+  <updated>2026-10-27T21:30:51Z</updated>
+  <link href="https://arxiv.org/api/query?search_query=all:GAUGE+AND+all:%22judge+calibration%22&amp;start=0&amp;max_results=5&amp;id_list=" type="application/atom+xml"/>
+  <opensearch:itemsPerPage>5</opensearch:itemsPerPage>
+  <opensearch:totalResults>1</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+  <entry>
+    <id>http://arxiv.org/abs/2509.08777v1</id>
+    <title>Calibrating MLLM-as-a-judge via Multimodal Bayesian Prompt Ensembles</title>
+    <updated>2025-09-10T17:06:47Z</updated>
+    <link href="https://arxiv.org/abs/2509.08777v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2509.08777v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Multimodal large language models (MLLMs) are increasingly used to evaluate text-to-image (TTI) generation systems, providing automated judgments based on visual and textual context. However, these "judge" models often suffer from biases, overconfidence, and inconsistent performance across diverse image domains. While prompt ensembling has shown promise for mitigating these issues in unimodal, text-only settings, our experiments reveal that standard ensembling methods fail to generalize effectively for TTI tasks. To address these limitations, we propose a new multimodal-aware method called Multimodal Mixture-of-Bayesian Prompt Ensembles (MMB). Our method uses a Bayesian prompt ensemble approach augmented by image clustering, allowing the judge to dynamically assign prompt weights based on the visual characteristics of each sample. We show that MMB improves accuracy in pairwise preference judgments and greatly enhances calibration, making it easier to gauge the judge's true uncertainty. In evaluations on two TTI benchmarks, HPSv2 and MJBench, MMB outperforms existing baselines in alignment with human annotations and calibration across varied image content. Our findings highlight the importance of multimodal-specific strategies for judge calibration and suggest a promising path forward for reliable large-scale TTI evaluation.</summary>
+    <category term="cs.CV" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2025-09-10T17:06:47Z</published>
+    <arxiv:comment>17 pages, 8 figures, Accepted at ICCV 2025</arxiv:comment>
+    <arxiv:primary_category term="cs.CV"/>
+    <author>
+      <name>Eric Slyman</name>
+    </author>
+    <author>
+      <name>Mehrab Tanjim</name>
+    </author>
+    <author>
+      <name>Kushal Kafle</name>
+    </author>
+    <author>
+      <name>Stefan Lee</name>
+    </author>
+  </entry>
+</feed>

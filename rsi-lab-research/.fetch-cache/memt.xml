@@ -1,0 +1,245 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns="http://www.w3.org/2005/Atom">
+  <id>https://arxiv.org/api/7QR7BnbJ1E0K64QGg2Hzc+NwhXw</id>
+  <title>arXiv Query: search_query=all:"MemT" AND all:agent AND all:memory&amp;id_list=&amp;start=0&amp;max_results=5</title>
+  <updated>2026-10-27T21:30:52Z</updated>
+  <link href="https://arxiv.org/api/query?search_query=all:%22MemT%22+AND+(all:agent+AND+all:memory)&amp;start=0&amp;max_results=5&amp;id_list=" type="application/atom+xml"/>
+  <opensearch:itemsPerPage>5</opensearch:itemsPerPage>
+  <opensearch:totalResults>1</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+  <entry>
+    <id>http://arxiv.org/abs/2610.26825v2</id>
+    <title>MemT-1.0: Towards Memory-Native Evolution</title>
+    <updated>2026-10-20T14:30:38Z</updated>
+    <link href="https://arxiv.org/abs/2610.26825v2" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.26825v2" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Memory-native evolution requires making memory an intrinsic capability of foundation models, enabling them to continuously accumulate and utilize information. To this end, we introduce MemT-1.0, a new architecture of memory foundation models that internalize memory as part of model computation. Building on Metis, MemT-1.0 employs Gated DeltaNet-2 with a stable token-level memory update mechanism within each turn. We further introduce Mixture-of-Storage to scale native memory capacity. Following a deliberate backbone preparation, we develop a two-stage training pipeline consisting of continued pre-training and post-training, supported by 34B tokens of training data and efficient training and inference infrastructure. We release a model family comprising MemT-1.0-Nano and MemT-1.0-Flash, and conduct a comprehensive evaluation of memory and general capabilities. The results show that they outperform the parametric memory baselines on average and remain competitive with retrieval-augmented methods, while largely preserving general capabilities. At a history length of 128K tokens, MemT-1.0-Nano achieves approximately $1.86\times$ end-to-end inference speedup and a $66\times$ reduction in persistent storage relative to full context KV cache. By internalizing retrieved procedural experience, MemT-1.0 improves task success on agentic tasks, providing a practical step toward memory-native evolution.</summary>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-19T17:54:35Z</published>
+    <arxiv:comment>66 pages, 15 figures, 16 tables</arxiv:comment>
+    <arxiv:primary_category term="cs.CL"/>
+    <author>
+      <name>Zhiyu Li</name>
+    </author>
+    <author>
+      <name>Zeyu Zhang</name>
+    </author>
+    <author>
+      <name>Linyun Liu</name>
+    </author>
+    <author>
+      <name>Yiwei Bu</name>
+    </author>
+    <author>
+      <name>Chenyang Xi</name>
+    </author>
+    <author>
+      <name>Xichong Zhang</name>
+    </author>
+    <author>
+      <name>Yi Yu</name>
+    </author>
+    <author>
+      <name>Yu Yu</name>
+    </author>
+    <author>
+      <name>Zhichen Liu</name>
+    </author>
+    <author>
+      <name>Yuxiao Yi</name>
+    </author>
+    <author>
+      <name>Chunyu Li</name>
+    </author>
+    <author>
+      <name>Haoran Liu</name>
+    </author>
+    <author>
+      <name>Zhenkai Ding</name>
+    </author>
+    <author>
+      <name>Le Zhou</name>
+    </author>
+    <author>
+      <name>Juncheng Zhang</name>
+    </author>
+    <author>
+      <name>Boyu Chen</name>
+    </author>
+    <author>
+      <name>Zehao Lin</name>
+    </author>
+    <author>
+      <name>Guorui Li</name>
+    </author>
+    <author>
+      <name>Renyu Fu</name>
+    </author>
+    <author>
+      <name>Ji Li</name>
+    </author>
+    <author>
+      <name>Youyang Xia</name>
+    </author>
+    <author>
+      <name>Jiajun Shen</name>
+    </author>
+    <author>
+      <name>Harvey Li</name>
+    </author>
+    <author>
+      <name>Jingsong Zhou</name>
+    </author>
+    <author>
+      <name>Helan Hu</name>
+    </author>
+    <author>
+      <name>Tong Shen</name>
+    </author>
+    <author>
+      <name>Tianxiao Xu</name>
+    </author>
+    <author>
+      <name>Chenye Han</name>
+    </author>
+    <author>
+      <name>Weijie Li</name>
+    </author>
+    <author>
+      <name>Zhongquan Zhou</name>
+    </author>
+    <author>
+      <name>Hongming Xu</name>
+    </author>
+    <author>
+      <name>Yuekeng Li</name>
+    </author>
+    <author>
+      <name>Erenkai Zhu</name>
+    </author>
+    <author>
+      <name>Peng Yu</name>
+    </author>
+    <author>
+      <name>Wenhao Li</name>
+    </author>
+    <author>
+      <name>Jingyi Kang</name>
+    </author>
+    <author>
+      <name>Xixuan Hao</name>
+    </author>
+    <author>
+      <name>Xuzhou Zhu</name>
+    </author>
+    <author>
+      <name>Can Chen</name>
+    </author>
+    <author>
+      <name>Jiawei Liu</name>
+    </author>
+    <author>
+      <name>Chen Jiang</name>
+    </author>
+    <author>
+      <name>Tao Jiang</name>
+    </author>
+    <author>
+      <name>Fangwei Xiang</name>
+    </author>
+    <author>
+      <name>Zepeng Yao</name>
+    </author>
+    <author>
+      <name>Kai Chen</name>
+    </author>
+    <author>
+      <name>Guang Yang</name>
+    </author>
+    <author>
+      <name>Mingfei Lu</name>
+    </author>
+    <author>
+      <name>Chunhui Li</name>
+    </author>
+    <author>
+      <name>Zhengxuan Jiang</name>
+    </author>
+    <author>
+      <name>Bo Tang</name>
+    </author>
+    <author>
+      <name>Shiyu Zhan</name>
+    </author>
+    <author>
+      <name>Yihang Sun</name>
+    </author>
+    <author>
+      <name>Jie Chu</name>
+    </author>
+    <author>
+      <name>Wenjun Xiong</name>
+    </author>
+    <author>
+      <name>Zhenxiang Hua</name>
+    </author>
+    <author>
+      <name>Chen Lin</name>
+    </author>
+    <author>
+      <name>Detong Su</name>
+    </author>
+    <author>
+      <name>Dongyu Deng</name>
+    </author>
+    <author>
+      <name>Qiuping Ding</name>
+    </author>
+    <author>
+      <name>Guofeng Ding</name>
+    </author>
+    <author>
+      <name>Si Chen</name>
+    </author>
+    <author>
+      <name>Guohua Wen</name>
+    </author>
+    <author>
+      <name>Xu Chen</name>
+    </author>
+    <author>
+      <name>Zhi-Qin John Xu</name>
+    </author>
+    <author>
+      <name>Ying-Cong Chen</name>
+    </author>
+    <author>
+      <name>Ningyu Zhang</name>
+    </author>
+    <author>
+      <name>Haofen Wang</name>
+    </author>
+    <author>
+      <name>Muning Wen</name>
+    </author>
+    <author>
+      <name>Haotian Chen</name>
+    </author>
+    <author>
+      <name>Wentao Zhang</name>
+    </author>
+    <author>
+      <name>Xuanhe Zhou</name>
+    </author>
+    <author>
+      <name>Rita Zhang</name>
+    </author>
+    <author>
+      <name>Junchi Yan</name>
+    </author>
+    <author>
+      <name>Feiyu Xiong</name>
+    </author>
+  </entry>
+</feed>

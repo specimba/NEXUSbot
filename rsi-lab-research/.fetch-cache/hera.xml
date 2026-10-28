@@ -1,0 +1,40 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns="http://www.w3.org/2005/Atom">
+  <id>https://arxiv.org/api/LD2/ex+GIaI4rV20kQ4RPB0sUOg</id>
+  <title>arXiv Query: search_query=all:HERA AND all:abstention&amp;id_list=&amp;start=0&amp;max_results=5</title>
+  <updated>2026-10-27T21:30:51Z</updated>
+  <link href="https://arxiv.org/api/query?search_query=all:HERA+AND+all:abstention&amp;start=0&amp;max_results=5&amp;id_list=" type="application/atom+xml"/>
+  <opensearch:itemsPerPage>5</opensearch:itemsPerPage>
+  <opensearch:totalResults>1</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+  <entry>
+    <id>http://arxiv.org/abs/2610.06563v1</id>
+    <title>HERA: Harness-Environment Co-Evolution for Reliable Agentic Abstention</title>
+    <updated>2026-10-05T15:49:12Z</updated>
+    <link href="https://arxiv.org/abs/2610.06563v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.06563v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Large language model (LLM) agents are increasingly capable of acting in complex tool-use environments, yet they often fail to recognize when tasks are infeasible and no valid solution exists. Recent work has formalized this reliability gap as the problem of agentic abstention, and existing approaches typically optimize a model or agent harness against a fixed set of tasks, leading to limited generalization to unseen failure modes. We introduce HERA, a framework for harness-environment co-evolution for agentic abstention. HERA consists of (i) a pipeline to automatically construct verifiable pairs of feasible and infeasible tasks by applying controlled environment mutations that transform solvable tasks into cases requiring abstention, and (ii) a co-evolution procedure in which performance failures on previous tasks are used to drive harness adaptation and generate new execution environments and tasks geared towards previous weaknesses. On held-out evaluation tasks, an evolved harness from HERA improves abstention accuracy from 61.7% to 83.3% while improving feasible-task completion from 68.3% to 76.7%, achieving the highest abstention and feasible-task completion among the compared methods. The resulting best harness transfers across 19 other LLMs, improving abstention accuracy by 15.3 percentage points on average without any model-specific optimization, and enabling smaller models to match the performance of more powerful models at an estimated 85% lower cost.</summary>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-05T15:49:12Z</published>
+    <arxiv:comment>23 pages. Project page: https://hera-bench.github.io/</arxiv:comment>
+    <arxiv:primary_category term="cs.AI"/>
+    <author>
+      <name>Han Luo</name>
+    </author>
+    <author>
+      <name>Bingbing Wen</name>
+    </author>
+    <author>
+      <name>Guang Yang</name>
+    </author>
+    <author>
+      <name>Zora Zhiruo Wang</name>
+    </author>
+    <author>
+      <name>Pan Lu</name>
+    </author>
+    <author>
+      <name>Lucy Lu Wang</name>
+    </author>
+  </entry>
+</feed>

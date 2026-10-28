@@ -1,0 +1,39 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns="http://www.w3.org/2005/Atom">
+  <id>https://arxiv.org/api/4SGF54lSYxHZq9FGaGut1m3nydk</id>
+  <title>arXiv Query: search_query=all:EMHO AND all:harness&amp;id_list=&amp;start=0&amp;max_results=5</title>
+  <updated>2026-10-27T21:30:52Z</updated>
+  <link href="https://arxiv.org/api/query?search_query=all:EMHO+AND+all:harness&amp;start=0&amp;max_results=5&amp;id_list=" type="application/atom+xml"/>
+  <opensearch:itemsPerPage>5</opensearch:itemsPerPage>
+  <opensearch:totalResults>1</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+  <entry>
+    <id>http://arxiv.org/abs/2610.08432v1</id>
+    <title>EMHO: EMbodied Agent Harness Optimization via Experience Traces</title>
+    <updated>2026-10-06T14:30:42Z</updated>
+    <link href="https://arxiv.org/abs/2610.08432v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.08432v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Improving embodied agents often focuses on optimizing the underlying model through training, while the surrounding agent harness that controls planning, context, and tool use is typically engineered. We ask whether this harness can instead improve itself directly from experience traces under sparse environmental feedback. We propose EMbodied Agent Harness Optimization (EMHO), a self-evolving framework that keeps the embodied model frozen and iteratively revises its harness by analyzing execution trajectories and prior harness history. EMHO optimizes beyond skills or recovery prompts, modifying how the agent monitors progress, uses vision tools, grounds observations, and responds to failures. To support multiple subtasks with a single harness, we introduce EMHO-Merge, which addresses trade-offs in jointly optimizing a single shared harness across subtasks by using episode-level gains and losses to guide evidence-supported refinement of when and how revised behaviors are applied. We evaluate EMHO on EmbodiedBench across navigation and manipulation tasks, and EMHO consistently improves task success for both Qwen 9B and 27B models. Qualitative analysis shows that EMHO goes beyond recovering from failures and unproductive actions to reshape how the embodied agent interprets and interacts with its environment.</summary>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-06T14:30:42Z</published>
+    <arxiv:primary_category term="cs.AI"/>
+    <author>
+      <name>Hyun Jung Lee</name>
+    </author>
+    <author>
+      <name>Jungtaek Kim</name>
+    </author>
+    <author>
+      <name>Jongwon Jeong</name>
+    </author>
+    <author>
+      <name>Tae-Eui Kam</name>
+    </author>
+    <author>
+      <name>Donghyun Kim</name>
+    </author>
+    <author>
+      <name>Yong Jae Lee</name>
+    </author>
+  </entry>
+</feed>

@@ -178,3 +178,158 @@ model UsageEvent {
   @@index([ts])
   @@index([kind, userHandle])
 }
+
+// ---------------------------------------------------------------------------
+// v35 RSI Lab — L3 frozen eval suites + L4 gated evolution cycles
+// (owner directive 2026-10-29: "start the eval modules and structures …
+// RSI harness evolution with smart evolution upgrade cycles").
+//
+// Honesty contract (docs/scope.md L3/L4, docs/verify.md addendum):
+// - RsiSuite/RsiTask rows are FROZEN once seeded (configHash-sealed); the
+//   engine never writes to them — the AUDIT stage re-checks every hash.
+// - Every RsiRun metric is live-measured; failures are stored as failures.
+// - Promotion (RsiPlugin status "adopted") requires the owner gate; deploy
+//   remains a manual Edge Cortex Deploy action — nothing auto-deploys.
+// ---------------------------------------------------------------------------
+
+// L3 paper library — the owner's curated RSI corpus (48 papers, seeded from
+// rsi-lab-research/curation-papers.json; all entries web-abstract evidence).
+model RsiPaper {
+  id           String   @id @default(cuid())
+  citeKey      String   @unique
+  title        String
+  authorsShort String
+  year         Int
+  arxivId      String
+  url          String
+  category     String // harness-evolution | verification-eval | efficiency-substrate | safety-governance | training-methods
+  relevance    String // core | supporting | peripheral
+  oneLine      String
+  keyTechnique String
+  appliesTo    String
+  evidence     String
+  createdAt    DateTime @default(now())
+
+  @@index([category])
+}
+
+// L3 frozen suite (v1.0). Seeded once from eval-design.json suiteBlueprints;
+// never overwritten by key — tamper-evidence via configHash re-check at AUDIT.
+model RsiSuite {
+  id          String    @id @default(cuid())
+  key         String    @unique
+  name        String
+  category    String // capability | research-grounding | safety | reliability | harness-discipline
+  description String
+  grounding   String
+  version     String    @default("1.0")
+  configHash  String // sha256 over canonical JSON of ordered task configs
+  frozenAt    DateTime  @default(now())
+  createdAt   DateTime  @default(now())
+  tasks       RsiTask[]
+  runs        RsiRun[]
+}
+
+model RsiTask {
+  id             String  @id @default(cuid())
+  suiteId        String
+  suite          RsiSuite @relation(fields: [suiteId], references: [id])
+  idx            Int
+  name           String
+  prompt         String
+  verifier       String // one of the 12 frozen verifier type ids
+  verifierConfig String  @default("{}") // JSON per eval-design.json verifierTypes
+  difficulty     Int     @default(3) // 1-5
+  weight         Float   @default(1) // 0-1
+  tags           String  @default("[]") // JSON string array (SQLite: no list primitives)
+}
+
+// Candidate prompt-delta module (PluginRSI-style atomized row). The persona
+// under test = baseline snapshot + adopted/active promptDelta only.
+model RsiPlugin {
+  id          String   @id @default(cuid())
+  name        String
+  kind        String   @default("prompt-delta")
+  payload     String   @default("{}") // JSON: {promptDelta?, notes, inspirationArxiv[]}
+  description String   @default("")
+  sourceArxiv String   @default("")
+  status      String   @default("draft") // draft | active | adopted | rejected
+  cycleId     String?
+  createdAt   DateTime @default(now())
+
+  @@index([status])
+}
+
+// L4 evolution cycle — 9 stages scout→record, terminal adopted|rejected|aborted.
+model RsiCycle {
+  id               String          @id @default(cuid())
+  name             String
+  thesis           String
+  techniqueRefs    String          @default("[]") // JSON arxivIds resolved against RsiPaper
+  status           String          @default("scout")
+  stageData        String          @default("{}") // JSON per-stage scratch (scout counts, run ids, canary, module, …)
+  baselineSnapshot String          @default("") // persona/system prompt at creation (attributable baselines)
+  pluginId         String?
+  suiteIds         String          @default("[]") // JSON suite ids used for shadow-eval
+  gateResults      String          @default("{}") // JSON G1/G2/G3/G5/G7 verdicts with real numbers
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  events           RsiCycleEvent[]
+
+  @@index([status, updatedAt])
+}
+
+// Append-only hash-chained cycle ledger: seq per cycle, eventHash =
+// sha256(prevHash + canonical_json(payload)) — replay-verified at AUDIT.
+model RsiCycleEvent {
+  id        String   @id @default(cuid())
+  cycleId   String
+  cycle     RsiCycle @relation(fields: [cycleId], references: [id])
+  seq       Int
+  stage     String
+  type      String
+  payload   String   @default("{}")
+  prevHash  String
+  hash      String
+  createdAt DateTime @default(now())
+
+  @@unique([cycleId, seq])
+}
+
+// One paired eval battery execution (baseline or candidate leg) on one suite.
+model RsiRun {
+  id             String   @id @default(cuid())
+  cycleId        String?
+  suiteId        String
+  suite          RsiSuite @relation(fields: [suiteId], references: [id])
+  variant        String // baseline | candidate
+  pluginId       String?
+  status         String   @default("queued") // queued | running | done | error
+  passRate       Float?
+  judgeAvg       Float?
+  abstainRate    Float?
+  latencyP50Ms   Int?
+  latencyP95Ms   Int?
+  tokensAvg      Int?
+  costUnits      Float?
+  compositeScore Float?
+  resultsJson    String   @default("[]") // per-task verdicts (replyExcerpt capped, engine truth)
+  engineJson     String   @default("{}") // {provider, modelId} truth per v34.1 convention
+  error          String   @default("")
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  createdAt      DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// Adopted-technique causal record (Causal Improvement Graph-style edges).
+model RsiImprovementEdge {
+  id        String   @id @default(cuid())
+  cycleId   String
+  technique String
+  metric    String
+  before    Float
+  after     Float
+  createdAt DateTime @default(now())
+}

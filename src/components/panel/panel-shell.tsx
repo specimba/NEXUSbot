@@ -21,10 +21,11 @@ import {
 } from "lucide-react";
 
 /**
- * Tab registry (frozen order). Eval stays gated behind G6. The Widgets tab
- * replaces the old Variables registry tab: widgets are what viewers SEE —
- * the {{namespace.field}} template dialect moves into the bot-commands work
- * where it actually executes.
+ * Tab registry (frozen order). G6 opened by owner directive 2026-10-29:
+ * the Eval tab is now the RSI Lab (L3 frozen suites + L4 gated cycles).
+ * The Widgets tab replaces the old Variables registry tab: widgets are what
+ * viewers SEE — the {{namespace.field}} template dialect moves into the
+ * bot-commands work where it actually executes.
  */
 const TABS = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
@@ -33,7 +34,7 @@ const TABS = [
   { id: "widgets", label: "Widgets", icon: AppWindow },
   { id: "connectors", label: "Connectors", icon: PlugZap },
   { id: "settings", label: "Settings", icon: SlidersHorizontal },
-  { id: "eval", label: "Eval", icon: FlaskConical, locked: true },
+  { id: "eval", label: "Eval · RSI", icon: FlaskConical },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -102,8 +103,7 @@ export function PanelShell() {
           className="mx-auto w-full max-w-5xl overflow-x-auto px-4 pb-2"
         >
           <div className="flex gap-1" role="tablist">
-            {TABS.map(({ id, label, icon: Icon, ...rest }) => {
-              const locked = "locked" in rest && rest.locked;
+            {TABS.map(({ id, label, icon: Icon }) => {
               const active = tab === id;
               return (
                 <button
@@ -121,7 +121,6 @@ export function PanelShell() {
                 >
                   <Icon className="size-4" aria-hidden="true" />
                   {label}
-                  {locked && <span className="text-[10px] text-accent text-glow-amber">G6</span>}
                 </button>
               );
             })}
@@ -157,4 +156,4 @@ import { PipelineTab } from "./pipeline";
 import { WidgetsTab } from "./widgets";
 import { ConnectorsTab } from "./connectors";
 import { SettingsTab } from "./settings";
-import { EvalTab } from "./eval-locked";
+import { EvalTab } from "./eval/rsi-lab";

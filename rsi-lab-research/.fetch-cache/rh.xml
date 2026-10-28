@@ -1,0 +1,205 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns="http://www.w3.org/2005/Atom">
+  <id>https://arxiv.org/api/Ajo5EiZdBEj3L4IDAmoOgosVf24</id>
+  <title>arXiv Query: search_query=abs:"reward hacking" AND abs:"self-improvement"&amp;id_list=&amp;start=0&amp;max_results=6</title>
+  <updated>2026-10-27T21:31:32Z</updated>
+  <link href="https://arxiv.org/api/query?search_query=abs:%22reward+hacking%22+AND+abs:%22self-improvement%22&amp;start=0&amp;max_results=6&amp;id_list=" type="application/atom+xml"/>
+  <opensearch:itemsPerPage>6</opensearch:itemsPerPage>
+  <opensearch:totalResults>21</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+  <entry>
+    <id>http://arxiv.org/abs/2511.23002v2</id>
+    <title>JarvisEvo: Towards a Self-Evolving Photo Editing Agent with Synergistic Editor-Evaluator Optimization</title>
+    <updated>2025-12-04T14:58:22Z</updated>
+    <link href="https://arxiv.org/abs/2511.23002v2" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2511.23002v2" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Agent-based editing models have substantially advanced interactive experiences, processing quality, and creative flexibility. However, two critical challenges persist: (1) instruction hallucination, text-only chain-of-thought (CoT) reasoning cannot fully prevent factual errors due to inherent information bottlenecks; (2) reward hacking, dynamic policy optimization against static reward models allows agents to exploit flaws in reward functions. To address these issues, we propose JarvisEvo, a unified image editing agent that emulates an expert human designer by iteratively editing, selecting appropriate tools, evaluating results, and reflecting on its own decisions to refine outcomes. JarvisEvo offers three key advantages: (1) an interleaved multimodal chain-of-thought (iMCoT) reasoning mechanism that enhances instruction following and editing quality; (2) a synergistic editor-evaluator policy optimization (SEPO) framework that enables self-improvement without external rewards, effectively mitigating reward hacking; and (3) support for both global and local fine-grained editing through seamless integration of Adobe Lightroom. On ArtEdit-Bench, JarvisEvo outperforms Nano-Banana by an average of 18.95% on preservative editing metrics, including a substantial 44.96% improvement in pixel-level content fidelity. Project page: https://jarvisevo.vercel.app/</summary>
+    <category term="cs.CV" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2025-11-28T09:04:51Z</published>
+    <arxiv:comment>31 pages, 18 figures</arxiv:comment>
+    <arxiv:primary_category term="cs.CV"/>
+    <author>
+      <name>Yunlong Lin</name>
+    </author>
+    <author>
+      <name>Linqing Wang</name>
+    </author>
+    <author>
+      <name>Kunjie Lin</name>
+    </author>
+    <author>
+      <name>Zixu Lin</name>
+    </author>
+    <author>
+      <name>Kaixiong Gong</name>
+    </author>
+    <author>
+      <name>Wenbo Li</name>
+    </author>
+    <author>
+      <name>Bin Lin</name>
+    </author>
+    <author>
+      <name>Zhenxi Li</name>
+    </author>
+    <author>
+      <name>Shiyi Zhang</name>
+    </author>
+    <author>
+      <name>Yuyang Peng</name>
+    </author>
+    <author>
+      <name>Wenxun Dai</name>
+    </author>
+    <author>
+      <name>Xinghao Ding</name>
+    </author>
+    <author>
+      <name>Chunyu Wang</name>
+    </author>
+    <author>
+      <name>Qinglin Lu</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2411.17760v1</id>
+    <title>Efficient Self-Improvement in Multimodal Large Language Models: A Model-Level Judge-Free Approach</title>
+    <updated>2024-11-26T00:44:37Z</updated>
+    <link href="https://arxiv.org/abs/2411.17760v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2411.17760v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Self-improvement in multimodal large language models (MLLMs) is crucial for enhancing their reliability and robustness. However, current methods often rely heavily on MLLMs themselves as judges, leading to high computational costs and potential pitfalls like reward hacking and model collapse. This paper introduces a novel, model-level judge-free self-improvement framework. Our approach employs a controlled feedback mechanism while eliminating the need for MLLMs in the verification loop. We generate preference learning pairs using a controllable hallucination mechanism and optimize data quality by leveraging lightweight, contrastive language-image encoders to evaluate and reverse pairs when necessary. Evaluations across public benchmarks and our newly introduced IC dataset designed to challenge hallucination control demonstrate that our model outperforms conventional techniques. We achieve superior precision and recall with significantly lower computational demands. This method offers an efficient pathway to scalable self-improvement in MLLMs, balancing performance gains with reduced resource requirements.</summary>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.CV" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2024-11-26T00:44:37Z</published>
+    <arxiv:primary_category term="cs.CL"/>
+    <author>
+      <name>Shijian Deng</name>
+    </author>
+    <author>
+      <name>Wentian Zhao</name>
+    </author>
+    <author>
+      <name>Yu-Jhe Li</name>
+    </author>
+    <author>
+      <name>Kun Wan</name>
+    </author>
+    <author>
+      <name>Daniel Miranda</name>
+    </author>
+    <author>
+      <name>Ajinkya Kale</name>
+    </author>
+    <author>
+      <name>Yapeng Tian</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2601.12310v3</id>
+    <title>Survival is the Only Reward: Sustainable Self-Training Through Environment-Mediated Selection</title>
+    <updated>2026-10-22T07:26:55Z</updated>
+    <link href="https://arxiv.org/abs/2601.12310v3" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2601.12310v3" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Self-training systems often degenerate due to the lack of an external criterion for judging data quality, leading to reward hacking and semantic drift. This paper provides a proof-of-concept system architecture for stable self-training under sparse external feedback and bounded memory, and empirically characterises its learning dynamics and failure modes.
+  We introduce a self-training architecture in which learning is mediated exclusively by environmental viability, rather than by reward, objective functions, or externally defined fitness criteria. Candidate behaviours are executed under real resource constraints, and only those whose environmental effects both persist and preserve the possibility of future interaction are propagated. The environment does not provide semantic feedback, dense rewards, or task-specific supervision; selection operates solely through differential survival of behaviours as world-altering events, making proxy optimisation impossible and rendering reward-hacking evolutionarily unstable.
+  Analysis of semantic dynamics shows that improvement arises primarily through the persistence of effective and repeatable strategies under a regime of consolidation and pruning, a paradigm we refer to as negative-space learning (NSL), and that models develop meta-learning strategies (such as deliberate experimental failure in order to elicit informative error messages) without explicit instruction. This work establishes that environment-grounded selection enables sustainable open-ended self-improvement, offering a viable path toward more robust and generalisable autonomous systems without reliance on human-curated data or complex reward shaping.</summary>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-01-18T08:35:56Z</published>
+    <arxiv:primary_category term="cs.AI"/>
+    <author>
+      <name>Jennifer Dodgson</name>
+    </author>
+    <author>
+      <name>Alfath Daryl Alhajir</name>
+    </author>
+    <author>
+      <name>Michael Joedhitya</name>
+    </author>
+    <author>
+      <name>Akira Rafhael Janson Pattirane</name>
+    </author>
+    <author>
+      <name>Surender Suresh Kumar</name>
+    </author>
+    <author>
+      <name>Joseph Lim</name>
+    </author>
+    <author>
+      <name>C. H. Peh</name>
+    </author>
+    <author>
+      <name>Adith Ramdas</name>
+    </author>
+    <author>
+      <name>Steven Zhang Zhexu</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2508.09155v1</id>
+    <title>A Rolling Stone Gathers No Moss: Adaptive Policy Optimization for Stable Self-Evaluation in Large Multimodal Models</title>
+    <updated>2025-08-05T07:54:01Z</updated>
+    <link href="https://arxiv.org/abs/2508.09155v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2508.09155v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Self-evaluation, a model's ability to assess the correctness of its own output, is crucial for Large Multimodal Models (LMMs) to achieve self-improvement in multi-turn conversations, yet largely absent in foundation models. Recent work has employed reinforcement learning (RL) to enhance self-evaluation; however, its fixed reward mechanism suffers from reward hacking when optimizing multiple training objectives, leading to model collapse. In this paper we propose AdaPO, an online reinforcement learning framework capable of adaptively adjusting training objective in real time according to the current training state for each task. Specifically, to mitigate reward hacking , AdaPO introduces an Adaptive Reward Model (ARM) and a Reward Aware Dynamic KL Regularization mechanism. ARM assesses the task's training state from the distribution of model generated multi-turn trajectories' performance. Reward Aware Dynamic KL replaces a fixed penalty with dynamic coefficients which is modulated by the reward gap between different multi-turn situations. Notably, our method automatically and smoothly adjusts its learning focus based on sub-tasks' training progress without manual intervention. Extensive experiments over 8 benchmarks and various models show that our method significantly enhances both direct reasoning and self-evaluation capability. We will release our code to contribute to the community.</summary>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2025-08-05T07:54:01Z</published>
+    <arxiv:comment>17 pages, 9 figures</arxiv:comment>
+    <arxiv:primary_category term="cs.LG"/>
+    <author>
+      <name>Wenkai Wang</name>
+    </author>
+    <author>
+      <name>Hongcan Guo</name>
+    </author>
+    <author>
+      <name>Zheqi Lv</name>
+    </author>
+    <author>
+      <name>Shengyu Zhang</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2512.23760v1</id>
+    <title>Audited Skill-Graph Self-Improvement for Agentic LLMs via Verifiable Rewards, Experience Synthesis, and Continual Memory</title>
+    <updated>2025-12-28T19:39:47Z</updated>
+    <link href="https://arxiv.org/abs/2512.23760v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2512.23760v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Reinforcement learning is increasingly used to transform large language models into agentic systems that act over long horizons, invoke tools, and manage memory under partial observability. While recent work has demonstrated performance gains through tool learning, verifiable rewards, and continual training, deployed self-improving agents raise unresolved security and governance challenges: optimization pressure can incentivize reward hacking, behavioral drift is difficult to audit or reproduce, and improvements are often entangled in opaque parameter updates rather than reusable, verifiable artifacts.
+  This paper proposes Audited Skill-Graph Self-Improvement (ASG-SI), a framework that treats self-improvement as iterative compilation of an agent into a growing, auditable skill graph. Each candidate improvement is extracted from successful trajectories, normalized into a skill with an explicit interface, and promoted only after passing verifier-backed replay and contract checks. Rewards are decomposed into reconstructible components derived from replayable evidence, enabling independent audit of promotion decisions and learning signals. ASG-SI further integrates experience synthesis for scalable stress testing and continual memory control to preserve long-horizon performance under bounded context.
+  We present a complete system architecture, threat model, and security analysis, and provide a fully runnable reference implementation that demonstrates verifier-backed reward construction, skill compilation, audit logging, and measurable improvement under continual task streams. ASG-SI reframes agentic self-improvement as accumulation of verifiable, reusable capabilities, offering a practical path toward reproducible evaluation and operational governance of self-improving AI agents.</summary>
+    <category term="cs.CR" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2025-12-28T19:39:47Z</published>
+    <arxiv:comment>11 pages, 4 figures. Includes a complete runnable reference implementation and audit logging framework</arxiv:comment>
+    <arxiv:primary_category term="cs.CR"/>
+    <author>
+      <name>Ken Huang</name>
+    </author>
+    <author>
+      <name>Jerry Huang</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2609.18642v1</id>
+    <title>STRETCH the Boundaries: A Unified Self-Taught Framework for Progressive LLM Evolution</title>
+    <updated>2026-09-16T13:27:16Z</updated>
+    <link href="https://arxiv.org/abs/2609.18642v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2609.18642v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Large language models (LLMs) often suffer from capability stagnation in self-improvement training because fixed difficulty levels fail to adapt to their evolving proficiency. To address this issue, we propose STRETCH (Self-Taught Reasoning Evolution via Targeted CHallenge), a unified framework inspired by cognitive scaffolding theory. STRETCH introduces a dynamic Stretch Zone mechanism that continuously aligns question difficulty with the model's solving capability. Within a single parameter space, the model alternates between a Scaffolder that generates adaptive, boundary-pushing challenges and a Learner that that optimizes its solving trajectories through reinforcement learning. This dual-loop co-evolution effectively stabilizes training, mitigates reward hacking and promote progressive reasoning growth. Experiments on both negotiation and operation research benchmarks demonstrate that STRETCH consistently outperforms strong prompting and domain-specific baselines. Further scaffolder configuration analysis shows that dynamic difficulty alignment is critical for sustained capability improvement and synchronized reasoning evolution.</summary>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-09-16T13:27:16Z</published>
+    <arxiv:primary_category term="cs.CL"/>
+    <author>
+      <name>Yajie Yu</name>
+    </author>
+    <author>
+      <name>Mark Lee</name>
+    </author>
+    <author>
+      <name>Yue Feng</name>
+    </author>
+  </entry>
+</feed>
