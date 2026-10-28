@@ -51,9 +51,16 @@ async function main() {
   const dbUrl = decryptSecret(cred.cipher);
   const encKey = process.env.ENCRYPTION_KEY ?? "";
   if (!encKey) throw new Error("ENCRYPTION_KEY missing");
-  const sig = (id: string) => createHmac("sha256", encKey).update(id).digest("hex");
+  // 2026-10-29 fix: mirror.ts panelSig() truncates the HMAC hex to 32 chars —
+  // this script compared against the FULL 64-char digest, so every honest row
+  // failed verification and the whole backfill silently no-oped ("unsigned/
+  // spam ignored"). Slice to 32 to match the pusher, exactly.
+  const sig = (id: string) => createHmac("sha256", encKey).update(id).digest("hex").slice(0, 32);
 
-  const sql = postgres(dbUrl, { max: 2, idle_timeout: 5, connect_timeout: 10 });
+  // 2026-10-29 fix: the vault URI is the Supabase transaction pooler (port
+  // 6543) — TLS required and NO prepared statements (pgbouncer), matching
+  // probePooler()'s measured-working options in src/lib/brain/mirror.ts.
+  const sql = postgres(dbUrl, { max: 2, idle_timeout: 5, connect_timeout: 10, ssl: "require", prepare: false });
 
   const ints = (await sql`
     SELECT * FROM nexus_mirror_interactions ORDER BY created_at ASC LIMIT 2000

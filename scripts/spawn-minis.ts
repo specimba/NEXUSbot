@@ -43,6 +43,15 @@ const SERVICES: Array<{ dir: string; cmd: string; log: string; hint: string; lab
     hint: "bun",
   },
   {
+    // 2026-10-29: bench-cadence (:3012, staleness checks) was missing from the
+    // spawner — it ran via dev.sh boots only, so agent-side repairs skipped it.
+    label: "bench-cadence",
+    dir: "/home/z/my-project/mini-services/bench-cadence",
+    cmd: "exec bun run dev >> /home/z/my-project/.zscripts/mini-service-bench-cadence.log 2>&1 < /dev/null",
+    log: "/home/z/my-project/.zscripts/mini-service-bench-cadence.log",
+    hint: "bun",
+  },
+  {
     label: "mem-watchdog",
     dir: "/home/z/my-project/mini-services/mem-watchdog",
     cmd: "exec bun index.ts >> /home/z/my-project/mini-services/mem-watchdog/watchdog.log 2>&1 < /dev/null",

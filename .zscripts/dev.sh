@@ -149,14 +149,28 @@ bun run dev &
 DEV_PID=$!
 log_step_end "Starting Next.js dev server"
 
+# 2026-10-29 starvation fix (measured TWICE: boots of 10-28 16:25 and 16:35 —
+# both times set -e killed dev.sh at the health gate, start_mini_services
+# never ran, kick-bridge :3010 stayed down the whole session and the live
+# Kick bot got NO_CHATROOM on every send; the orphaned next-server kept
+# serving, so the panel LOOKED healthy). The health gates below are now
+# ADVISORY: a failed check logs a warning and the script continues so
+# mini-services ALWAYS start. mem-watchdog (started by start_mini_services)
+# owns respawning a dead dev server — but it can only do that if it exists.
 log_step_start "Waiting for Next.js dev server"
-wait_for_service "localhost" "3000" "Next.js dev server"
-log_step_end "Waiting for Next.js dev server"
+if wait_for_service "localhost" "3000" "Next.js dev server"; then
+        log_step_end "Waiting for Next.js dev server"
+else
+        echo "WARN: dev server not healthy within the wait window — CONTINUING so mini-services still start (mem-watchdog will respawn the panel if it stays down)."
+        log_step_end "Waiting for Next.js dev server"
+fi
 
 log_step_start "Health check"
-echo "[BUN] Performing health check..."
-curl -fsS localhost:3000 >/dev/null
-echo "[BUN] Health check passed"
+if curl -fsS localhost:3000 >/dev/null; then
+        echo "[BUN] Health check passed"
+else
+        echo "WARN: health check failed — CONTINUING so mini-services still start (mem-watchdog owns the respawn)."
+fi
 log_step_end "Health check"
 
 start_mini_services
