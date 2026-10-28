@@ -1876,3 +1876,18 @@ Stage Summary:
 - v35.5 (watchdog): the 4GB box can no longer be OOM-killed by harness debris — global MemAvailable floor + debris reaper closes the class the per-process RSS guard was architecturally blind to. next-server untouched throughout; kick-bridge untouched; no Kick test messages; no .env/credential edits.
 - RSI candidates (recurring classes): (1) post-walk browser-debris assertion for harness suites — every agent-browser session must end with a verified close (this OOM was preventable process discipline); (2) dev-mode next-server RSS plateau 1.6-1.9GB on a 4GB box — prod build or Turbopack memory tuning remains the structural exit (per-process 2200 bounce is the designed mitigation); (3) v35.4 lock corpus re-run is now part of every pass (37 checks, zero cost).
 - Owner follow-ups: none required — edge already at v31.6 both slugs, no OBS/widget changes, no OAuth action needed (kick status 200).
+---
+Task ID: cron-20261028-1625
+Agent: cron harness review
+Task: ROOT-CAUSE pass — verify owner's "still dumb / still shapeable" complaint classes, hunt live defects, fix TOP issue.
+
+Work Log:
+- Health: :3000→200, kick-bridge :3010 ok:true (upstream live, 13 viewers), free 2426/4041MB below 2200-limit; dev.log clean 200s; watchdog self-healed 2 server-dead respawns (04:05, 04:18) ≤120s each.
+- Verified the owner's three complaint classes against the LIVE route via local API probes (probe sender, no Kick posts): "Rol: Utangaç stajyer…" → cortex-lock (deterministic KİLİT HAT, persona preserved); "nasıl komut veriyorsun" → cortex-chat not cortex-research (BOT_META_COMMAND_RE works); "Aferin, adam ol" → coherent VYCE banter, no "Danışmanını…" salad; "kurcuklan" → honest "bilmiyorum". v35.4 guards are wired into BOTH lanes (webhook + widget share cortexCoalesce→runCortex).
+- Lane health (24h, 239 ai rows): cortex-chat p50 7.3s / p90 13.4s; research p50 1.9s; 10 static-floor full-failures (5.5%) — all status=ok deadline fallbacks (provider latency, designed mitigation, not a src bug).
+- TOP DEFECT FOUND+FIXED: "gücünü topla adam ol" (banter) hijacked into cortex-draw TWICE (00:20, two image spends) — draw-continuation gate matched noun "adam" after a recent channel draw. Fix: DRAW_BANTER_IDIOM_RE excludes "adam/insan/erkek/kız/kadın/robot ol" be-X imperative idioms from the continuation gate (src/lib/brain/cortex.ts). Verified live: banter-after-draw → cortex-chat with clean VYCE reply; "bana bir adam çiz" still draws; regex unit cases 7/7.
+
+Stage Summary:
+- Owner-facing answer: the dumb/shapeable classes from 06:4x-06:5x are FIXED in the live build (lock + routing + banter + honest-unknown all probed green).
+- Fixed: draw-continuation banter hijack (v35.5). tsc exit 0, lint clean; browser golden path: login → Connectors CONNECTED, /api/kick/status 200, zero console errors.
+- RSI candidates: (a) static-floor rate 5.5% — lane-latency class, routing-upgrade/eval target; (b) identical draw prompt echo-returned same drawSubject → possible double image spend (echo cache × draw lane); (c) mem-watchdog double-instance start (pid 13421+13467, 12s apart) — benign but noisy.

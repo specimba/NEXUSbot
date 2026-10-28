@@ -2068,10 +2068,20 @@ async function runCortexCore(req: CortexRequest): Promise<CortexResult> {
   // robot looks fragile" row). The recent-draw check reads the interaction
   // log — ANY sender, streams are shared rooms — tightly time-boxed to 15 min
   // and gated behind a noun-phrase heuristic so banter never hijacks.
+  // v35.5 — DRAW-CONTINUATION ANTI-HIJACK: "gücünü topla adam ol" (00:20 +03,
+  // TWO image spends on one banter line) — the "adam" noun + a recent channel
+  // draw pulled a pure personality command into the image lane. "X ol" (be-X)
+  // imperative idioms are banter aimed AT the bot, never a bare image
+  // description; real draw requests keep a draw verb ("adam çiz") or image
+  // semantics and still match. Boundary after "ol" keeps "adam olsun" and
+  // "olmak" forms drawing.
+  const DRAW_BANTER_IDIOM_RE =
+    /(?:^|\s)(?:adam|insan|erkek|k[ıi]z|kad[ıi]n|robot)\s+ol(?:[,.!?;:]|\s|$)/i;
   if (
     intent === "CHAT" &&
     prompt.length <= 100 &&
     !prompt.includes("?") &&
+    !DRAW_BANTER_IDIOM_RE.test(prompt) &&
     DRAW_NOUN_RE.test(prompt)
   ) {
     try {
