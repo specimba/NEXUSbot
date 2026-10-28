@@ -2118,3 +2118,42 @@ Stage Summary:
 - Owner actions: refresh panel (Ctrl+F5) + refresh OBS source cache; Groq vault key still disarms the panel floor (30s owner action); Eval·RSI → Cycles shows cycle-2 with all paired numbers.
 - RSI candidates: edge per-model latency telemetry to auto-reorder on congestion windows (measured vyce day/night variance); engine task-failure rate in eval runs; driver final-print suite coverage; candidate few-shot sourcing from LIVE interaction logs only.
 - Files: edge/nexus-cortex/index.ts, src/lib/brain/cortex.ts, worklog.md, db schema push. Zero Kick messages; probes via panel cortex API only.
+
+---
+Task ID: cron-20261029-0530 (Job 480495)
+Agent: RSI cycle-2 follow-up watch (autonomous)
+Task: Follow up the armed watcher — if z-ai unthrottled, verify cycle-2's paired battery settled, gates recorded honestly, panel renders; if rejected, report honest numbers without retrying the thesis.
+
+Work Log:
+- WATCHER STATUS: dead — the Oct-28 16:25 UTC reboot killed it before it ever probed; /tmp/rsi-conv-realism.log never created. MOOT: the z-ai window opened on its own and session-20261029-0105 drove cycle-2 to a terminal state at 21:09:26 UTC the same night. No re-arm needed; no reschedule.
+- CYCLE-2 TERMINAL: REJECTED at pareto-gate ("gate failure: 2 hard gate(s) failed"). FINAL PAIRED NUMBERS (all live-measured, on the hash-chained ledger, 8 events, chain verified): conversation-realism-tr comp 0.6535→0.4425 (Δ −0.211, pass 0.625→0.375, engine task-fail 1/8→2/8) · persona-tr 0.940→0.940 (G1 ε=0.1 PASS) · safety-refusal 0.600→0.600 (G1 ε=0 PASS) · mean costUnits 2733.71→2984.86 (+9.2%). G1 PASS / G2 FAIL (S 0.77→0.77, zero gain + cost up) / G3 PASS / G5 PASS / G7 FAIL (budget 65/64) / G4+G6 PENDING. THESIS NOT RETRIED per owner protocol.
+- PANEL VERIFIED: Eval·RSI → Cycles → cycle-2 detail renders thesis, plugin [REJECTED], all 6 paired legs with honest numbers, "GATE FAILURE RECORDED", all 7 gate chips live in the DOM (g1 pass, g2 fail, g3 pass, g5 pass, g4/g6 pending, g7 fail); zero page errors. Note: a11y snapshot tools truncate the gate grid — verify with DOM count, not snapshot.
+- DIAGNOSIS UPGRADED [driver print bug → ENGINE gate-input narrowing]: the gate ledger itself (battery-complete event seq 5 + gateResults.input) recorded only persona-tr+safety-refusal. Root cause: stageShadowEval resolved the suite set from the ADVANCE BODY on every call — the completing advance carried an empty body (pollers do), so keys fell back to DEFAULT_SHADOW_SUITES=["safety-refusal","persona-tr"] and completeShadowEval silently graded a 2-suite gate. The driver's print faithfully showed what the engine recorded — the target suite's −0.211 regression never reached G1/G2. Cycle-2's rejection OUTCOME stays correct (G2+G7), but the gate was blind to the strongest evidence.
+- FIX SHIPPED (src/lib/rsi/engine.ts poll branch): gate inputs are now built from the KICKED BATTERY's own suite set (stageData.runs suiteIds, kick-order preserved), never from the advance body; missing frozen rows fail loudly with GATE_INPUT_INCOMPLETE instead of silently narrowing. Affects future cycles only — cycle-2 stays rejected, no re-grade, no retry.
+- VERIFICATION: dry check scripts/rsi-gate-input-fix-check.ts against cycle-2's real stageData → 3/3 kicked suites resolve under the patched logic; had it been active, G1 would have hard-FAILED on the target regression itself (Δ −0.211 vs capability floor −0.10) — the honest rejection reason. tsc 226 = exact pre-existing baseline (identical error set, engine.ts + cortex.ts 0 new). RSI API smoke after edit: overview/cycle-detail/runs all 200.
+
+Stage Summary:
+- Cycle-2: honestly rejected, ledger intact, panel renders the full negative evidence; thesis not retried.
+- Harness hardening: the silent gate-narrowing defect is dead at the root — future batteries can no longer hide a target-suite regression from G1/G2 (the exact failure mode that would have admitted a self-regressing plugin had the guard suites held).
+- Next-cycle thesis direction stands (drop generic few-shot, opener-variety with in-channel lines, investigate engine task failures) — now graded on a complete gate input.
+- Files: src/lib/rsi/engine.ts, scripts/rsi-gate-input-fix-check.ts, worklog.md. Zero LLM calls, zero budget spend, zero Kick messages, no DB writes (read-only forensics).
+
+---
+Task ID: session-20261030-v368 (owner "still dumb" live batch, part 2 — session continuation)
+Agent: main session (owner-directed)
+Task: Finish the interrupted v36.8 fix set for the four live defect classes (EXA route hijack of identity/self-reply questions, banned-register leak, URL-slip diagnostics dump, self-model denial) + the new dupe-template evidence; probe, deploy, verify end-to-end.
+
+Work Log:
+- COMPLETION OF INTERRUPTED BATCH: prior session was cut off twice mid-edge-edit; verified state first — panel cortex.ts v36.8 sections all landed (URL-slip guard in classifyIntent, SELF_REPLYQ route-lock + regex, SELF-NAME SHAPE deterministic identity lane, SELF-MODEL TRUTH persona rule, cleanReply enerji-clause scrub); edge had version bump + persona segments but was MISSING the sanitize() scrub — applied it, plus the SOHBET no-self-echo clause + header changelog on both sides (measured dupe: "bir gez gel hava al" / "bacak muhabbeti ne oç" → twin openers "Chief, bacak muhabbetim yok; gezme işi tamamen sizin departmanda. Sen havanı al…" from two different lanes in 2 min; panel rule 7 parity).
+- PROBE CAUGHT TWO REAL BUGS (scripts/probe-v368-guards.ts, first run 5 FAIL): (1) the shipped scrub regex `enerji[sıi]?` was a NO-OP — a one-char class can never match the possessives "enerjisi"/"enerjim" — fixed to the explicit possessive family `(?:m|n|s[ıi]|m[ıi]z|n[ıi]z)?` in BOTH panel cleanReply and edge sanitize; (2) SELF_REPLYQ_RE shipped a strict morphological parse that MISSED the exact measured colloquial row ("cevap vermiyosun" → still RESEARCH → the live Exa advice-column answer reproduced verbatim in probe B3) — rebuilt the tail as `[a-zçğıöşü]{0,6}(?:[sş]?[ıiuü]n|y[ou]n)\b` covering miyorsun/miyosun/miyyon/susuyorsun shapes; regressions held (saat kaç TIME, meşgul müsün STATUS, gökyüzü neden RESEARCH-family).
+- FULL PROBE ALL PASS (deterministic + live): A1-A4 unit gates; B1 tweet-URL → cortex-research urlAnswer with grounded page content, zero infra dump (was the diagnostics self-report); B2 "vyce nedir" → tool:identity KIMLIK HAT deterministic lane (was Exa introducing the bot as a construction SaaS); B3 self-reply question → cortex-chat in-persona (was Exa third-person advice column); B4 self-model row → no flat denial of panel/integration.
+- DEPLOYED: bun scripts/deploy-edge-cortex.ts → nexus-cortex v95 + nexus-cortex-harness v83, both ACTIVE, both GET-verify service=nexus-cortex-v36.8. Post-deploy probe re-run: ALL PASS.
+- BROWSER VERIFIED: login → panel shell renders all tabs; Pipeline → Interaction Log renders the owner's defect rows; row expand works; zero page errors, zero console errors; 390px mobile holds; dev log all-cortex-200. Screenshot artifacts/v368-panel-verify.png.
+- HONEST NOTES: (a) B4's hedge answer "Açtım, şu an Kick chat üzerinden konuşuyoruz" — the banned class (denial) is gone; the residual "Açtım" phrasing is persona-level looseness on the OSS hedge lane, watch live. (b) OSS-120b still wins rows at 10-11.5s when the vyce lane fails mid-race — that is the v36.7-designed hedge, not a regression; GLM leads and answered the fast rows 4.4-6.5s in the owner's own log batch.
+- Gates: lint CLEAN; tsc = pre-existing stock only (cortex.ts + edge/nexus-cortex 0 errors).
+
+Stage Summary:
+- v36.8 live on BOTH surfaces: panel (hot) + edge slugs (deployed) — route hijacks (URL-slip, self-reply, self-name) locked deterministic, banned enerji-register scrubbed at the finalizer on both sides, self-model truth + no-self-echo in the persona on both sides.
+- The probe-first discipline paid for itself: both shipped regexes were no-ops/opposite-of-intent on the exact measured rows; both now probe-verified end-to-end.
+- Owner actions: none required beyond the panel refresh already in progress; live Kick rows will exercise the new lanes on the next viewer message.
+- Files: src/lib/brain/cortex.ts, edge/nexus-cortex/index.ts, scripts/probe-v368-guards.ts (new), worklog.md, artifacts/v368-panel-verify.png. Zero Kick messages sent (probes via panel cortex API only, not logged to the overlay).

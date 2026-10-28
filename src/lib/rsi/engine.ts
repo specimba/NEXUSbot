@@ -522,7 +522,27 @@ async function stageShadowEval(cycle: RsiCycle, body: AdvanceBody): Promise<Adva
       };
     }
     // All legs done: aggregate gate inputs → pareto-gate.
-    return await completeShadowEval(cycle, stageData, suites);
+    // Gate inputs MUST be built from the kicked battery's own suite set — the
+    // completing advance may carry an empty body (pollers do), and resolving
+    // suites from body/defaults here silently narrowed the gate inputs to
+    // DEFAULT_SHADOW_SUITES on cycle-2 (conversation-realism-tr's −0.21
+    // regression never reached G1/G2; the cycle was rejected on G2/G7 alone).
+    const kickedSuiteIds = [...new Set(stageData.runs!.map((r) => r.suiteId))];
+    const kickedRows = await db.rsiSuite.findMany({ where: { id: { in: kickedSuiteIds } } });
+    const kickedByKey = new Map(kickedRows.map((s) => [s.id, s]));
+    const kickedSuites = kickedSuiteIds
+      .map((id) => kickedByKey.get(id))
+      .filter((s): s is (typeof kickedRows)[number] => Boolean(s));
+    if (kickedSuites.length !== kickedSuiteIds.length) {
+      // Never silently narrow: a missing frozen suite row is a harness fault.
+      return {
+        ok: false,
+        code: "GATE_INPUT_INCOMPLETE",
+        message: `battery kicked on ${kickedSuiteIds.length} suite(s) but only ${kickedSuites.length} frozen rows resolve — refusing to grade a narrowed gate`,
+        cycle,
+      };
+    }
+    return await completeShadowEval(cycle, stageData, kickedSuites);
   }
 
   // Kick the paired battery: baseline + candidate per suite, cycle-linked.
