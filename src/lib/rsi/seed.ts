@@ -77,15 +77,19 @@ export async function ensurePapersSeeded(): Promise<number> {
 }
 
 /**
- * Seed the 5 frozen suites (23 tasks) from eval-design.json suiteBlueprints
- * if none exist. configHash seals each suite; version 1.0; frozenAt now.
- * Existing suites are NEVER overwritten (tamper-evidence via AUDIT re-hash).
+ * Seed the frozen suites from eval-design.json suiteBlueprints — v36
+ * per-key idempotent: a blueprint whose key is already seated is SKIPPED
+ * (its tasks + configHash stand frozen); a blueprint with a NEW key (e.g.
+ * conversation-realism-tr, owner directive 2026-10-29) seeds alongside the
+ * originals and is itself frozen from the moment it is created (version 1.0,
+ * configHash-sealed; tamper-evidence via AUDIT re-hash).
  */
 export async function ensureSuitesSeeded(): Promise<number> {
-  const count = await db.rsiSuite.count();
-  if (count > 0) return count;
-
   for (const bp of EVAL_DESIGN.suiteBlueprints) {
+    // FROZEN-SUITE RULE: an already-seated key is never re-touched.
+    const existing = await db.rsiSuite.findFirst({ where: { key: bp.key } });
+    if (existing) continue;
+
     const configHash = suiteConfigHash(bp.tasks);
     const suite = await db.rsiSuite.create({
       data: {

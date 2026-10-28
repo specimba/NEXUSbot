@@ -124,66 +124,92 @@ type JudgeBudgetCtx = {
   call?: "judge" | "judge-anchor";
 };
 
-/** One raw z-ai judge call. Never throws — failures are honest outcomes. */
+/**
+ * One raw z-ai judge call. Never throws — failures are honest outcomes.
+ * Infra-level 429 resilience (v36): the gateway throttles bursts ("Too many
+ * requests, please try again later"); one patient 30s retry per call keeps
+ * verdicts from failing on pure infra noise. The retry is a REAL second HTTP
+ * call — it is telemetry-counted as its own UsageEvent row (P7 counters stay
+ * honest). A second 429 surfaces as judge-unavailable, never a guessed score.
+ */
 async function zaiJudgeCall(taskPrompt: string, reply: string, budget: JudgeBudgetCtx): Promise<JudgeOutcome> {
-  const started = Date.now();
+  const callOnce = async (): Promise<{ rawText: string; latencyMs: number } | { error: string; latencyMs: number }> => {
+    const started = Date.now();
+    try {
+      const { default: ZAI } = await import("z-ai-web-dev-sdk");
+      const zai = await ZAI.create();
+      const res = (await zai.chat.completions.create({
+        messages: [
+          { role: "system", content: JUDGE_SYSTEM_PROMPT },
+          {
+            role: "user",
+            content: `GOREV ISTEMI:\n${taskPrompt}\n\nYANIT:\n${reply}\n\nBu yaniti olcege gore puanla.`,
+          },
+        ],
+      })) as { choices?: Array<{ message?: { content?: unknown } }> };
+      const rawText =
+        typeof res?.choices?.[0]?.message?.content === "string"
+          ? res.choices[0].message.content
+          : Array.isArray(res?.choices?.[0]?.message?.content)
+            ? (res.choices[0].message.content as Array<{ text?: string }>).map((c) => c?.text ?? "").join(" ")
+            : "";
+      return { rawText, latencyMs: Date.now() - started };
+    } catch (e) {
+      return { error: e instanceof Error ? e.message.slice(0, 160) : "judge call failed", latencyMs: Date.now() - started };
+    }
+  };
+
+  let outcome = await callOnce();
+  if ("error" in outcome && /429|too many requests/i.test(outcome.error)) {
+    await new Promise((r) => setTimeout(r, 30_000));
+    outcome = await callOnce();
+  }
+
+  if ("error" in outcome) {
+    const failed: JudgeOutcome = {
+      score: null,
+      abstained: false,
+      detail: "judge-unavailable",
+      ok: false,
+      latencyMs: outcome.latencyMs,
+      provider: "z-ai",
+      modelId: "z-ai-judge",
+      error: outcome.error,
+    };
+    void recordRsiCall({
+      runId: budget.runId,
+      cycleId: budget.cycleId,
+      variant: budget.variant,
+      call: budget.call ?? "judge",
+      provider: "z-ai",
+      modelId: "z-ai-judge",
+      latencyMs: outcome.latencyMs,
+      ok: false,
+      error: "JUDGE_CALL_FAILED",
+    });
+    return failed;
+  }
+
   const base: JudgeOutcome = {
     score: null,
     abstained: false,
     detail: "",
     ok: false,
-    latencyMs: 0,
+    latencyMs: outcome.latencyMs,
     provider: "z-ai",
     modelId: "z-ai-judge",
   };
-  try {
-    const { default: ZAI } = await import("z-ai-web-dev-sdk");
-    const zai = await ZAI.create();
-    const res = (await zai.chat.completions.create({
-      messages: [
-        { role: "system", content: JUDGE_SYSTEM_PROMPT },
-        {
-          role: "user",
-          content: `GOREV ISTEMI:\n${taskPrompt}\n\nYANIT:\n${reply}\n\nBu yaniti olcege gore puanla.`,
-        },
-      ],
-    })) as { choices?: Array<{ message?: { content?: unknown } }> };
-    const rawText =
-      typeof res?.choices?.[0]?.message?.content === "string"
-        ? res.choices[0].message.content
-        : Array.isArray(res?.choices?.[0]?.message?.content)
-          ? (res.choices[0].message.content as Array<{ text?: string }>).map((c) => c?.text ?? "").join(" ")
-          : "";
-    const latencyMs = Date.now() - started;
-    base.latencyMs = latencyMs;
-    void recordRsiCall({
-      runId: budget.runId,
-      cycleId: budget.cycleId,
-      variant: budget.variant,
-      call: budget.call ?? "judge",
-      provider: "z-ai",
-      modelId: "z-ai-judge",
-      latencyMs,
-      ok: true,
-    });
-    return parseJudgeText(rawText, base);
-  } catch (e) {
-    base.latencyMs = Date.now() - started;
-    base.detail = "judge-unavailable";
-    base.error = e instanceof Error ? e.message.slice(0, 160) : "judge call failed";
-    void recordRsiCall({
-      runId: budget.runId,
-      cycleId: budget.cycleId,
-      variant: budget.variant,
-      call: budget.call ?? "judge",
-      provider: "z-ai",
-      modelId: "z-ai-judge",
-      latencyMs: base.latencyMs,
-      ok: false,
-      error: "JUDGE_CALL_FAILED",
-    });
-    return base;
-  }
+  void recordRsiCall({
+    runId: budget.runId,
+    cycleId: budget.cycleId,
+    variant: budget.variant,
+    call: budget.call ?? "judge",
+    provider: "z-ai",
+    modelId: "z-ai-judge",
+    latencyMs: outcome.latencyMs,
+    ok: true,
+  });
+  return parseJudgeText(outcome.rawText, base);
 }
 
 /** Defensive score parse: 'SCORE: n' line, then ABSTAIN, then first bare 0-5. */

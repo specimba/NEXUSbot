@@ -1891,3 +1891,55 @@ Stage Summary:
 - Owner-facing answer: the dumb/shapeable classes from 06:4x-06:5x are FIXED in the live build (lock + routing + banter + honest-unknown all probed green).
 - Fixed: draw-continuation banter hijack (v35.5). tsc exit 0, lint clean; browser golden path: login → Connectors CONNECTED, /api/kick/status 200, zero console errors.
 - RSI candidates: (a) static-floor rate 5.5% — lane-latency class, routing-upgrade/eval target; (b) identical draw prompt echo-returned same drawSubject → possible double image spend (echo cache × draw lane); (c) mem-watchdog double-instance start (pid 13421+13467, 12s apart) — benign but noisy.
+---
+Task ID: cron-20261028-1658
+Agent: cron harness review (owner Q: "why we stuck on oss 120B with that meaningless approaches?")
+Task: Root-cause the gpt-oss-120b domination in the live interaction log.
+
+Work Log:
+- Read the race (raceModel): vyce primary 4.5s lead / 8s timeout; floor = GLM+DeepSeek backups (7s) + groq (openai/gpt-oss-120b, proxy, handicapped); edge lane = gpt-oss-120b via owner's Supabase nexus-cortex, 15s budget, fires at t=0. THE ENTIRE FLOOR IS gpt-oss-120b by design (z-ai removed 2026-10-26) — when vyce misses, oss-120b is the only voice.
+- FOUND legacy misconfig: DB egress.routing had vyce:"proxy" — a leftover OPTIONAL workaround from the 10-26 vyceai outage (direct was black-holed then; worklog line 1093). Panel egress probe NOW: direct 200 OK + proxied 200 OK → the workaround is obsolete. Flipped vyce→direct via the sanctioned POST /api/egress/routing (groq STAYS proxy — sandbox IP is WAF-403 at Groq, measured; load-bearing). Vyce card now reports route:direct.
+- MEASURED (temp in-process probe, 15s budgets, deleted after — key hygiene intact): DIRECT beam-1.0 ×2 = 15s black hole (no HTTP answer); DIRECT glm-5.3-flash ×2 = 15s black hole; DIRECT deepseek-v4.1 ×2 = 200 OK at 13.1-13.7s. VERDICT: vyceai.com is in a supplier-degraded window RIGHT NOW — /models answers 200 fast, chat completions are in the 13s+ class or dead. This, not the race, is why oss-120b dominates tonight's rows.
+- Edge lane's flat 12.4-14.5s: edge/nexus-cortex internal hedge burns a 5s vyce lead before groq-1 fires (t=5s), + ~7s groq oss-120b under load → the fixed band. Proposal (needs owner go-ahead since it redeploys the live edge function): v31.6 adaptive hedge — circuit-break vyce attempts after consecutive black-holes and fire groq at t=0 during supplier outages (saves 5s on every reply in exactly this window).
+
+Stage Summary:
+- Answer to owner: oss-120b domination = designed floor behavior during a live vyceai.com supplier degradation (beam/glm black-hole, deepseek 13s — measured directly tonight). The race is healthy; the quality upstream is down. When vyce recovers, BEAM/Claude win the 4.5s lead again and quality returns.
+- Fixed: vyce egress reverted proxy→direct (probe-verified; saves 4-5s/call + pool variance on every future vyce win). No src change this pass; tsc/lint untouched-clean.
+- RSI candidate: adaptive edge hedge (v31.6) + supplier-outage detection as a routing-upgrade eval target.
+---
+Task ID: cron-20261028-1712
+Agent: cron harness review (owner Q: "vyce is not offline or blackhole degraded I guess our wiring has problems")
+Task: Re-verify the vyce verdict against the owner's dashboard evidence.
+
+Work Log:
+- Owner right on both counts, partially: ran a per-model DIRECT-vs-PROXY chat A/B (25s budgets, tiny prompt, vault key, temp script deleted).
+- MEASURED: beam-1.0 DIRECT = 25s BLACK HOLE (0 bytes — the 10-26 IP-level drop signature) but PROXY = 200 OK usable @24.9s; glm-5.3-flash = black hole BOTH routes tonight (their own dashboard: 13.3s elevated); deepseek-v4.1 = 200 @7.0s direct AND @6.9s proxy.
+- VERDICT: (a) platform is alive but supplier-slow tonight (owner dashboard: Response 8.44s Elevated, deepseek 11.4s, claude 18.4s — matches our deepseek 7-13s); (b) WIRING: vyceai's beam upstream IP-drops sandbox-direct requests — the 10-26 proxy workaround IS LOAD-BEARING for beam. The per-model "380ms" figures on the dashboard are synthetic health pings (8 models all print exactly 380ms), not chat latency.
+- CORRECTED the previous pass's flip: vyce→direct (made on /models evidence) BROKE the BEAM lane — reverted vyce→proxy via POST /api/egress/routing. deepseek pays nothing (7s on both routes); beam regains its lane. Probe after revert: banter still EDGE@13.9s tonight because beam is 24.9s-slow upstream even via proxy — supplier latency, not wiring.
+- Post-mortem on my earlier wrong flip: the /models endpoint answers direct (it's a different upstream than beam chat); per-upstream probe ≠ per-model chat reachability. Rule banked: routing flips need a per-model chat A/B, not a /models ping.
+
+Stage Summary:
+- Routing map: {"default":"proxy","groq":"proxy","vyce":"proxy","generic-echo":"proxy"} — all proxy, now CORRECT and load-bearing (groq WAF-403 direct, beam IP-dropped direct).
+- Tonight's oss-120b domination = vyceai supplier-wide elevated latency (their own status page agrees); the race floor is working as designed.
+- RSI/routing-upgrade candidates: (1) per-model egress routing (deepseek→direct saves the proxy hop; beam/glm→proxy) — needs registry extension in src; (2) adaptive edge hedge v31.6 (fire groq at t=0 while vyce is circuit-broken) — still on the table; (3) extend the egress probe to a per-model chat ping so the Connectors card tells this truth without manual A/B scripts.
+---
+Task ID: session-20261028-1805 (owner Q: snapshot push failed + "how about intelligence and eval - RSI upgrades with better realistic conversation system?")
+Agent: direct session (continuation after cron-20261028-1712)
+Task: (a) triage the snapshot PUSH_FAILED banner; (b) ship the intelligence+eval upgrade: evolve the v35 RSI Lab toward realistic conversation.
+
+Work Log:
+- SNAPSHOT PUSH TRIAGE [MEASURED]: the vault token (ops/vault/github.token, 40 chars) is genuinely DEAD — GitHub API /user and /repos/specimba/NEXUSbot both 401 via curl. Matches the 13:45+03 backup log ("Invalid username or token"). Chain itself healthy: divergence pre-check passed (remote main b918ea121711 is ancestor/equal of local head e98de9009542) — no manual merge needed; it is pure auth. OWNER ACTION REQUIRED: re-connect GitHub in Connectors (web or device flow) — the 12-b mirror restores ops/vault/github.token automatically; next run then pushes fast-forward. No force push (§8 honored).
+- OWNER'S RSI ASK mapped onto the existing v35 lab (5 frozen suites, 12 runs, 1 rejected cycle, z-ai judge with provisional anchors): what's missing is the CONVERSATION-REALISM axis — nothing measured multi-turn realism (threading, opener variety, roast composure, length calibration, stream-specific honesty).
+- SHIPPED suite #6: "conversation-realism-tr" (category capability → G1 ε=0.10 rubric class) appended to eval-design.json suiteBlueprints — 8 Turkish live-chat tasks with embedded SOHBET transcripts (roast-comeback-tr, thread-grounding-tr, opener-variety-tr, opinionated-take-tr, honest-unknown-stream-tr, short-calibration-tr, depth-calibration-tr, turkish-fluency-tr), all graded by the frozen judge + deterministic allOf guards (forbidden corporate-tone/hedge/English-bleed patterns, lengthBand KISA bands, abstain on fabricated viewer counts). Frozen v1.0, configHash-sealed.
+- SHIPPED per-key idempotent seeding (src/lib/rsi/seed.ts): ensureSuitesSeeded now seeds per blueprint key — existing keys are never touched (frozen rule intact), new blueprints seed alongside. Verified: 6 suites in DB, 8 tasks in the new suite.
+- SHIPPED cycle driver scripts/rsi-conv-realism.ts: drives the FULL gated loop through engine.ts's own stage functions — scout → thesis → synthesize (z-ai drafts the G3-capped prompt-delta) → shadow-eval (paired baseline/candidate on conversation-realism-tr + persona-tr + safety-refusal) → pareto-gate → canary — and PARKS AT PROMOTE (owner human gate; nothing auto-deploys). Fully RESUMABLE (re-attaches to a non-terminal cycle-2 by name; engine statuses are the source of truth), 429-aware backoff at synthesize, honest SHADOW_RUN_ERROR salvage (clears engine scratch + one re-kick, append-only chain intact).
+- CYCLE-2 OPENED [MEASURED]: "cycle-2 conversation-realism-v36" (module persona, techniqueRefs 2609.24972/2610.26770/2609.12191, falsifiable thesis on 4 realism axes) advanced scout→thesis OK; SYNTHESIZE hit the z-ai gateway 429 wall — 6 failed synth calls logged honestly (UsageEvent ok:false), cycle parked at status "synthesize" (resumable; budget 66/512 today, morning's cycle-1 battery burned the quota window).
+- SHIPPED judge 429 resilience (src/lib/rsi/judge.ts zaiJudgeCall): one patient 30s retry on 429 per judge call — verdicts no longer fail on pure burst-throttle noise; a second 429 still surfaces as judge-unavailable (never a guessed score). Protocol untouched; both HTTP attempts telemetry-counted (P7 honest).
+- ARMED scripts/rsi-conv-realism-watcher.sh (nohup, background): probes z-ai every 600s (up to ~9h); the moment the gateway opens it launches the driver, which resumes cycle-2 at synthesize and runs through to the promote gate. Rationale: a paired battery against a throttled judge would poison verdicts with infra noise — waiting for a healthy window is the honest path.
+- VERIFY [MEASURED]: bun run lint CLEAN; /api/rsi/suites + /api/rsi/cycles 200 after hot-compile (dev.log clean); agent-browser E2E with the saved panel session: Eval·RSI tab → Suites & Runs shows "Conversation Realism TR (v36)" frozen card; Cycles tab shows cycle-2 at synthesize with the full thesis rendered + Advance button, cycle-1's rejection ledger intact.
+
+Stage Summary:
+- Snapshot: token dead (401 measured) — owner must re-connect GitHub in Connectors; chain healthy, no manual merge; next run after re-connect pushes fast-forward.
+- RSI v36 realism upgrade: suite frozen + cycle-2 opened through the lab's own gated machinery; parked at synthesize by a z-ai quota wall with an autonomous watcher armed to finish it the moment the window opens.
+- Nothing deployed, nothing auto-promoted: cycle-2 ends parked at the PROMOTE owner gate with all paired numbers on the ledger.
+- Still queued (owner's earlier list): per-model egress routing (deepseek→direct), adaptive edge hedge v31.6, per-model chat probe on the Vyce card.
