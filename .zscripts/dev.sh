@@ -135,6 +135,15 @@ bun run db:push
 log_step_end "bun run db:push"
 
 log_step_start "Starting Next.js dev server"
+# 2026-10-29 cron-20261029-0025 root-cause fix: the sandbox suspend/resume
+# cycle can freeze .next/dev (turbopack incremental cache) mid-write; on the
+# next boot every PAGE then 500s with a bare "Internal Server Error" (API
+# routes fine, no request logged). Measured consequence chain this boot
+# (16:25:40): dev.sh health check failed -> set -e killed dev.sh BEFORE
+# start_mini_services -> mem-watchdog starved for the whole session (panel
+# unguarded). Deterministic pre-start purge costs one cold compile (~10s) and
+# kills the whole failure class, for both boot-time and watchdog respawns.
+rm -rf "$PROJECT_DIR/.next/dev"
 echo "[BUN] Starting development server..."
 bun run dev &
 DEV_PID=$!

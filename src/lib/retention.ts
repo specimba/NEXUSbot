@@ -76,8 +76,13 @@ async function pruneEvents(): Promise<number> {
   })
   if (old.length === 0) return 0
   const ids = old.map((e) => e.id)
-  // FK order: outbox rows first (Event relation has NO cascade by design).
-  await withWriteRetry(() => db.outbox.deleteMany({ where: { eventId: { in: ids } } }))
+  // 2026-10-29 cron-20261029-0025: dropped the pre-delete `db.outbox.deleteMany`
+  // step. No Outbox model exists in prisma/schema.prisma (verified across the
+  // whole git history) nor a table in custom.db — the reference was a ghost
+  // from an unshipped design that made every tsc pass fail (TS2339) and would
+  // have thrown TypeError at runtime the first time this sweep actually ran
+  // (reachable via /api/metrics and /api/dev/retention). Event rows carry no
+  // FK children in the current schema, so the ordered delete is unnecessary.
   const res = await withWriteRetry(() =>
     db.event.deleteMany({ where: { id: { in: ids } } }),
   )
@@ -85,23 +90,13 @@ async function pruneEvents(): Promise<number> {
 }
 
 async function pruneArtifacts(): Promise<number> {
-  const rows = await db.artifact.findMany({
-    orderBy: { createdAt: 'asc' },
-    select: { id: true, path: true, bytes: true },
-  })
-  let files = rows.length
-  let bytes = rows.reduce((sum, r) => sum + r.bytes, 0)
-  let deleted = 0
-
-  for (const row of rows) {
-    if (files <= ARTIFACT_MAX_FILES && bytes <= ARTIFACT_MAX_BYTES) break
-    await deleteFileQuiet(path.join(process.cwd(), row.path))
-    await withWriteRetry(() => db.artifact.delete({ where: { id: row.id } }))
-    files -= 1
-    bytes -= row.bytes
-    deleted += 1
-  }
-  return deleted
+  // 2026-10-29 cron-20261029-0025: no Artifact model exists in
+  // prisma/schema.prisma nor a table in custom.db (ghost from the same
+  // unshipped design as the removed outbox delete). There is nothing to
+  // enumerate or prune; report zero so the sweep shape stays intact.
+  // ARTIFACT_MAX_FILES / ARTIFACT_MAX_BYTES remain exported for callers that
+  // tune budgets; deleteFileQuiet() stays in use via pruneBackups().
+  return 0
 }
 
 async function pruneBackups(): Promise<number> {

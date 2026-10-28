@@ -1975,3 +1975,42 @@ Work Log:
 - Deployed via scripts/deploy-edge-cortex.ts: nexus-cortex v81 + nexus-cortex-harness v69, both ACTIVE, verify 200. tsc + lint clean. Browser golden path OK (Connectors renders, kick/status 200, no page errors).
 - E2E probes (scripts/probe-v362-edge-fix.sh, nx-probe local, no Kick posts): 7,467ms / 7,446ms edge wins warm (was 12.4-15.5s), 11,384ms with cold start, ZERO static floors.
 Stage Summary: v36.2 shipped — the 15011ms STATIC class is structurally dead (edge decision ≤14s + 0.4s grace < 16.5s panel wall); edge win band cut ~12.7s→~7.4s. RSI eval candidates: (1) tone/attitude consistency for no-memory replies + static-floor copy (owner's "attitude" note — warm-honest vs cold-denial variance across lanes); (2) vyce model latency locally (beam 7.1s, deepseek 10.9s) vs official 380ms — payload-driven; short-context fast lane for banter remains the routing-upgrade candidate. Note: GitHub snapshot PUSH_FAILED persists (stored token rejected 09:31+13:45 +03) — owner must reconnect GitHub in Connectors; snapshot chain itself healthy.
+
+---
+Task ID: cron-20261029-0025
+Agent: cron harness review
+Task: 4h ROOT-CAUSE pass (round 3). Context: worklog/dev.log/watchdog tails; health: :3000, :3010, free -m; hunt real defects; fix top issue in src; gates: tsc/lint/browser verify; append here.
+
+Work Log:
+- Boot forensics (sandbox woke 16:25:15 UTC for this cron): start.sh ran dev.sh; its health check FAILED (GET / 500 since first compile) -> set -e killed dev.sh BEFORE start_mini_services -> mem-watchdog starved all session. The node server survived as PPID-1 orphan (trap killed only bun).
+- Symptom: every PAGE 500 with bare "Internal Server Error", zero request lines logged; ALL API routes healthy (interactions/stats/kick-status answering). Stale dev.log (mtime Oct 26) hid everything; boot server's tee was lost.
+- ROOT CAUSE (page 500): .next/dev turbopack incremental cache dirty from the suspend/resume freeze cycle. FIX (durable, in .zscripts/dev.sh): deterministic `rm -rf $PROJECT_DIR/.next/dev` before `bun run dev` — kills the class for boot-time AND watchdog respawns; costs one cold compile (~10s). Verified: fresh compile -> GET / 200 (owner's open tab reconnecting to widget stream observed in dev.log).
+- Sandbox process reaper mapped empirically: direct `setsid ... &` spawns die at command end; `(setsid nohup ... &)` double-fork survives. Dev server + mem-watchdog relaunched this way, both alive and verified (watchdog.log: started pid=2464, 2200MB limit, 30s poll).
+- retention.ts ghost models: db.outbox/db.artifact referenced models that exist in NO committed schema nor in custom.db (unshipped Oct-27 WIP; libs lost in restore). Reachable runtime bomb via /api/metrics + /api/dev/retention (TypeError on first real sweep). Removed the outbox pre-delete + stubbed pruneArtifacts to 0 (shape preserved, budgets still exported). tsc errors -3.
+- tsc full inventory: 233 lines red PRE-EXISTING since Oct 27 (api/artifacts, api/connectors/exa/*, api/connectors/hyperbrowser/*, api/beta/checklist route families import exports that never existed in committed lib history — verified via git log -S across all commits). Their lib WIP died with the Oct 26-restore. NOT fixed (owner decision: rebuild or delete the families); lint clean; my delta strictly reduces errors.
+- Golden path: login 200, GET / 200, /api/kick/status 200 — BUT configured:false: the Kick credential row is gone with the DB restore (see below). Per harness discipline: no re-auth from my side; bot stays idle until owner re-connects.
+- DATA-LOSS FINDING (no fix applied, owner must know): boot restored a MIXED archive — src/worklog carry Oct 28 12:38 state, but custom.db rolled back to Oct 26 17:58 (verified: owner's three quoted v35.4/v35.5 replies have 0 rows; latest InteractionLog 10-26 17:16Z). Lost window ~46h: interactions, SecurityLesson, UsageEvent, Kick credential, GitHub snapshot-era credentials. Local db/backups only reaches Oct 22. Dev.log last-live Oct 26 17:59 corroborates.
+- mem-watchdog :3010/health contract: current 445-line watchdog has NO HTTP server (poll+respawn only, signal/exit handlers + pidfile). Harness expectation is stale; logged, not built.
+- Prior-round "tsc clean" claims were pipe-masked (`| tail` eats rc) — same trap caught me this round on first run. Gate now run as `tsc > out; echo RC=$?`.
+
+Stage Summary:
+- Shipped: dev.sh cache-purge (boot-500 class root fix), retention.ts ghost-model defuse, watchdog+panel revived via double-fork spawn, dev.log tee restored. Panel serving 200 to the owner's live tab.
+- RSI / routing-upgrade candidates: (1) pre-suspend DB quiesce (checkpoint+close) and post-restore archive freshness verification — the 46h interaction loss is the biggest defect class found to date; (2) verification-gate hygiene: tsc/lint rc must be captured unpiped in ALL harness rounds; (3) dev.sh: start mem-watchdog even when the health check fails (the watchdog is precisely the guardian a broken boot needs); (4) restore-skew inventory command for every boot (diff working tree vs last attested snapshot).
+- Files: .zscripts/dev.sh (purge), src/lib/retention.ts (ghost fix), worklog.md (this entry). No schema changes, no DB writes beyond app-owned usage events, nothing sent to Kick.
+
+---
+Task ID: owner-20261029-0205
+Agent: owner session (post-cron follow-up)
+Task: Owner reported OBS browser source blank ("link alive, nothing shown in browser source") after refreshing credentials; asked to verify the Google Drive backup folder (KICKspeciBOT) and analyze uploaded screenshot.
+
+Work Log:
+- Screenshot (VLM): OBS "Settings for Browser Source", URL = specimba.github.io/NEXUSbot/obs.html?t=nxi_-…&w=…, preview shows the platform Z placeholder logo. File mtime 16:32 UTC = exactly the 16:27-16:37 maintenance window from cron-20261029-0025 (old server killed, first respawn reaped, double-fork respawn landed 16:38). Placeholder explained; not a config defect.
+- End-to-end bridge walk (agent-browser): obs.html (Pages 200) -> obs-target.json (raw.githubusercontent, origin = current chat-stable preview URL, fresh) -> redirect to /api/widgets/{id}/stream?token=… -> 200 text/html HUD rendering "QUEUE: 0". Chain GREEN. Screenshot saved: .zscripts/obs-bridge-verified.png.
+- Token audit: IngestToken row (obs-Specimba Cyber AI Counter) not revoked, minted Oct 26 17:09, lastUsedAt today 17:13 UTC via the only stream hit in dev.log (200). Zero 401s since -> OBS URL token valid. Owner action: press "Refresh cache of current page" in OBS source settings; if still blank, copy fresh Stable bridge URL from panel (Widgets -> OBS Browser Source URL).
+- Known limitation documented for owner: overlay/bot live only while the sandbox is awake (session-scoped instance). Z placeholder between sessions is expected platform behavior, not a bug. Persistent-24/7 hosting = future upgrade discussion.
+- Drive audit (KICKspeciBOT folder, public link, anonymous access OK): 3 full-workspace snapshot folders (NEXUSbot2210v1/v2/v7, uploaded 02:48 local today) + ~24 files: complete widget design history (kickbot_cyber_ai_viewer v1-v19, Oct 7-17), gemini logs, kicbot saved state. v7 inspected: full repo tree BUT Oct-22-era state (old dev.sh without today's cache-purge fix, no logs/tarballs) and NO artifacts/ or db/ folders. No .png/.jpg anywhere at root or v7. Local artifacts/v33-deep-research.png (Oct 27) survived the rollback. Reported to owner: images are NOT in the Drive folders I can see — re-upload or point me at the right subfolder if they should be there.
+- Owner's fresh interaction paste shows both replies on EDGE route (8.3s) with memory: no — the known edge-channel memory-injection gap (root of the "attitude"/"geçmişi tutmuyorum" complaint). Confirmed as the top RSI/routing upgrade candidate, unchanged from prior rounds.
+
+Stage Summary:
+- No code changes this session; verification round only. Bridge verified green end-to-end; Drive audited (design-history complete, images absent, snapshots predate today's fixes); edge memory gap re-confirmed with fresh evidence.
+- RSI candidates: edge-channel memory injection (top); persistent-overlay hosting story (Z placeholder between sessions); Drive snapshot freshness (v7 predates today's dev.sh fix — next snapshot should include it).
