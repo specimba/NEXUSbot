@@ -1962,3 +1962,16 @@ Stage Summary:
 - Shipped: v36.1 static floor rewrite + cron-failure-attitude-audit.ts; vyce routing restored to all-proxy. Lint clean. Nothing deployed to edge; nothing auto-promoted; no Kick test messages.
 - Owner actions: (1) raw Groq key → panel Groq vault slot (arms the outage floor); (2) confirm this morning's GitHub device-flow reconnect completed — snapshot pushes resume fast-forward; (3) when the watcher finishes cycle-2, RSI Lab parks at PROMOTE — review the paired numbers and gate verdicts there.
 - Queued candidates unchanged: adaptive edge hedge v31.6, per-model egress routing, per-model chat probe on the Vyce card.
+
+---
+Task ID: cron-20261028-2025
+Agent: cron harness review
+Task: Root-cause the owner-flagged InteractionLog rows (STATIC @15011ms + EDGE @13746ms) — "attitude and random connection traffic errors" — plus standard 4h health sweep.
+Work Log:
+- Health: :3000=200, kick-bridge ok (live, 9 viewers), free 1176MB avail, no OOM since 04:18Z. Webhook 200s, no single-flight dupes, 0 emoji rows, 0 error-field rows in 8h.
+- Forensics (scripts/cron-lane-forensics.ts): 8h lane data — edge 10/14 wins p50 12.7s p95 14.5s; vyce 2 wins (beam 7.1s, deepseek 10.9s); 2 STATIC rows at EXACTLY 15011ms (11:48Z @specimba, 05:39Z @berxx). Not random — structural.
+- ROOT CAUSE (edge/nexus-cortex/index.ts): after the 14s decision deadline, `await Promise.allSettled(launched)` held the HTTP response open until every straggler settled (groq-2/3 fired t=10s with 5.5s abort → response pinned 12.4-15.5s). Panel race aborted the edge fetch at 15.0s → real answers chopped into the STATIC floor. Secondary: groq-1's 5.5s window clipped gpt-oss-120b (reasoner, ~5.3s for 380 max_tokens) mid-generation.
+- FIX (v36.2): edge — straggler hold replaced with bounded 400ms telemetry grace; groq abort 5500→8000ms (win still ≤14s deadline). Panel (src/lib/brain/cortex.ts) — CORTEX_DEADLINE_MS 16s→17s (widget budget 19s respected), edge attempt cap 15s→16.5s so transport/cold-start jitter can never clock-chop an edge answer again.
+- Deployed via scripts/deploy-edge-cortex.ts: nexus-cortex v81 + nexus-cortex-harness v69, both ACTIVE, verify 200. tsc + lint clean. Browser golden path OK (Connectors renders, kick/status 200, no page errors).
+- E2E probes (scripts/probe-v362-edge-fix.sh, nx-probe local, no Kick posts): 7,467ms / 7,446ms edge wins warm (was 12.4-15.5s), 11,384ms with cold start, ZERO static floors.
+Stage Summary: v36.2 shipped — the 15011ms STATIC class is structurally dead (edge decision ≤14s + 0.4s grace < 16.5s panel wall); edge win band cut ~12.7s→~7.4s. RSI eval candidates: (1) tone/attitude consistency for no-memory replies + static-floor copy (owner's "attitude" note — warm-honest vs cold-denial variance across lanes); (2) vyce model latency locally (beam 7.1s, deepseek 10.9s) vs official 380ms — payload-driven; short-context fast lane for banter remains the routing-upgrade candidate. Note: GitHub snapshot PUSH_FAILED persists (stored token rejected 09:31+13:45 +03) — owner must reconnect GitHub in Connectors; snapshot chain itself healthy.

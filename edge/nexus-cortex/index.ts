@@ -1104,7 +1104,12 @@ async function modelCall(
               temperature: 0.5,
             }),
           },
-          5500,
+          // v36.2 — 5500 → 8000: gpt-oss-120b is a reasoner; 380 max_tokens
+          // generates in ~5.3s typical, so the old 5.5s window clipped the
+          // model mid-generation on the exact jitter that fed the STATIC
+          // tail. 8s keeps the win inside the 14s decision deadline (fired
+          // at t=5s → latest resolve t=13s).
+          8000,
         );
         const attempt: ProviderAttemptTelemetry = {
           action: "chat",
@@ -1191,7 +1196,18 @@ async function modelCall(
   });
   clearTimeout(hedgeTimer);
   clearTimeout(lateTimer);
-  await Promise.allSettled(launched);
+  // v36.2 — STRAGGLER FIX (cron 2026-10-28 20:25 root-cause, two 15011ms
+  // STATIC rows same day): the old `await Promise.allSettled(launched)` held
+  // the HTTP response open until EVERY in-flight attempt settled. groq-2/3
+  // fire at t=10s with their own 5.5s abort → the response was pinned at
+  // 12.4-15.5s even when the winner was decided at ~10.4s, drifting past the
+  // panel's edge wall and chopping real answers into the STATIC floor. The
+  // decision above is final; stragglers get a bounded 400ms telemetry grace
+  // so fast settles still make it into `attempts`, then the response ships.
+  await Promise.race([
+    Promise.allSettled(launched),
+    new Promise((r) => setTimeout(r, 400)),
+  ]);
 
   if (result) return { ...result, attempts };
 

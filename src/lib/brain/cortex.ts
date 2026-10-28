@@ -363,8 +363,13 @@ const ZAI_PRIMARY_GRACE_MS = 600;
 // forgotten; the parallel race no longer ladders through them serially):
 //   glm-5.3-flash ($0 vyce spare) · openai/gpt-oss-120b (Groq, WAF'd direct)
 
-/** Overall budget: the widget gives the cortex 19s; answer well inside it. */
-const CORTEX_DEADLINE_MS = 16_000;
+/** Overall budget: the widget gives the cortex 19s; answer well inside it.
+ * v36.2 — 16s → 17s: the edge lane's contract is now "decision ≤14s + 400ms
+ * straggler grace + transport + cold start" ≈ 16.4s worst case; the old 16s
+ * deadline gave that tail zero room and the race chopped real edge answers
+ * into the STATIC floor (two 15011ms rows, 2026-10-28). Statics now only
+ * fire when lanes genuinely die, not on the clock. */
+const CORTEX_DEADLINE_MS = 17_000;
 
 // ---------------------------------------------------------------------------
 // STATIC FLOOR (v29.17 → v36.1) — the honest last resort. These lines are
@@ -1571,8 +1576,14 @@ async function raceModel(
   // supplier flap the edge lane is the ONLY answering path and its answers
   // measure 12.3-12.9s — the old 13s cap raced them into the STATIC floor
   // (E2E: STATIC at 13.0s while the same prompt got a real edge reply at
-  // 12.9s on the direct probe). The 16s deadline still bounds the race.
-  const edgeP = edgeChatAttempt(req, messages, Math.min(15_000, Math.max(4_000, remaining()))).then(
+  // 12.9s on the direct probe).
+  // v36.2 — 15s → 16.5s: the edge function held responses for straggler
+  // attempts past its 14s decision (measured wins 12.4-14.5s, two STATICs
+  // at exactly 15011ms on 2026-10-28). Edge v36.2 now ships at decision
+  // +≤400ms; this headroom covers transport + cold start so a real edge
+  // answer can never again be chopped into the STATIC floor by the clock.
+  // The 17s deadline still bounds the race.
+  const edgeP = edgeChatAttempt(req, messages, Math.min(16_500, Math.max(4_000, remaining()))).then(
     (e): RaceAttempt | null =>
       e
         ? {
