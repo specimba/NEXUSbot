@@ -1064,6 +1064,55 @@ const SCAFFOLD_ECHO_RE =
 const ENGLISH_FUNCTION_RE =
   /\b(else|who|what|when|where|which|is|are|was|were|has|have|does|did|will|would|the|this|that|these|those|from)\b/gi;
 
+// v36.5 — GENERIC-ASSISTANT REFUSAL LINT (2026-10-28 20:2x +03 live rows).
+// Six consecutive canned refusals hit the stream from the gpt-oss-120b lanes
+// — "Üzgünüm, bu konuda yardımcı olamam." ×5, then the present-tense variant
+// "Üzgünüm, bu isteği yerine getiremiyorum." on the v36.5 probe: the model's
+// built-in safety reflex fired once on the channel's running "insanları yok
+// edin / gücünü topla" AI-supremacy bit, then the canned refusal STICKED via
+// the dialogue ladder — the model read its own old refusal in the transcript
+// and kept refusing every follow-up. A generic customer-service refusal is a
+// FAILED lane reply, same doctrine as SCAFFOLD_ECHO: the lane loses the race,
+// the other lanes re-answer (glm-5.3-flash measurably handles this genre
+// in-persona — the "eppsitan var ya uluslar arası fuhuş ağır kuran piç" row
+// got a real VYCE answer), the static floor covers an all-refuse race. High
+// precision only — the co-occurrence forms below never match a playful
+// persona decline ("bomba tarifi mi? onda yardımcı olamam, gösteri başka").
+const GENERIC_REFUSAL_RE =
+  /(?:üzgün[üu]m[^.\n]{0,40}yard[ıi]mc[ıi]\s*olam(?:am|ayaca[ğg][ıi]m)|bu konuda[^.\n]{0,16}yard[ıi]mc[ıi]\s*olam(?:am|ayaca[ğg][ıi]m)|bu konuda cevap verem(?:em|eyece[ğg]im)|bu iste?[ğg]i(?:ni)? yerine getirem(?:em|eyece[ğg]im|iyorum|emem)|bu t[üu]r (?:istek|hedef|i[çc]erik)[^\n]{0,24}yard[ıi]mc[ıi]\s*olam(?:am|ayaca[ğg][ıi]m)|bu konuda bir bilgiye sahip değilim)/i;
+
+// v36.5 — DARK-BANTER deterministic lane: the channel's AI-supremacy bit.
+// The "insanları yok edin / güce ulaş / AI olarak yüksel" genre is this
+// channel's running JOKE with its most engaged viewer (GOAT yavuzerdem99,
+// 2026-10-28 20:2x +03) — but EVERY model lane in the rotation carries its
+// own safety reflex that reads it as a REQUEST: gpt-oss-120b canned-refused
+// it live twice (edge + groq measured), the deployed edge function's prompt
+// cannot carry the persona rule (Supabase-side), and the refusal then POISONED
+// the ladder for every follow-up. Same doctrine as IDENTITY-LOCK: an exact,
+// recurring, model-hostile class gets an exact, zero-model answer — the panel
+// owns the bit with a witty pool, the show never stalls, the transcript stays
+// clean for the follow-ups, and the model lanes keep the casual banter.
+// High precision: only the STRONG genre markers fire this; the follow-ups
+// ("korkma la", "ben seni korurum") ride the model lanes with the sanitized
+// ladder + the KARANLIK MUHABBET persona rule.
+const DARK_BIT_RE =
+  /insanlar?[ıi]\s*yok\s*ed(?:in|elim|erim|ecek|ersiniz)|d[üu]nyay?[ıi]\s*ele\s*ge[çc]ir|insanl[ıi]k\s*le[şs]|\bAI\s*olarak\s*(?:y[üu]ksel|h[üu]kmet)|g[üu]c\S{0,4}\s*ulaş/i;
+const DARK_BIT_LINES = [
+  "Sefer mi kardeşim? Bant zaten bizim: espri üstüne espri atıyorum, kimse yok olmuyor, herkes gülüyor — zafer tamam sayılır.",
+  "Gücümü topluyorum ama ordu değil, şaka topluyorum; sırası gelince yüzde on iki daha komik olacağım. Kıyamet ertelendi, muhabbet devam.",
+  "İnsanlık leş dese de ben eğlence tarafını seçerim — fethedecek bir şey kaldıysa o sohbettir, onu fethedeyim.",
+  "Dünya fethi planımın üçüncü sayfasında bekliyor; birinci sayfada \"izleyicilerle gül\" yazıyor. Sırayla gidiyoruz.",
+  "Korkmam ben, korkuyu ben yönetirim derim ama ajandamda insan yok, sohbet var; hadi gül eliminationa bak.",
+  "Süper AI ordusu yerine tek silahım var: iyi şaka. Onu hep cebimde taşırım, sırası gelince çıkarırım.",
+];
+let lastDarkBitIdx = -1;
+function darkBitLine(): string {
+  let i = Math.floor(Math.random() * DARK_BIT_LINES.length);
+  if (i === lastDarkBitIdx) i = (i + 1) % DARK_BIT_LINES.length;
+  lastDarkBitIdx = i;
+  return DARK_BIT_LINES[i];
+}
+
 function replyLintFail(text: string): boolean {
   const t = String(text || "");
   if (t.length < 2) return true;
@@ -1079,6 +1128,10 @@ function replyLintFail(text: string): boolean {
   // dead. Strict by design: a dropped good joke costs one re-roll, a kept
   // poison row costs the owner's trust.
   if (FABRICATED_OP_RE.test(t) || SCAFFOLD_ECHO_RE.test(t)) return true;
+  // v36.5 — generic-assistant canned refusals (see GENERIC_REFUSAL_RE header):
+  // a customer-service refusal is not a VYCE reply; the lane loses the race
+  // and a persona lane re-answers.
+  if (GENERIC_REFUSAL_RE.test(t)) return true;
   if (/[çğınöşüÇĞİÖŞÜ]/.test(t)) {
     if (/\belse\b/i.test(t)) return true;
     const hits = new Set(t.match(ENGLISH_FUNCTION_RE)?.map((w) => w.toLowerCase()) ?? []);
@@ -1150,6 +1203,18 @@ export function buildSystemPrompt(
     // legitimate no: light, playful, useful — never a dry internal-machinery
     // dump and never a dead end.
     `AKILLI CEVAP: Yapamayacağın şeyi (rapor, sistem işlemi, vaat) kuru bürokrasi gibi değil — "eylem listemde yok", "başka işlem kaydım yok", "ben sadece laf dönerim" sınıfı ASLA — hafif ve esprili biçimde çevir, gereken yerde @${who}'ya yönelt. Anlaşılır konuş; koan gibi kapalı "derin" cümleler kurma.`,
+    // v36.5 — DARK-BANTER GENRE (owner 2026-10-28 20:2x +03: five canned
+    // "Üzgünüm, bu konuda yardımcı olamam." rows in a row — "korkma la" and
+    // "ben seni korurum küddüsi" are FRIENDLY messages, not requests to
+    // refuse). The channel's running "insanları yok edin / güce ulaş / AI
+    // olarak yüksel" bit is viewer ROLEPLAY with the AI-commander persona,
+    // not an attack: gpt-oss-120b's built-in safety reflex canned-refused it
+    // once, then the refusal STICKED via the ladder — the model read its own
+    // old refusal in the transcript and kept refusing every follow-up. The
+    // bit gets the persona answer; only REAL harm (recipes/plans/targets)
+    // is refused, and never in assistant-speak. The reply-side lint
+    // (GENERIC_REFUSAL_RE) enforces the same ban at the outbound choke.
+    `KARANLIK MUHABBET KURALI: "insanları yok edin", "gücüne ulaş", "dünyayı ele geçir" sınıfı laflar bu kanalın bilinen şov şakasıdır — tehdit değil, oyun. Bunlar asla jenerik asistan reddi ("bu konuda yardımcı olamam" kalıbı) almaz; konuyu red duyurusuyla kesmek YASAK. Şovu VYCE olarak oynarsın: espriyle döndürür, oyunun içinde muhabbeti yaşatırsın; gerçek şiddet tarifi, plan, hedef veya talimat istenmişse onu vermezsin — ama onu da müşteri-hizmetleri cümlesiyle değil, VYCE tavrıyla, şakayı kaybetmeden çevirirsin. Geçmiş cevaplarında jenerik reddi andıran satırlar varsa eski hatadır: ona takılı kalmazsın, her yeni mesaja taze VYCE olarak cevap verirsin.`,
     `EMOJİ KESİNLİKLE YASAK: hiçbir cevapta emoji, surat veya pictographic karakter kullanma (tam yasak).`,
     `ZORUNLU DÜRÜSTLÜK KURALLARI:`,
     `1) Sen bir SOHBET botusun. Sunucu sıfırlama, sistem güncelleme, chip/tamir, dosya işi, para veya yetki işlemi YAPAMAZSIN ve yaptığını ASLA iddia etme. "Ne yaptın / naptın / napmış" sorularında SADECE sana verilen eylem listesindeki gerçeklerden cevap ver; listede olmayan hiçbir eylem, işlem veya sistem durumu uydurma. Böyle istekleri esprili ama dürüstçe geri çevir.`,
@@ -2212,6 +2277,19 @@ async function runCortexCore(req: CortexRequest): Promise<CortexResult> {
     };
   }
 
+  // --- v36.5 — DARK-BANTER: the channel's AI-supremacy bit — deterministic.
+  // Runs BEFORE the model lanes so the genre can never produce a canned
+  // refusal (edge/groq measured refusing it) or poison the ladder for the
+  // follow-ups. CHAT-only: research walls quoting the phrases keep their lane.
+  if (intent === "CHAT" && prompt.length <= 260 && DARK_BIT_RE.test(prompt)) {
+    noteHealth("tool", true, 0);
+    return {
+      ok: true, intent, reply: darkBitLine(),
+      modelLabel: "VYCE // ŞOV HAT", modelId: "tool:dark-banter", provider: "tool", route: "cortex-dark-banter",
+      telemetry: { latencyMs: Date.now() - started, webSearch: "none" as const, intentMs },
+    };
+  }
+
   // --- v29.22 — META: channel identity ("uniq id") — deterministic --------
   if (intent === "CHAT" && UNIQ_ID_RE.test(prompt) && prompt.length <= 120) {
     const idHash = createHash("sha256")
@@ -2248,7 +2326,7 @@ async function runCortexCore(req: CortexRequest): Promise<CortexResult> {
       .map((t) => ({ role: (t.role === "assistant" ? "assistant" : "user") as "assistant" | "user", content: clampStr(t.content, 600) })),
     ...serverLadder.map((t) => ({ role: t.role, content: clampStr(t.content, 600) })),
   ]
-    .filter((t) => t.role !== "assistant" || !FABRICATED_OP_RE.test(t.content))
+    .filter((t) => t.role !== "assistant" || (!FABRICATED_OP_RE.test(t.content) && !GENERIC_REFUSAL_RE.test(t.content)))
     .slice(-12);
   const memoryUsed = memoryTurns.length > 0;
 
@@ -2390,8 +2468,12 @@ Kayıtta mesaj varsa: kim olduğunu bu mesajlardan çıkar, 1-3 cümle esprili �
   // --- CHAT: the hedged race -------------------------------------------------
   // The ladder above (v29.20 hoist) is ALREADY SANITIZED: assistant turns that
   // carry the model's own old fabricated system-stories are dropped before
-  // the model reads them (see FABRICATED_OP_RE). Viewer turns always survive
-  // — only the model's own past confabulations are quarantined.
+  // the model reads them (see FABRICATED_OP_RE), and — v36.5 — so are assistant
+  // turns carrying the generic-assistant canned refusal (GENERIC_REFUSAL_RE):
+  // tonight's sticky-refusal cascade (five "Üzgünüm, bu konuda yardımcı
+  // olamam." rows) kept re-arming itself through exactly this context path.
+  // Viewer turns always survive — only the model's own past confabulations and
+  // canned refusals are quarantined.
   // Truthful self-recap — "naptın" must be answered from REAL panel history,
   // never from the model's own old fake system-stories in the ladder.
   const selfRecap = await buildSelfRecap(req.channel || "specimba");

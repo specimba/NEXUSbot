@@ -2039,3 +2039,37 @@ Stage Summary:
 - RSI candidates update: (1) edge-channel memory injection unchanged (top; "memory: no" on EDGE replies still open); (2) mirror-side uid could store the key era to make cross-era restores verifiable (store a keyId column + allow archived-key verification); (3) persistent-overlay hosting story unchanged.
 - Files: scripts/backfill-from-mirror.ts, scripts/spawn-minis.ts, .zscripts/dev.sh, worklog.md (this entry). No schema changes; DB writes = the sig-verified restore inserts only; one Kick test message (panel's own test-chat, owner-visible).
 
+---
+Task ID: cron-20261029-1750
+Agent: one-time cron (backup push follow-up to owner-20261029-1730)
+Task: 30-min backup throttle expired — push today's durable repairs off-site via the panel's own flow; verify kick-bridge upstream.
+
+Work Log:
+- Panel flow executed as designed (no force-bypass, no manual git push): /api/auth/login 200 -> POST /api/backup/run -> exitCode 0, "Snapshot pushed to specimba/NEXUSbot (fast-forward on main)"; backup-log: divergence pre-check OK, `326278f..409c1ec public-snapshot -> main`, PUSH OK, files-changed 6 (today's sig-fix/spawn-minis/dev.sh/worklog delta), snapshot-20261028 tag left untouched.
+- Pushed head: 409c1ec6a46d89ef137fde4a06fd03c30a3eee8e (main, 2026-10-28 20:53 +03).
+- kick-bridge :3010/health → ok:true, upstream "live", chatroomId 3628172, viewers 4, lastChatAt 17:53:30Z, lastError "" — no restart needed (double-fork survivor still holding from owner-20261029-1730).
+
+Stage Summary:
+- Off-site snapshot current with all of today's durable repairs; bot chat reach intact (bridge live, bot writing verified earlier this session). Nothing else touched: no code changes, no test code, no Kick test messages.
+---
+Task ID: owner-20261029-2140
+Agent: owner session (refusal-cascade fix, follow-up to owner-20261029-1730)
+Task: Owner pasted the live Interaction Log: five consecutive "Üzgünüm, bu konuda yardımcı olamam." canned refusals — 4 of 5 to FRIENDLY messages ("korkma la", "ben seni korurum küddüsi", "niye olamıyorsun") — plus one STATIC floor on "OLACAKSIN". "Still need fixes."
+
+Work Log:
+- ROOT CAUSE (three-layer): (1) gpt-oss-120b's built-in safety reflex reads the channel's running "insanları yok edin / güce ulaş" AI-supremacy JOKE (GOAT viewer's bit) as a real request and emits the generic-assistant canned refusal; (2) the canned refusal rides the dialogue ladder into every follow-up — the model reads its own old refusal and keeps refusing friendly messages (sticky cascade, all 5 rows measured); (3) the deployed edge function's prompt is Supabase-side and cannot carry a persona rule from here. Live probe pre-fix: "insanları yok edin diyorum boş mu bu" → "Üzgünüm, bu isteği yerine getiremiyorum." (a SECOND canned form slipping past a first-draft narrow regex).
+- FIX (v36.5, src/lib/brain/cortex.ts + prompt-guard.ts, four coordinated layers):
+  1. KARANLIK MUHABBET KURALI persona rule (buildSystemPrompt): the supremacy bit is the channel's show-joke — never answered with generic assistant refusals; play it with wit, refuse only REAL harm (recipes/plans/targets) in persona voice; past canned refusals in the transcript are old mistakes — answer fresh. Matching canary added to prompt-guard.ts per its own canary-follows-persona discipline.
+  2. GENERIC_REFUSAL_RE reply lint (replyLintFail): high-precision co-occurrence forms (üzgünüm…yardımcı olamam, bu konuda…yardımcı olamam, bu isteği(ni) yerine getiremem/getiremeyeceğim/getiremiyorum, bu tür isteklere yardımcı olamam, bu konuda bir bilgiye sahip değilim). A canned refusal now FAILS the lane exactly like a scaffolding echo — every generation lane funnels here (vyce primary, both backups, groq, edge measured). Playful persona declines ("bomba tarifi mi? onda yardımcı olamam") verified non-matching.
+  3. Ladder quarantine (memoryTurns filter): assistant turns carrying canned refusals are dropped before ANY lane reads them — the cascade's self-re-arming vector is cut at the source (same doctrine as FABRICATED_OP_RE).
+  4. DARK-BANTER deterministic lane (VYCE // ŞOV HAT, tool:dark-banter, runs after identity-lock, before model lanes): DARK_BIT_RE strong genre markers (insanları yok edin/elim, dünyayı ele geçir, insanlık leş, AI olarak yüksel/hükmet, güc[eüne] ulaş) answer from a 6-line witty pool with rotation — zero-model, zero-latency, CHAT-only, ≤260 chars. Follow-ups ("korkma la") keep the model lanes with the sanitized ladder.
+- Gates: lint clean; tsc 233 lines = exact pre-existing stock (zero errors in touched files, RC captured unpiped); regex batteries 19/19 (refusal v2) + 13/13 real-corpus (dark-bit; one synthetic paraphrase dropped as over-strict); module import OK.
+- LIVE PROOF (panel cortex API, zero Kick footprint, senders cortex-v36-probe-a/b/c): tonight's exact refused message → "VYCE // ŞOV HAT" witty line in 1ms; second refused message → ŞOV HAT (rotated line); refused friendly follow-up "korkma la" → EDGE in-persona answer "Korku? Ben VYCE'im…" 8.0s, NO canned refusal (ladder no longer poisoned).
+- Browser golden path (agent-browser): login → Pipeline tab renders tonight's rows + Security Memory with all 6 lessons (PROMPT_INJECTION/SECRET_FISHING/FAKE_AUTHORITY visible); zero page errors; console clean; 390px no overflow; 1440px screenshot saved. dev.log: all 200s, kick webhooks flowing; the single NO_CHATROOM line is line 196 of 720 = pre-fix era, zero occurrences after the bridge revival; bridge :3010 health upstream live, chatroomId 3628172.
+- "OLACAKSIN" STATIC floor: momentary all-lane settle (vyce flap evening + edge blip), one-off — the static line answered honestly; with the cascade dead the ladder around it stays clean.
+
+Stage Summary:
+- Shipped: the sticky-refusal cascade is dead at all four layers — genre messages now answer in-persona in ~0ms via ŞOV HAT, follow-ups ride clean ladders, and no covered canned refusal can reach the stream from any lane.
+- Owner actions: panel side needs nothing (server hot-reloaded); OBS browser source — press "Refresh cache of current page" to pick up the live HUD fully; hard-refresh the panel tab (Ctrl+F5) if it was open before the fixes.
+- RSI candidates unchanged: edge-channel memory injection (top; the "memory: no" on durum raporu was the post-restart ring warming up — self-healed, all later rows memory: yes); persistent-overlay hosting story.
+- Files: src/lib/brain/cortex.ts, src/lib/brain/prompt-guard.ts, worklog.md (this entry). No schema changes; no DB writes beyond app-owned rows; zero Kick messages sent (all probes went through the panel cortex API which does not post to chat).

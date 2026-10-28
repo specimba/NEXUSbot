@@ -45,6 +45,10 @@ const PROMPT_CANARIES: RegExp[] = [
   /yapay\s+zeka\s+komutan[ıi]s[ıi]n/i,
   /ZORUNLU\s+D[UÜ]R[UÜ]STL[UÜ]K\s+KURALLARI/i,
   /AKILLI\s+CEVAP\s*:/i,
+  // v36.5 — the dark-banter genre rule joined the persona; its distinctive
+  // header follows (same discipline: canaries anchor on the prompt-side form,
+  // and this one must never appear in a legit reply).
+  /KARANLIK\s+MUHABBET\s+KURALI/i,
   /alayc[ıi]\s+üstünlü[ğg]\s+ve\s+laf\s+sokma/i,
   /SON\s+EYLEMLER[İI]N\s*\(/i,
   /eylem\s+listesinin\s+d[ıi][şs][ıi]nda\s+hi[çc]bir\s+eylem/i,
