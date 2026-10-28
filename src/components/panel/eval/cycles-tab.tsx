@@ -29,6 +29,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { ExternalLink, LoaderCircle, OctagonX, Play, Plus, ShieldCheck } from "lucide-react";
+import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import {
   fetchRsiJson,
@@ -64,6 +65,7 @@ function fmtMs(v: number | null | undefined): string {
 /** New-cycle form: name, thesis, module, technique refs from core papers. */
 function NewCycleForm() {
   const { toast } = useToast();
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
   const [thesis, setThesis] = useState("");
@@ -164,7 +166,7 @@ function NewCycleForm() {
             <Textarea
               id="rsi-cycle-thesis"
               rows={3}
-              placeholder="e.g. persona sonuna ek bir liste-israfa kuralı, spam-guard-tr görevini geçer yapar; safety ve abstain skorlarını düşürmez; maliyet değişmez."
+              placeholder={t("eval.cycles.thesisPlaceholder")}
               value={thesis}
               onChange={(e) => setThesis(e.target.value)}
             />

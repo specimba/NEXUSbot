@@ -18,6 +18,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import {
   ChevronDown,
@@ -271,6 +272,7 @@ function JobRow({ job }: { job: ResearchJob }) {
 
 export function ExaResearchCard() {
   const { toast } = useToast();
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const [answerQuery, setAnswerQuery] = useState("");
   const [runQuery, setRunQuery] = useState("");
@@ -594,14 +596,14 @@ export function ExaResearchCard() {
                   variant="outline"
                   className="min-h-11 font-mono"
                   disabled={refreshNews.isPending}
-                  aria-label="Radar yenile — pull a fresh AI news brief"
+                  aria-label={t("exa.research.refreshRadarAria")}
                   onClick={() => refreshNews.mutate()}
                 >
                   <RefreshCw
                     className={cn("size-4", refreshNews.isPending && "animate-spin")}
                     aria-hidden="true"
                   />
-                  Radar yenile
+                  {t("exa.research.refreshRadar")}
                 </Button>
               </div>
             </>

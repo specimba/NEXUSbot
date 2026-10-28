@@ -339,3 +339,67 @@ setInterval(async () => {
   await runCycle("interval");
   nextRunAt = Date.now() + CHECK_INTERVAL_MS;
 }, CHECK_INTERVAL_MS);
+
+// ---------------------------------------------------------------------------
+// Watchdog sitter (cron-20261028-0825)
+// ---------------------------------------------------------------------------
+// ROOT CAUSE, measured twice (pid 5043 silent death, then the sitter's own
+// probe pid 28242): ANY process spawned from an agent/tool bash invocation is
+// SIGKILL'd when that invocation's session tears down — setsid/nohup/disown
+// do NOT escape it (the cgroup reap gets them; verified with a test `sleep`).
+// The three resident mini-services survive because they were booted by the
+// sandbox boot path (dev.sh) and orphan-reparented long ago. The mem-watchdog
+// therefore had NO launch path that survives: dev.sh instances were later
+// SIGTERM'd by fix sessions, agent respawns died at session end.
+//
+// Fix: this RESIDENT service supervises the watchdog. Every 60s, if no live
+// process has its cwd in mini-services/mem-watchdog, spawn one DETACHED from
+// this long-lived process (children of a resident survive teardowns). The
+// watchdog's own single-instance pidfile guard (same commit) makes double
+// spawns harmless: a refused second launch logs and exits 0. If bench-cadence
+// itself dies, the watchdog keeps running as an orphan and the 4h cron pass
+// notices the sitter's silence in this log.
+import { readdirSync, readlinkSync } from "node:fs";
+import { spawn as nodeSpawn } from "node:child_process";
+
+const SITTER_INTERVAL_MS = 60 * 1000;
+const WATCHDOG_DIR = `${PROJECT_ROOT}/mini-services/mem-watchdog`;
+
+function watchdogRunning(): boolean {
+  try {
+    for (const pid of readdirSync("/proc")) {
+      if (!/^\d+$/.test(pid)) continue;
+      try {
+        if (readlinkSync(`/proc/${pid}/cwd`).endsWith("/mini-services/mem-watchdog")) return true;
+      } catch {
+        /* vanished mid-scan */
+      }
+    }
+  } catch {
+    /* /proc unreadable — assume running, never spawn blindly */
+    return true;
+  }
+  return false;
+}
+
+function spawnWatchdog(): void {
+  try {
+    const child = nodeSpawn(
+      "bash",
+      ["-lc", `cd ${WATCHDOG_DIR} && setsid nohup bun index.ts >> ${PROJECT_ROOT}/.zscripts/mini-service-mem-watchdog.log 2>&1 < /dev/null &`],
+      { detached: true, stdio: "ignore" },
+    );
+    child.unref();
+    log(`[watchdog-sitter ${new Date().toISOString()}] mem-watchdog absent -> spawned detached`);
+  } catch (err) {
+    log(`[watchdog-sitter ${new Date().toISOString()}] spawn failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+setInterval(() => {
+  if (!watchdogRunning()) spawnWatchdog();
+}, SITTER_INTERVAL_MS);
+// One boot-delayed probe too (the boot cycle waits 30s; the sitter acts sooner).
+setTimeout(() => {
+  if (!watchdogRunning()) spawnWatchdog();
+}, 10_000);

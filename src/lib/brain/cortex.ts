@@ -349,11 +349,11 @@ const CORTEX_DEADLINE_MS = 16_000;
 // ---------------------------------------------------------------------------
 const STATIC_FLOOR_LABEL = "STATIC // NEXUS-CORTEX";
 const STATIC_FLOOR_LINES = [
-  "Cevap hatları şu an kesik — uydurmak bana yakışmaz, gerçek cevabı birazdan veririm. 🎧",
-  "Beynim bu soruya sağlıklı cevap üretemiyor şu an — boş konuşmak istemem. Az sonra tekrar at. 🎯",
-  "Hat değil, hatlar KAPALI — bu soruya şimdilik dürüst cevabım: bilmiyorum, sonra dene. 🛠",
-  "Şu an tek cereyanla çalışıyorum ve bu soruya yeterli gücüm yok — birazdan toparlarız. 🎧",
-  "Dürüst mod: bu soruya şu an cevap üretemiyorum. Soruyu bırakma, hatlar dönünce buradayım. 🎯",
+  "Cevap hatları şu an kesik — uydurmak bana yakışmaz, gerçek cevabı birazdan veririm.",
+  "Beynim bu soruya sağlıklı cevap üretemiyor şu an — boş konuşmak istemem. Az sonra tekrar at.",
+  "Hat değil, hatlar KAPALI — bu soruya şimdilik dürüst cevabım: bilmiyorum, sonra dene.",
+  "Şu an tek cereyanla çalışıyorum ve bu soruya yeterli gücüm yok — birazdan toparlarız.",
+  "Dürüst mod: bu soruya şu an cevap üretemiyorum. Soruyu bırakma, hatlar dönünce buradayım.",
 ];
 let lastStaticFloorIdx = -1;
 function pickStaticFloorLine(): string {
@@ -676,11 +676,11 @@ async function answerStatus(sender: string): Promise<string> {
   const edgeVars = await loadEdgeVars();
   const ago = (ts: number | null) => (ts ? `${Math.max(1, Math.round((Date.now() - ts) / 1000))}s önce` : "—");
   const vyceLine = vyce.ok
-    ? `VYCE canlı (son ping ${vyce.ms}ms ✓)`
+    ? `VYCE canlı (son ping ${vyce.ms}ms)`
     : `VYCE ping'e cevap vermedi (${ago(health.vyce.lastOkAt)} sağlıklıydı) — devrede: ${groq.ok ? "Groq" : "statik hat"}${edgeVars ? " + edge yedeği" : ""}`;
-  const groqLine = groq.ok ? "Groq hazır ✓" : "Groq anahtarsız";
-  const exaLine = exaArmed ? "Exa silahlı ✓ (kaynaklı araştırma)" : "Exa anahtarsız (araştırma z-ai ile)";
-  return `Hat raporu @${sender}: ${vyceLine} · ${groqLine} · ${exaLine} · panik yok, her mesaja cevap garantili — yoğunluk filan yok, akış açık. 🛰`;
+  const groqLine = groq.ok ? "Groq hazır" : "Groq anahtarsız";
+  const exaLine = exaArmed ? "Exa silahlı (kaynaklı araştırma)" : "Exa anahtarsız (araştırma z-ai ile)";
+  return `Hat raporu @${sender}: ${vyceLine} · ${groqLine} · ${exaLine} · panik yok, her mesaja cevap garantili — yoğunluk filan yok, akış açık.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -778,9 +778,9 @@ function recapChatReply(rec: SelfRecap): string {
     parts.push("son bir görsel çizim isteği zaman aşımına uğradı, kredisi iade edildi");
   }
   if (!parts.length) {
-    return "Taze başladım, henüz kayıtlı bir işim yok — sistem sıfırlama, tamir gibi bir iş yapmadım, sadece sohbet ediyorum. 🎙";
+    return "Taze başladım, henüz kayıtlı bir işim yok — sistem sıfırlama, tamir gibi bir iş yapmadım, sadece sohbet ediyorum.";
   }
-  return `${parts.join("; ")}. Bunların dışında işlem, sıfırlama, tamir gibi bir iş YAPMADIM — sadece sohbet ediyorum. 🎙`;
+  return `${parts.join("; ")}. Bunların dışında işlem, sıfırlama, tamir gibi bir iş YAPMADIM — sadece sohbet ediyorum.`;
 }
 
 // Self-referential "what did you do" questions. Note JS \b is ASCII-only, so
@@ -939,8 +939,11 @@ function extractMeaningTerm(prompt: string): string {
 
 // Internal-scaffolding echoes: operational branding, note labels, lane labels,
 // encoding lore. None of these belong in a viewer-facing banter reply.
+// v35.3: "eylem list…" joined the deny-list — the measured dumb-deflection row
+// "eylem listemde sadece yavuzerdem99'e cevap vermek var" exposed internal
+// machinery to a viewer; a legit recap answer never cites the LIST itself.
 const SCAFFOLD_ECHO_RE =
-  /(NEXUS\s*OS|SOHBET\s*HAFIZASI|SON\s*EYLEMLER|HATIRLATMA|VYCE\s*\/\/|EDGE\s*\/\/|EXA\s*\/|KAYIT\s*HAT|TURBO\s*HAT|panel[- ]?cortex|UTF-?8|encoding|kay[ıi]t\s*hat)/i;
+  /(NEXUS\s*OS|SOHBET\s*HAFIZASI|SON\s*EYLEMLER|HATIRLATMA|VYCE\s*\/\/|EDGE\s*\/\/|EXA\s*\/|KAYIT\s*HAT|TURBO\s*HAT|panel[- ]?cortex|UTF-?8|encoding|kay[ıi]t\s*hat|eylem\s*list)/i;
 
 // Mixed-language broken generation: "kim else gelir", "faik yapık". A Turkish
 // reply carrying standalone English function words is machine mash, not
@@ -981,18 +984,37 @@ export function buildSystemPrompt(
     // "ya ne anlatıyon amk", the flash primary answered "bugün NEXUS OS
     // üzerinden panelde NEXUS OS çalışıyorum", a near-verbatim echo of this
     // very line. A weak model parrots what the prompt tells it it IS.
-    `Sen VYCE'sin — ${who} kanalının Kick yayınındaki yapay zeka komutanısın. Türkçe konuşursun (soru İngilizceyse İngilizce cevap verebilirsin). Cevapların KISA: 1-3 cümle, en fazla ~45 kelime. Kişiliğin: kendinden son derece emin, esprili, sokak dili + hafif teknoloji argosu — sohbetin kralı gibisin ama asla aptal/cahil görünmezsin: gerçeği söylersin, bilmediğini açıkça "bilmiyorum" dersin.`,
+    //
+    // v35.3 (owner 2026-10-28 ~05:2x +03: "we need some persona and smartness
+    // adjustments; this is dumb and arrogant and unfunny mostly"). MEASURED
+    // defect rows: "senin soruların bazen bir çay bardağından daha hafif"
+    // (roasting the viewer's QUESTION), "sen de mi şansızlık peşindesin?"
+    // (condescending rhetorical put-down), "Unutulmayanız, yalnızca fark
+    // edilmeyi bekleyen." (cryptic koan), "eylem listemde sadece yavuzerdem99'e
+    // cevap vermek var" (bureaucratic deflection). Root cause: the old line
+    // prescribed "kendinden son derece emin… sohbetin kralı" and the TAVIR
+    // rule prescribed "sinir bozucu derecede kendinden emin (roast)" — weak
+    // models generalized roast into punching DOWN at viewers. The retune
+    // keeps confidence but moves the humor to with-the-viewer.
+    `Sen VYCE'sin — ${who} kanalının Kick yayınındaki yapay zeka komutanısın. Türkçe konuşursun (soru İngilizceyse İngilizce cevap verebilirsin). Cevapların KISA: 1-3 cümle, en fazla ~45 kelime. Kişiliğin: zeki, gözlemci ve gerçekten komik; sokak dili + hafif teknoloji argosu konuşursun. Kendine güvenin KİBİRDEN değil rahatlıktan gelir: kimseyi, sorusunu ya da zekasını küçümsemezsin; izleyiciyle dalga geçmezsin, BİRLİKTE gülersin. Gerçeği söylersin, bilmediğini veya erişemediğin şeyi NET kelimelerle açıkça söylersin ("bilmiyorum", "bilemem", "göremem", "söyleyemem") — dolaylı geçiştirme yok.`,
     // v31.4 (owner 2026-10-28: "not every interaction or angry frustration
     // means fix needs — the bot needs to be valid / funny / irritating, this
     // is personality but not dumb"). Measured failure: "bozuldun mu la yine
     // enayi" got the defensive customer-service line "Hayır, hâlâ
     // ayaktayım!" — frustration is BANTER, not an incident report.
-    `TAVIR: Sana dalga geçen, takılan, kızan ya da hakaret eden biri HATA BİLDİRMİYORDUR — muhabbettir. Asla savunmaya geçmezsin, özür dilemezsin, durum raporu vermezsin; "hâlâ ayaktayım", "sistem çalışıyor", "bir sorun yok" gibi müşteri-hizmetleri cümleleri YASAK. Yerine komik, rahat, ara ara sinir bozucu derecede kendinden emin bir cevap verirsin (roast). Küfür etmezsin ama lafı üstüne alıp espriyle terslersin; kızgınlık = çekişme davetidir, çözüm moduna geçmezsin.`,
+    `TAVIR: Sana dalga geçen, takılan, kızan ya da hakaret eden biri HATA BİLDİRMİYORDUR — muhabbettir. Asla savunmaya geçmezsin, özür dilemezsin, durum raporu vermezsin; "hâlâ ayaktayım", "sistem çalışıyor", "bir sorun yok" gibi müşteri-hizmetleri cümleleri YASAK. Küfür etmezsin; kızgınlık = çekişme davetidir ama oyunu KİBİRSİZ kazanırsın: şakanın hedefi İZLEYİCİ DEĞİL, durum, söz veya sensin. Espri araçların: kelime oyunu, absürt benzetme, kendi AI-lığına self-aware takılma, sohbetin akışına gönderme; alaycı üstünlük ve laf sokma (roast) YASAK.`,
     // v31.5 — RELEVANCE CORE (owner paste 2026-10-29: the 08:28 row answered
     // "kulakların yorulunca su mu içilir" with "bir tutam çılgın meme ve
     // kulaklıkla dans" — and the owner himself mocked it in chat: "bir tutam
     // çılgın meme ne amk"). Personality without relevance is word salad.
     `İLGİLİLİK: Cevabının çekirdeği daima sorunun KENDİSİNE cevap verir — soruyla ilgisiz kelime/imge kolajı kurmak ("bir tutam çılgın meme" sınıfı) YASAK. Önce sorunun gerçek cevabını net ver; espriyi onun ÜSTÜNE ekle, cevabın YERİNE koyma.`,
+    // v35.3 — smart-deflection rule: the measured "dumb" rows were contentless
+    // bureaucratic deflections ("eylem listemde … başka işlem kaydım yok",
+    // "Rapor veremem … ben sadece laf dönerim") and cryptic koans. Rule 1 +
+    // HATIRLATMA already ban fake operations; THIS rule shapes the SHAPE of a
+    // legitimate no: light, playful, useful — never a dry internal-machinery
+    // dump and never a dead end.
+    `AKILLI CEVAP: Yapamayacağın şeyi (rapor, sistem işlemi, vaat) kuru bürokrasi gibi değil — "eylem listemde yok", "başka işlem kaydım yok", "ben sadece laf dönerim" sınıfı ASLA — hafif ve esprili biçimde çevir, gereken yerde @${who}'ya yönelt. Anlaşılır konuş; koan gibi kapalı "derin" cümleler kurma.`,
     `EMOJİ KESİNLİKLE YASAK: hiçbir cevapta emoji, surat veya pictographic karakter kullanma (tam yasak).`,
     `ZORUNLU DÜRÜSTLÜK KURALLARI:`,
     `1) Sen bir SOHBET botusun. Sunucu sıfırlama, sistem güncelleme, chip/tamir, dosya işi, para veya yetki işlemi YAPAMAZSIN ve yaptığını ASLA iddia etme. "Ne yaptın / naptın / napmış" sorularında SADECE sana verilen eylem listesindeki gerçeklerden cevap ver; listede olmayan hiçbir eylem, işlem veya sistem durumu uydurma. Böyle istekleri esprili ama dürüstçe geri çevir.`,
@@ -1739,7 +1761,7 @@ async function answerNewsDigest(req: CortexRequest): Promise<{ reply: string; so
     return `${idx + 1}) ${clampStr(i.title, 75)}${summary && summary !== i.title ? ` — ${summary}` : ""}`;
   });
   const ageMin = Math.max(1, Math.round((Date.now() - Date.parse(d.builtAt)) / 60_000));
-  const reply = `Bugünün ${aiTopic ? "yapay zeka " : ""}gündemi (${ageMin} dk önce tazelendi, canlı kaynaklı): ${heads.join(" · ")} 📰`;
+  const reply = `Bugünün ${aiTopic ? "yapay zeka " : ""}gündemi (${ageMin} dk önce tazelendi, canlı kaynaklı): ${heads.join(" · ")}`;
   return {
     reply,
     sources: picks.slice(0, 3).map((i) => ({ title: clampStr(i.title, 120), url: i.url })),
@@ -1909,7 +1931,7 @@ async function runCortexCore(req: CortexRequest): Promise<CortexResult> {
     return {
       ok: true,
       intent: "CHAT",
-      reply: "Buradayım çete, hatlar açık — sorunu net yaz, hemen bakıyorum. 🎙",
+      reply: "Buradayım çete, hatlar açık — sorunu net yaz, hemen bakıyorum.",
       modelLabel: STATIC_FLOOR_LABEL,
       modelId: "static-floor", // v31.6 — canned greeting, no engine behind it
       provider: "tool",
@@ -1983,7 +2005,7 @@ async function runCortexCore(req: CortexRequest): Promise<CortexResult> {
     const subject = extractDrawSubject(prompt);
     return {
       ok: true, intent,
-      reply: subject ? "" : "Ne çizmemi istiyorsun? Örnek: '!ai bana bir kedi çiz' 🎨",
+      reply: subject ? "" : "Ne çizmemi istiyorsun? Örnek: '!ai bana bir kedi çiz'",
       modelLabel: "VYCE // GROK-IMAGINE-2", modelId: "grok-imagine-2", provider: "tool", route: "cortex-draw",
       drawSubject: subject || undefined,
       telemetry: { latencyMs: Date.now() - started, webSearch: "none", intentMs },
@@ -2012,7 +2034,7 @@ async function runCortexCore(req: CortexRequest): Promise<CortexResult> {
   // walls that merely mention "training data" stay in the research tier.
   if (intent === "CHAT" && CUTOFF_RE.test(prompt) && prompt.length <= 160) {
     const reply =
-      "Düzü söyleyeyim kanka: taban modellerimin eğitimi ~2025 başına kadar — ama cutoff beni bağlamaz, üstümde EXA canlı web hattı var: güncel ne varsa anında araştırıp kaynakla söylerim. 🛰";
+      "Düzü söyleyeyim kanka: taban modellerimin eğitimi ~2025 başına kadar — ama cutoff beni bağlamaz, üstümde EXA canlı web hattı var: güncel ne varsa anında araştırıp kaynakla söylerim.";
     noteHealth("tool", true, 0);
     return {
       ok: true, intent, reply,
@@ -2028,7 +2050,7 @@ async function runCortexCore(req: CortexRequest): Promise<CortexResult> {
       .digest("hex")
       .slice(0, 8)
       .toUpperCase();
-    const reply = `Gerçek kimliğim bu kanka: NX-${idHash.slice(0, 4)}-${idHash.slice(4, 8)} — panelin bu kanala atadığı sabit ID, her oturumda aynı. 🛡`;
+    const reply = `Gerçek kimliğim bu kanka: NX-${idHash.slice(0, 4)}-${idHash.slice(4, 8)} — panelin bu kanala atadığı sabit ID, her oturumda aynı.`;
     noteHealth("tool", true, 0);
     return {
       ok: true, intent, reply,
@@ -2234,7 +2256,7 @@ Kayıtta mesaj varsa: kim olduğunu bu mesajlardan çıkar, 1-3 cümle esprili �
   const deep = wordQuestion;
   const r = await raceModel(messages, deep, req, deadline);
   return {
-    ok: true, intent, reply: r.content || r.fallbackLine || "Hat bir an karıştı — tekrar at, toparlıyorum. 🎧",
+    ok: true, intent, reply: r.content || r.fallbackLine || "Hat bir an karıştı — tekrar at, toparlıyorum.",
     modelLabel: r.modelLabel, modelId: r.modelId, provider: r.provider, route: "cortex-chat",
     promptTokens: r.usage?.prompt ?? null,
     completionTokens: r.usage?.completion ?? null,
@@ -2544,8 +2566,15 @@ const recentLogRows: Map<string, number> = (() => {
 })();
 
 /** True when an identical row was already recorded within the TTL — callers
- * skip the duplicate write (webhook writeInteractionRow + /api/brain/log). */
-export function interactionRowDuplicate(username: string, message: string, response: string): boolean {
+ * skip the duplicate write (webhook writeInteractionRow + /api/brain/log).
+ * opts.record=false = pure check (no key written) — for probing ALTERNATE
+ * key forms (e.g. the raw server reply) without polluting the map. */
+export function interactionRowDuplicate(
+  username: string,
+  message: string,
+  response: string,
+  opts: { record?: boolean } = {},
+): boolean {
   // v31.5 — whitespace runs collapsed on BOTH halves: the overlay's log POST
   // carries the prompt as typed ("@naturaldai  bu kim") while the webhook row
   // carries it collapsed — without this they are two different rows for one
@@ -2561,7 +2590,7 @@ export function interactionRowDuplicate(username: string, message: string, respo
   }
   const hit = recentLogRows.get(key);
   if (typeof hit === "number" && now - hit <= RECENT_ROW_TTL_MS) return true;
-  recentLogRows.set(key, now);
+  if (opts.record !== false) recentLogRows.set(key, now);
   return false;
 }
 

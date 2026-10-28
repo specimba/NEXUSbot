@@ -9,6 +9,7 @@ import { clearSessionToken } from "@/lib/client-auth";
 import { cn } from "@/lib/utils";
 import {
   FlaskConical,
+  Languages,
   LayoutDashboard,
   LogOut,
   Moon,
@@ -19,6 +20,7 @@ import {
   AppWindow,
   ScrollText,
 } from "lucide-react";
+import { useI18n } from "@/lib/i18n";
 
 /**
  * Tab registry (frozen order). G6 opened by owner directive 2026-10-29:
@@ -26,15 +28,19 @@ import {
  * The Widgets tab replaces the old Variables registry tab: widgets are what
  * viewers SEE — the {{namespace.field}} template dialect moves into the
  * bot-commands work where it actually executes.
+ *
+ * Labels are i18n dictionary keys (src/lib/i18n.tsx) — one click on the
+ * language toggle in the header switches them (and the rest of the
+ * translated chrome) instantly, no reload.
  */
 const TABS = [
-  { id: "overview", label: "Overview", icon: LayoutDashboard },
-  { id: "stream", label: "Stream", icon: Radio },
-  { id: "pipeline", label: "Pipeline", icon: ScrollText },
-  { id: "widgets", label: "Widgets", icon: AppWindow },
-  { id: "connectors", label: "Connectors", icon: PlugZap },
-  { id: "settings", label: "Settings", icon: SlidersHorizontal },
-  { id: "eval", label: "Eval · RSI", icon: FlaskConical },
+  { id: "overview", label: "nav.overview", icon: LayoutDashboard },
+  { id: "stream", label: "nav.stream", icon: Radio },
+  { id: "pipeline", label: "nav.pipeline", icon: ScrollText },
+  { id: "widgets", label: "nav.widgets", icon: AppWindow },
+  { id: "connectors", label: "nav.connectors", icon: PlugZap },
+  { id: "settings", label: "nav.settings", icon: SlidersHorizontal },
+  { id: "eval", label: "nav.eval", icon: FlaskConical },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -44,6 +50,7 @@ export function PanelShell() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { resolvedTheme, setTheme } = useTheme();
+  const { lang, setLang, t } = useI18n();
 
   const logout = useMutation({
     mutationFn: async () => {
@@ -54,10 +61,10 @@ export function PanelShell() {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["session"] });
-      toast({ title: "Signed out" });
+      toast({ title: t("toast.signedOut") });
     },
     onError: (e: Error) => {
-      toast({ title: "Logout failed", description: e.message, variant: "destructive" });
+      toast({ title: t("toast.logoutFailed"), description: e.message, variant: "destructive" });
     },
   });
 
@@ -70,7 +77,7 @@ export function PanelShell() {
               className="size-2 rounded-full bg-primary shadow-[0_0_8px_rgba(16,185,129,0.8)]"
               aria-hidden="true"
             />
-            <span className="sr-only">Server online</span>
+            <span className="sr-only">{t("header.serverOnline")}</span>
             <span className="font-mono text-sm font-semibold tracking-[0.2em] text-primary text-glow">
               NEXUS OS
             </span>
@@ -80,7 +87,7 @@ export function PanelShell() {
               variant="ghost"
               size="icon"
               className="size-11"
-              aria-label="Toggle light / dark theme"
+              aria-label={t("header.toggleTheme")}
               onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
             >
               <Moon className="size-4 dark:hidden" aria-hidden="true" />
@@ -89,8 +96,20 @@ export function PanelShell() {
             <Button
               variant="ghost"
               size="icon"
+              className="size-11 flex-col gap-0.5 px-1"
+              aria-label={t("lang.toggle")}
+              onClick={() => setLang(lang === "en" ? "tr" : "en")}
+            >
+              <Languages className="size-4" aria-hidden="true" />
+              <span className="font-mono text-[9px] font-semibold leading-none" aria-hidden="true">
+                {lang === "en" ? "EN" : "TR"}
+              </span>
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
               className="size-11"
-              aria-label="Sign out"
+              aria-label={t("header.signOut")}
               disabled={logout.isPending}
               onClick={() => logout.mutate()}
             >
@@ -99,7 +118,7 @@ export function PanelShell() {
           </div>
         </div>
         <nav
-          aria-label="Panel sections"
+          aria-label={t("nav.sections")}
           className="mx-auto w-full max-w-5xl overflow-x-auto px-4 pb-2"
         >
           <div className="flex gap-1" role="tablist">
@@ -120,7 +139,7 @@ export function PanelShell() {
                   )}
                 >
                   <Icon className="size-4" aria-hidden="true" />
-                  {label}
+                  {t(label)}
                 </button>
               );
             })}
@@ -140,8 +159,8 @@ export function PanelShell() {
 
       <footer className="mt-auto border-t border-border/70 bg-background/70 backdrop-blur">
         <div className="mx-auto flex w-full max-w-5xl flex-wrap items-center justify-between gap-1 px-4 py-3 font-mono text-[11px] text-muted-foreground">
-          <span>NEXUS OS · owner speci</span>
-          <span>L0 stream · local-first · zero external spend</span>
+          <span>{t("footer.brand")}</span>
+          <span>{t("footer.l0")}</span>
         </div>
       </footer>
     </div>

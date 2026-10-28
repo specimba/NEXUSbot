@@ -51,7 +51,6 @@ import fs from "node:fs";
 // this sandbox (measured — connection refused to 127.0.0.1 from bun runtime
 // while curl succeeds). A bun-based probe would false-negative EVERY tick and
 // murder a healthy server. curl is the ground truth here.
-import fs from "node:fs";
 
 const PROJECT = "/home/z/my-project";
 const LOG = `${import.meta.dir}/watchdog.log`;

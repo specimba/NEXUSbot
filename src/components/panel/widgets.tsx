@@ -514,6 +514,27 @@ function WidgetEditor({
     onError: (e: Error) => toast.error("OBS link failed", { description: e.message }),
   });
 
+  // v35.1 — explicit seed-code sync (POST /api/widgets/[id]/sync-seed). The
+  // auto-sync refuses to touch code modified in the panel; this is the
+  // owner's "take the seed, I know" override. Variables always preserved.
+  const seedSync = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/widgets/${widget.id}/sync-seed`, { method: "POST" });
+      const body = (await res.json().catch(() => null)) as
+        | { ok?: boolean; mode?: string; jsHash?: string; detail?: string; error?: { message?: string } }
+        | null;
+      if (!res.ok || !body?.ok) throw new Error(body?.error?.message ?? `Seed sync failed (HTTP ${res.status})`);
+      return body as { mode: string; jsHash: string; detail: string };
+    },
+    onSuccess: (body) => {
+      void queryClient.invalidateQueries({ queryKey: ["widgets"] });
+      toast.success(`Seed code synced (${body.mode})`, {
+        description: `${body.detail} jsHash ${body.jsHash.slice(0, 8)}…`,
+      });
+    },
+    onError: (e: Error) => toast.error("Seed sync failed", { description: e.message }),
+  });
+
   // Live preview document — an explicit apply-model: the (up to 100 KB)
   // document is rebuilt ONLY when the operator clicks "Apply to preview" or
   // saves, so typing in the editors never thrashes an iframe remount.
@@ -606,6 +627,32 @@ function WidgetEditor({
           </Button>
         </div>
       </div>
+
+      {widget.seeded && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex flex-wrap items-center justify-between gap-2 font-mono text-sm">
+              <span>Seed code sync</span>
+              <Button
+                variant="outline"
+                className="min-h-11 font-mono"
+                disabled={seedSync.isPending}
+                onClick={() => seedSync.mutate()}
+                aria-label="Force-sync the widget code from the repo seed"
+              >
+                <RefreshCw className={cn("size-4", seedSync.isPending && "animate-spin")} aria-hidden="true" />
+                {seedSync.isPending ? "Syncing…" : "Sync code from seed"}
+              </Button>
+            </CardTitle>
+            <CardDescription>
+              The live overlay auto-syncs from the repo seed whenever the seed is newer and the live code was not
+              modified here (auto-sync skips modified code and logs an event). Owner variables, size and enabled
+              state are always preserved — only html/css/js change. After any sync, refresh the OBS Browser Source
+              once so the running overlay picks up the new code.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      )}
 
       <div className="grid items-start gap-4 xl:grid-cols-[1fr_430px]">
         {/* ---------------- LEFT: settings + variables + code ---------------- */}

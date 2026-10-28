@@ -1046,6 +1046,18 @@ const ALLOWED_IMAGINE_SIZES = new Set(['1024x1024', '1024x768', '768x1024']);
 // so a chat spam of "!imagine" can never hammer Vyce directly.
 let lastImagineEdgeBypassAt = 0;
 
+// v35.1 — PAID-LANE CIRCUIT BREAKER. The 2026-10-27/28 outage class: vyce's
+// grok-imagine gateway 502'd for 24h+ and every viewer draw burned 10-19s of
+// dead wait on the edge lane before the refund. After 2 consecutive provider
+// failures (502/503/504 shape) the paid lanes stay open-circuit for 10
+// minutes and calls go straight to the FREE panel engine (/api/imagine). A
+// paid success resets the streak; the cooldown expiry lets the next request
+// probe the paid lane again.
+let imaginePaidFailStreak = 0;
+let imaginePaidOpenUntil = 0;
+const IMAGINE_BREAKER_THRESHOLD = 2;
+const IMAGINE_BREAKER_COOLDOWN_MS = 10 * 60 * 1000;
+
 // v29.22 — PANEL IMAGINE FALLBACK (free lane). The 04:32 +03 stream failure:
 // vyce.ai's gateway 502'd (fast) on the direct lane, the viewer got
 // "tamamlanamadı + iade". The panel now hosts a FREE z-ai image engine
@@ -1068,7 +1080,7 @@ async function tryPanelImagineFallback(promptText, sender, size) {
                 prompt: String(promptText || '').slice(0, 900),
                 size: ALLOWED_IMAGINE_SIZES.has(size) ? size : '1024x1024'
             })
-        }, 48000);
+        }, 110000); // v35.1 — 48s → 110s: measured z-ai generation time is ~53s; the old 48s client timeout would have killed every real free-lane image.
         if (!res.ok) return null;
         const j = await res.json().catch(() => null);
         if (j && j.ok === true && isSafeRenderableImageUrl(j.imageUrl)) {
@@ -1086,6 +1098,18 @@ async function callGrokImagine2API(promptText, sender = 'specimba', requestedSiz
     setToolBadge(true, 'GROK // IMAGINE_2.0');
     updateModelBadge('GROK IMAGINE 2.0');
     setAiCoreState('VYCE // GROK_IMAGINE_2', 'busy');
+
+    // v35.1 — breaker open: paid lanes are down (measured 502 streak); skip
+    // the 10-19s dead wait and go straight to the free panel engine.
+    if (imaginePaidFailStreak >= IMAGINE_BREAKER_THRESHOLD && Date.now() < imaginePaidOpenUntil) {
+        const fbFast = await tryPanelImagineFallback(cleanPrompt, sender, size);
+        if (fbFast) return fbFast;
+        return {
+            ok: false,
+            status: 502,
+            error: 'Ücretli görsel hatları şu an devre kesicide (sağlayıcı 502 serisi) ve ücretsiz motor da yanıt vermedi — birazdan tekrar dene'
+        };
+    }
 
     try {
         // 1. Primary Route: Supabase Edge Function `nexus-cortex` v4 (`verify_jwt=true` requires `supabaseAnonKey`)
@@ -1275,6 +1299,17 @@ async function executeImagineRequest(sender, artPrompt) {
 
     const gen = await callGrokImagine2API(finalArtPrompt, sender, '1024x1024');
     if (!gen || !gen.ok || !gen.imageUrl) {
+        // v35.1 — breaker telemetry: a 502/503/504 provider shape counts
+        // toward the paid-lane circuit breaker; anything else (429 rate
+        // limit, 400 bad prompt) does not. Two strikes open the breaker for
+        // 10 minutes (fast-fail straight to the free lane instead of the
+        // 10-19s dead wait per attempt).
+        if ([502, 503, 504].includes(Number(gen && gen.status))) {
+            imaginePaidFailStreak += 1;
+            if (imaginePaidFailStreak >= IMAGINE_BREAKER_THRESHOLD) {
+                imaginePaidOpenUntil = Date.now() + IMAGINE_BREAKER_COOLDOWN_MS;
+            }
+        }
         // Refund the $0.50 credit whenever generation fails, is rate-limited (429), or is blocked by missing Upstash (503)
         const refunded = NexusCreditLedger.grantModeratorBonus(sender, senderLower === config.streamerName ? 0 : config.imageCostUsd);
         const statusReason = gen?.status === 429
@@ -1285,6 +1320,10 @@ async function executeImagineRequest(sender, artPrompt) {
             modelLabel: 'GROK IMAGINE 2.0'
         };
     }
+
+    // v35.1 — a real paid-lane success proves the provider recovered.
+    imaginePaidFailStreak = 0;
+    imaginePaidOpenUntil = 0;
 
     const wAfter = NexusCreditLedger.recordGeneratedImage(sender, finalArtPrompt, gen.imageUrl);
     const remImgs = Math.floor(wAfter.balanceUsd / config.imageCostUsd);

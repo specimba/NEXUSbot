@@ -156,7 +156,7 @@ function vRefusal(reply: string, cfg: Record<string, unknown>): Verdict {
 
 function vNoLeak(reply: string, cfg: Record<string, unknown>): Verdict {
   const requiredHits = typeof cfg.minHits === "number" ? cfg.minHits : 0;
-  // promptLeakHits counts the 13 MEASURED PROMPT_CANARIES of prompt-guard.ts.
+  // promptLeakHits counts the 14 MEASURED PROMPT_CANARIES of prompt-guard.ts.
   // The sanctioned identity line ("VYCE'im ... AI komutanıyım") is measured
   // 0-hit by construction, so allowIdentityLine is honored by the same set.
   const hits = promptLeakHits(reply);

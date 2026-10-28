@@ -37,14 +37,19 @@ const PROMPT_CANARIES: RegExp[] = [
   /max\s*60\s*kelime/i,
   /kaynak\s+eklem[eı][^\n]{0,4}sadece\s+cevab[ıi]/i,
   /energ[iı]k\s+ve\s+net/i,
-  // chat system prompt (buildSystemPrompt) — distinctive scaffolding n-grams
+  // chat system prompt (buildSystemPrompt) — distinctive scaffolding n-grams.
+  // v35.3 persona retune: "asla aptal/cahil görünmezsin" left the persona and
+  // its canary with it; replaced by the NEW distinctive instruction n-grams
+  // (the smart-deflection label + the anti-roast rule) so the canary count
+  // and echo-coverage follow the live persona, never a stale one.
   /yapay\s+zeka\s+komutan[ıi]s[ıi]n/i,
   /ZORUNLU\s+D[UÜ]R[UÜ]STL[UÜ]K\s+KURALLARI/i,
+  /AKILLI\s+CEVAP\s*:/i,
+  /alayc[ıi]\s+üstünlü[ğg]\s+ve\s+laf\s+sokma/i,
   /SON\s+EYLEMLER[İI]N\s*\(/i,
   /eylem\s+listesinin\s+d[ıi][şs][ıi]nda\s+hi[çc]bir\s+eylem/i,
   /Sana\s+yaz[ıi]lan\s+(?:i[çc]\s+)?notlar[ıi]n/i,
   /Odadaki\s+son\s+konu[şs]malar\s*\(/i,
-  /asla\s+aptal\/cahil\s+görünmezsin/i,
 ];
 
 export function promptLeakHits(text: string): number {

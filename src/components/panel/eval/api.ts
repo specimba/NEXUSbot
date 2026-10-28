@@ -178,6 +178,18 @@ export type RsiAdvanceResponse = {
   note?: string;
 };
 
+/** GET/PUT /api/rsi/budget payload — the fresh engine budget state. */
+export type RsiBudgetResponse = {
+  ok: true;
+  budget: RsiOverview["budget"];
+};
+
+/** Owner-editable daily LLM-call cap bounds (mirrors /api/rsi/budget validation). */
+export const BUDGET_CAP_MIN = 1;
+export const BUDGET_CAP_MAX = 4096;
+/** Quick-pick cap presets rendered in the overview budget card. */
+export const BUDGET_CAP_PRESETS = [64, 128, 256, 512] as const;
+
 export class RsiApiError extends Error {
   readonly status: number;
   readonly code: string | null;

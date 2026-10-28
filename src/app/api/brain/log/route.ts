@@ -106,7 +106,24 @@ export async function POST(req: Request) {
   // v31.4 — one row per exchange: when the official webhook already logged
   // the coalesced answer for this identical (user, message, response), this
   // POST is the overlay mount reporting the same exchange — skip the dupe.
-  if (interactionRowDuplicate(username, message, finalResponse)) {
+  // cron-20261028-0825 — the widget transforms the reply before POSTing
+  // (cleanModelReply strips markdown, sources gain a " — kaynak:" suffix,
+  // latency becomes the widget's own cycle wall-time), so the raw-string key
+  // missed every transformed replay (measured 22:36 +03: webhook row 7861ms
+  // raw + widget row 8600ms transformed for ONE generation — the owner's
+  // recurring "doubled requests, different responses" class). The STORED
+  // server reply is probed as a second key form; record:false so a miss
+  // never seeds the map with an alias key.
+  const storedReply =
+    stored?.result?.reply && stored.result.reply.trim()
+      ? clampStr(redactSecrets(stored.result.reply), 2000)
+      : "";
+  if (
+    interactionRowDuplicate(username, message, finalResponse) ||
+    (storedReply &&
+      storedReply !== finalResponse &&
+      interactionRowDuplicate(username, message, storedReply, { record: false }))
+  ) {
     return NextResponse.json({ ok: true, deduped: true });
   }
 

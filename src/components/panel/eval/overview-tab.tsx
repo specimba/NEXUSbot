@@ -1,13 +1,23 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { fetchRsiJson, type RsiAdvanceResponse, type RsiOverview } from "./api";
+import {
+  BUDGET_CAP_MAX,
+  BUDGET_CAP_MIN,
+  BUDGET_CAP_PRESETS,
+  fetchRsiJson,
+  type RsiAdvanceResponse,
+  type RsiBudgetResponse,
+  type RsiOverview,
+} from "./api";
 import { StageStepper } from "./stage-stepper";
 import { Database, FlaskConical, Gauge, Layers, LoaderCircle, Play, ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -63,6 +73,29 @@ export function RsiOverviewTab() {
       toast({ title: "Advance failed", description: e.message, variant: "destructive" }),
   });
 
+  // Owner cap editor draft — null mirrors the server cap (the draft survives
+  // the 15s overview poll; a successful save resets it back to the server).
+  const [capDraft, setCapDraft] = useState<string | null>(null);
+
+  const saveCap = useMutation({
+    mutationFn: (cap: number) =>
+      fetchRsiJson<RsiBudgetResponse>("/api/rsi/budget", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cap }),
+      }),
+    onSuccess: (data) => {
+      setCapDraft(null);
+      void queryClient.invalidateQueries({ queryKey: ["rsi-overview"] });
+      toast({
+        title: `Daily cap set to ${data.budget.cap}`,
+        description: `Setting rsi.callBudgetDaily written — ${data.budget.remaining} call(s) remaining today (UTC). Live for every G7 gate and runner pre-flight on the next check.`,
+      });
+    },
+    onError: (e: Error) =>
+      toast({ title: "Cap update failed", description: e.message, variant: "destructive" }),
+  });
+
   const o = overview.data;
   const cyclesAdopted = o?.cycles?.adopted ?? 0;
   const cyclesRejected = o?.cycles?.rejected ?? 0;
@@ -70,6 +103,16 @@ export function RsiOverviewTab() {
   const cyclesLive = Object.entries(o?.cycles ?? {})
     .filter(([k]) => !["adopted", "rejected", "aborted"].includes(k))
     .reduce((s, [, v]) => s + v, 0);
+
+  const liveCap = o?.budget.cap ?? null;
+  const capValue = capDraft ?? (liveCap !== null ? String(liveCap) : "");
+  const parsedCap = Number(capValue);
+  const capValid =
+    capValue.trim() !== "" &&
+    Number.isInteger(parsedCap) &&
+    parsedCap >= BUDGET_CAP_MIN &&
+    parsedCap <= BUDGET_CAP_MAX;
+  const capDirty = liveCap !== null && parsedCap !== liveCap;
 
   return (
     <div className="space-y-4">
@@ -106,9 +149,58 @@ export function RsiOverviewTab() {
               aria-label="Daily RSI LLM call budget"
               className="h-2"
             />
-            <p className="font-mono text-[11px] text-muted-foreground">
-              Cap stored in Setting <code>rsi.callBudgetDaily</code> (default 64, evolution-engine.json costModel). A
-              breach fails runs loudly with <code>budget_exceeded</code> — never a silent truncation.
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <span className="font-mono text-[11px] text-muted-foreground">Owner cap:</span>
+              {BUDGET_CAP_PRESETS.map((preset) => (
+                <Button
+                  key={preset}
+                  type="button"
+                  variant={capValue === String(preset) ? "default" : "outline"}
+                  className="min-h-11 px-3 font-mono text-xs"
+                  disabled={saveCap.isPending}
+                  aria-pressed={capValue === String(preset)}
+                  aria-label={`Preset daily cap ${preset}`}
+                  onClick={() => setCapDraft(String(preset))}
+                >
+                  {preset}
+                </Button>
+              ))}
+              <Input
+                type="number"
+                inputMode="numeric"
+                min={BUDGET_CAP_MIN}
+                max={BUDGET_CAP_MAX}
+                step={1}
+                value={capValue}
+                onChange={(e) => setCapDraft(e.target.value)}
+                disabled={saveCap.isPending}
+                aria-label={`Custom daily cap, integer ${BUDGET_CAP_MIN} to ${BUDGET_CAP_MAX}`}
+                aria-invalid={capDraft !== null && !capValid}
+                className="h-11 w-20 shrink-0 font-mono text-xs"
+              />
+              <Button
+                type="button"
+                className="min-h-11 shrink-0 px-4 font-mono text-xs"
+                disabled={saveCap.isPending || !capValid || !capDirty}
+                aria-label="Save the daily LLM call cap"
+                onClick={() => saveCap.mutate(parsedCap)}
+              >
+                {saveCap.isPending ? (
+                  <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+                ) : null}
+                Save
+              </Button>
+            </div>
+            {capDraft !== null && !capValid ? (
+              <p className="font-mono text-[10px] text-destructive" role="alert">
+                cap must be an integer between {BUDGET_CAP_MIN} and {BUDGET_CAP_MAX}
+              </p>
+            ) : null}
+            <p className="font-mono text-[11px] leading-relaxed text-muted-foreground">
+              Cap stored in Setting <code>rsi.callBudgetDaily</code> (default 64, evolution-engine.json costModel) —
+              owner-editable right here: raising it grants headroom for longer, harder evaluation batteries. A breach
+              still fails runs loudly with <code>budget_exceeded</code> — never a silent truncation, and no number is
+              ever fabricated.
             </p>
           </CardContent>
         </Card>

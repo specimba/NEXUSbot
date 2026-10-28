@@ -27,7 +27,7 @@ import { clientKey, rateLimit } from "@/lib/guard";
 import ZAI from "z-ai-web-dev-sdk";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 /** The only sizes the free engine accepts — mirrored from the SDK's own type.
  * Unknown widget values coerce to the square default (never an error: the
@@ -180,8 +180,12 @@ export async function POST(req: Request) {
     };
     const zai = (g.__nexusZAI ??= await ZAI.create());
 
-    // Hard 45s wall: a hung generation must not pin an OBS browser source —
+    // Hard 80s wall: a hung generation must not pin an OBS browser source —
     // the widget gets a fast honest 504 instead of a frozen overlay.
+    // v35.1 — wall raised 45s → 80s: live-measured z-ai image generation ran
+    // 52.7s on 2026-10-29, so the old 45s wall would have killed every real
+    // generation (the outage-night lesson: timeouts must fit MEASURED
+    // generation times, not guessed ones).
     // v31.1 — bounded 429 backoff: the z-ai remote fn throttles in short
     // bursts (measured 05:2x +03: two instant 429s while the reader lane
     // recovered minutes later). Two retries (3s / 8s backoff) ride out the
@@ -201,7 +205,7 @@ export async function POST(req: Request) {
             timer = setTimeout(() => {
               timedOut = true;
               reject(new Error("imagine engine timeout"));
-            }, 45_000);
+            }, 80_000);
           }),
         ]);
       } finally {
