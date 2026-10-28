@@ -342,12 +342,12 @@ export type CortexResult = {
 //     "~630ms lead" was a 12-token ping lie — on real payloads tonight it was
 //     neither the fastest nor ever coherent. Every poison row ever logged in
 //     InteractionLog carries this model's label.
-const VYCE_FAST = "beam-1.0"; // banter lead — real-payload verified v29.16
+const VYCE_FAST = "glm-5.3-flash"; // v36.7 — banter lead; the strong persona lane (GLM answered the live hard rows in-persona; beam-1.0 measured proxy-only 24.9s on 10-28)
 const VYCE_FRONTIER = "claude-sonnet-4-6"; // ~1.4s measured — research lead
 // Backup lanes — DUAL, on DIFFERENT upstream queues per tier (Task 19: one
 // lane stalled together with the primary on a gateway-wide hiccup).
-const VYCE_BACKUP_BANTER = "glm-5.3-flash"; // $0 lane, coherent-Turkish sweep ✓
-const VYCE_BACKUP_BANTER_2 = "deepseek-v4.1"; // mediocre but lint-guarded last banter backup
+const VYCE_BACKUP_BANTER = "deepseek-v4.1"; // v36.7 — primary is GLM now; deepseek is first banter backup
+const VYCE_BACKUP_BANTER_2 = "beam-1.0"; // v36.7 — the old primary as last-ditch backup
 const VYCE_BACKUP_DEEP = "deepseek-v4.1"; // ~2.3s sweep / 4.3s real payload
 const VYCE_BACKUP_DEEP_2 = "beam-1.0"; // ~1.7s real payload
 // z-ai head-start handicap: the floor's z-ai leg starts at least this long
@@ -1507,7 +1507,7 @@ async function raceModel(
   //   A healthy vyce always answers inside its lead window and wins.
   // ---------------------------------------------------------------------------
   const vyceModel = deep ? VYCE_FRONTIER : VYCE_FAST;
-  const vyceLabel = deep ? "VYCE // CLAUDE 4.6" : "VYCE // BEAM 1.0";
+  const vyceLabel = deep ? "VYCE // CLAUDE 4.6" : "VYCE // GLM 5.3 FREE"; // v36.7 — GLM primary label
   // v34.3 — LABEL TRUTH FROM THE RESOLVED MODEL ID. The engine footer already
   // shows the gateway-resolved id (v31.6), but the display label kept the LANE
   // brand — measured live: backup wins printed "VYCE // BEAM 1.0" on rows whose
@@ -1602,10 +1602,10 @@ async function raceModel(
       fireBackup(VYCE_BACKUP_DEEP, "VYCE // DEEPSEEK 4.1", resolveB1, "b1");
       fireBackup(VYCE_BACKUP_DEEP_2, "VYCE // BEAM 1.0", resolveB2, "b2");
     } else {
-      fireBackup(VYCE_BACKUP_BANTER, "VYCE // GLM 5.3 FREE", resolveB1, "b1");
-      // v34.3 — the b2 banter backup IS deepseek-v4.1; the "BEAM 1.0" label on
-      // this lane was the source of the live BEAM/deepseek mislabel rows.
-      fireBackup(VYCE_BACKUP_BANTER_2, "VYCE // DEEPSEEK V4.1", resolveB2, "b2");
+      fireBackup(VYCE_BACKUP_BANTER, "VYCE // DEEPSEEK V4.1", resolveB1, "b1");
+      // v36.7 — the b2 banter backup IS beam-1.0 (the old primary, last-ditch);
+      // the primary lane now carries GLM (label truth from resolved id, v34.3).
+      fireBackup(VYCE_BACKUP_BANTER_2, "VYCE // BEAM 1.0", resolveB2, "b2");
     }
     // Handicap rule: the Groq floor waits the handicap AND — if the primary is
     // still running — the primary's own timeout window + grace. A primary that
@@ -1744,6 +1744,25 @@ function cleanReply(text: string): string {
   // always an artifact; paired quoting is left untouched.
   const quoteHits = (t.match(/["“”]/g) ?? []).length;
   if (quoteHits === 1) t = t.replace(/["“”]/g, "");
+  // v36.6 — TOKEN-CAP TRUNCATION REPAIR (2026-10-29 00:4x +03 live rows):
+  // "GPU'mu yakıp çay demleyecek kadar enerjim var, ama …! Şaka bir yana,"
+  // and "Yanlış yönlendirme yok; elimdeki metin" both shipped mid-sentence —
+  // the gpt-oss-120b reasoner burned its 380-token completion cap and the
+  // visible answer was chopped at the cut, then sent to Kick as-is. A reply
+  // that doesn't end in terminal punctuation carries a dangling tail: cut at
+  // the last hard boundary (a complete sentence is almost always there and
+  // is the GOOD part of the answer); fall back to the last ";" + appended
+  // "."; short no-boundary banter fragments are legitimate and left alone.
+  if (!/[.!?…]["')\]]*$/.test(t)) {
+    const hard = Math.max(t.lastIndexOf("."), t.lastIndexOf("!"), t.lastIndexOf("?"), t.lastIndexOf("…"));
+    if (hard >= 9) {
+      t = t.slice(0, hard + 1);
+    } else {
+      const semi = t.lastIndexOf(";");
+      if (semi >= 9) t = t.slice(0, semi) + ".";
+      else t = t.replace(/[,;:\u2014\s]+$/, "") + ".";
+    }
+  }
   if (t.length > 460) {
     t = t.slice(0, 460);
     // Trim to the last complete sentence so the overlay never shows a
