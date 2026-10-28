@@ -31,6 +31,19 @@
  * purge when dev.log carries the panic signature, one bounded post-failure
  * purge+retry) and crash-evidence preservation (dev.log snapshot to
  * .zscripts/watchdog-precrash.log BEFORE any kill — respawns truncate dev.log).
+ *
+ * 2026-10-28 cron-20261028-1225 — GLOBAL-PRESSURE DEFENSE. Measured root cause
+ * of the 04:05:08 kernel OOM kill (next-server pid 7181, anon-rss 1897MB,
+ * dmesg-verified): the per-process RSS guard never fired (1.9GB < 2200 limit)
+ * because the GLOBAL pool was exhausted by ~1.4GB of leftover harness-browser
+ * debris (14 chrome/agent-browser processes from a finished cron session's
+ * walk, resident for 30+ min on the 4GB no-swap box). This watchdog was blind
+ * to any memory it does not own. New: every tick reads MemAvailable; below
+ * GLOBAL_FLOOR_MB it reaps ONLY harness-browser debris older than
+ * DEBRIS_MIN_AGE_MS (an in-flight harness walk is never touched; next-server,
+ * kick-bridge and every other service are never touched), SIGTERM then SIGKILL,
+ * one sweep per 5 min. Debris reaping never counts as a respawn and never
+ * enters the server cooldown.
  */
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -64,6 +77,16 @@ const RSS_LIMIT_MB = 2200;
 const STRIKES_NEEDED = 2;
 const POLL_MS = 30_000;
 const COOLDOWN_MS = 10 * 60_000;
+
+// Global-pressure defense (see header, 2026-10-28 cron-20261028-1225).
+const GLOBAL_FLOOR_MB = 700; // 4GB box, no swap: below ~700MB available the kernel OOM zone is close
+const DEBRIS_MIN_AGE_MS = 15 * 60_000; // an in-flight harness browser walk never lives past this unattended
+const DEBRIS_REAP_COOLDOWN_MS = 5 * 60_000;
+const DEBRIS_SIGS = [
+  "/home/z/.agent-browser/", // chrome-for-testing under the agent-browser home
+  "agent-browser-linux-x64", // the agent-browser CLI daemon
+  "google-chrome-for-testing", // crashpad/user-data paths
+];
 
 // Turbopack persistent-cache corruption class (measured 2026-10-27 crash):
 // a sandbox reap mid-write leaves .next/dev missing SST files; EVERY `next dev`
@@ -224,6 +247,76 @@ function portUp(): Promise<boolean> {
   });
 }
 
+function memAvailableMb(): number | null {
+  try {
+    const m = fs.readFileSync("/proc/meminfo", "utf8").match(/MemAvailable:\s+(\d+) kB/);
+    return m ? Math.round(parseInt(m[1]!, 10) / 1024) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Process age in ms from /proc/<pid>/stat field 22 (starttime, clock ticks).
+ * stat layout: pid (comm) state... — after the last ')' fields start at
+ * state=3, so starttime (22) sits at split-index 19. */
+function procAgeMs(pid: string): number | null {
+  try {
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
+    const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+    const startTicks = parseInt(fields[19]!, 10);
+    const uptimeSec = parseFloat(fs.readFileSync("/proc/uptime", "utf8").split(" ")[0]!);
+    if (!Number.isFinite(startTicks) || !Number.isFinite(uptimeSec)) return null;
+    return Math.round((uptimeSec - startTicks / 100) * 1000);
+  } catch {
+    return null;
+  }
+}
+
+let debrisReapedAt = 0;
+
+async function reapDebrisIfNeeded(): Promise<void> {
+  const avail = memAvailableMb();
+  if (avail === null || avail > GLOBAL_FLOOR_MB) return;
+  if (Date.now() - debrisReapedAt < DEBRIS_REAP_COOLDOWN_MS) return; // one sweep per 5 min
+  const victims: number[] = [];
+  for (const pid of fs.readdirSync("/proc")) {
+    if (!/^\d+$/.test(pid)) continue;
+    let cmd = "";
+    try {
+      cmd = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8");
+    } catch {
+      continue;
+    }
+    if (!DEBRIS_SIGS.some((s) => cmd.includes(s))) continue;
+    const age = procAgeMs(pid);
+    if (age === null || age < DEBRIS_MIN_AGE_MS) continue; // live harness walk — hands off
+    victims.push(parseInt(pid, 10));
+  }
+  debrisReapedAt = Date.now();
+  if (!victims.length) {
+    log(`GLOBAL-LOW MemAvailable=${avail}MB < ${GLOBAL_FLOOR_MB}MB: no harness-browser debris older than ${DEBRIS_MIN_AGE_MS / 60000}min — nothing to reap`);
+    return;
+  }
+  for (const pid of victims) {
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {
+      /* already gone */
+    }
+  }
+  await new Promise((r) => setTimeout(r, 2000));
+  let killed = 0;
+  for (const pid of victims) {
+    try {
+      process.kill(pid, "SIGKILL");
+      killed++;
+    } catch {
+      /* exited after SIGTERM — good */
+    }
+  }
+  log(`GLOBAL-LOW MemAvailable=${avail}MB < ${GLOBAL_FLOOR_MB}MB: reaped ${victims.length} harness-browser debris processes (${killed} needed SIGKILL) — next-server untouched`);
+}
+
 async function serverDead(): Promise<boolean> {
   // Double-check grace: one failed probe re-probes after 10s before we declare
   // death — protects against a boot race where the watchdog out-runs the panel.
@@ -320,6 +413,11 @@ async function tick() {
     await respawn("server dead (:3000 refused, double-checked)");
     return;
   }
+  // Global-pressure defense BEFORE the per-process check: the kernel kills the
+  // fattest process when the BOX runs dry (measured 04:05:08 — next-server at
+  // 1.9GB died while this guard watched a limit it never crossed). Freeing
+  // foreign debris first can also calm a near-limit RSS reading.
+  await reapDebrisIfNeeded();
   const rss = getRssMb();
   if (rss === null) {
     strikes = 0;
