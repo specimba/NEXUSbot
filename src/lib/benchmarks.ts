@@ -3,6 +3,8 @@ import {
   hyperbrowserBaseUrl,
   loadHyperbrowserKey,
 } from "./connectors/hyperbrowser";
+import { loadTinyFishKey, tinyfishFetchPages } from "./connectors/tinyfish";
+import { loadFirecrawlKey, firecrawlScrape } from "./connectors/firecrawl";
 import { loadEgressPool, pickProxies, proxiedFetch } from "./egress";
 
 /**
@@ -181,7 +183,7 @@ export type BenchBoardMeta = {
 /** How `rank` on a snapshot's entries was produced. */
 export type BenchRankSource = "board" | "derived";
 
-export type BenchVia = "direct" | "hyperbrowser" | "pool" | "failed";
+export type BenchVia = "direct" | "hyperbrowser" | "pool" | "tinyfish" | "firecrawl" | "failed";
 
 export type BenchError = { code: "FETCH_FAILED" | "PARSE_FAILED" | "UPSTREAM_UNAVAILABLE"; message: string };
 
@@ -471,8 +473,97 @@ function isMetaLine(line: string): boolean {
  * sequence as `seq` — the board's display order is the ranking (R20-a).
  * Returns RAW rows (finalize + range guard happen in parseForKind).
  */
+/**
+ * v37.2 — PIPE-TABLE board shape [MEASURED 2026-10-30 via the TinyFish
+ * residential-proxy rung, which is the only lane that passes arena.ai's
+ * Cloudflare wall]:
+ *   | 1 | 13 | Gemini 4 Argon (High) Google · Proprietary | 1517±7 | 10,083 | $0.03 | $2 / $10 | 1M |
+ * i.e. one row per line: rank | spread | "Name (Variant) Lab · License" |
+ * score±CI | votes | cost | price | context. The model-name cell carries the
+ * lab as a trailing " · License" segment — stripped by labNameFromCell.
+ * Tried FIRST inside parseArenaMarkdown; the old alternating-cell-line walk
+ * remains for the Hyperbrowser markdown shape.
+ */
+/**
+ * Cell shapes [MEASURED 2026-10-30, live boards via the TinyFish rung]:
+ *   chat text boards:  | 1 | 13 | Name (Var) Lab · Lic | 1517±7 | votes | …
+ *   agent boards:      | 1 11 | Name (Var) Lab · Lic | 20.77%±2.38% | sub-scores | …
+ * i.e. the rank may be alone (spread a separate digits-only cell) or fused
+ * with the spread ("1 11"). The optional spread cell is therefore digits-ONLY
+ * (`\|\s*\d+\s*\|`) — the name cell always carries letters (digits inside
+ * model names must never eat the spread slot).
+ */
+const TABLE_ELO_RE =
+  /^\|\s*(\d{1,3})(?:\s+\d+)?\s*\|(?:\s*\d+\s*\|)?\s*([^|]*[A-Za-z][^|]*?)\s*\|\s*(\d{3,4})\u00b1\d+(?:\.\d+)?\s*(?:Preliminary)?\s*\|/;
+const TABLE_AGENT_RE =
+  /^\|\s*(\d{1,3})(?:\s+\d+)?\s*\|(?:\s*\d+\s*\|)?\s*([^|]*[A-Za-z][^|]*?)\s*\|\s*(-?\d+(?:\.\d+)?)%\u00b1\d+(?:\.\d+)?%\s*\|/;
+const TABLE_ALIGN_RE =
+  /^\|\s*(\d{1,3})(?:\s+\d+)?\s*\|(?:\s*\d+\s*\|)?\s*([^|]*[A-Za-z][^|]*?)\s*\|\s*(\d{1,3}(?:\.\d+)?)\u00b1\d+(?:\.\d+)?\s*(?:Preliminary)?\s*\|/;
+
+const LAB_CELL_SUFFIX_RE =
+  /\s+((?:Google|OpenAI|Anthropic|Meta|xAI|Alibaba|Mistral|Microsoft|NVIDIA|Cohere|DeepSeek|AI21|Perplexity|Tencent|Xiaomi|Z\.ai|Moonshot|01\.ai)\s*\u00b7\s*[\w.\-]+)$/;
+
+/**
+ * Name-cell cleanup across ALL observed markdown shapes:
+ *  - TinyFish table:  "Gemini 4 Argon (High) Google · Proprietary" (trailing lab)
+ *  - Firecrawl table: "[Gemini 4 Carbon (High)](url)<br>Google · Proprietary"
+ *                     "Anthropic<br>[Claude Opus 4.7 (High)](url)<br>Anthropic · Proprietary"
+ *    (<br>-separated segments; the model is the segment carrying a markdown
+ *    link — the leading "Anthropic<br>" prefix and the trailing "Lab · Lic"
+ *    segments are lab furniture, not the name). [MEASURED 2026-10-30]
+ */
+const MD_LINK_TEXT_RE = /^\[([^\]]+)\]\(https?:\/\/\S+\)$/;
+
+function labNameFromCell(cell: string): string {
+  const t = cell.trim();
+  if (t.includes("<br>")) {
+    const segments = t.split(/<br\s*\/?>/i).map((s) => s.trim()).filter(Boolean);
+    // prefer the segment that IS a markdown link (the model's own link)
+    for (const seg of segments) {
+      const m = MD_LINK_TEXT_RE.exec(seg);
+      if (m && m[1].trim().length >= 2) return m[1].trim();
+    }
+    // fallback: first segment that is neither a lab line nor digits-only
+    for (const seg of segments) {
+      if (!isMetaLine(seg) && !/^[\d.,%±\s]+$/.test(seg) && seg.length >= 2) {
+        const inner = MD_LINK_TEXT_RE.exec(seg)?.[1] ?? seg;
+        return inner.trim();
+      }
+    }
+    return segments[0] ?? t;
+  }
+  const stripped = t.replace(LAB_CELL_SUFFIX_RE, "");
+  return stripped.trim() || t;
+}
+
+function parseArenaTableRows(markdown: string, kind: BenchKind): RawEntry[] | null {
+  const re =
+    kind === "arena-agent"
+      ? TABLE_AGENT_RE
+      : kind === "arena-agent-alignment"
+        ? TABLE_ALIGN_RE
+        : TABLE_ELO_RE;
+  const lines = markdown.split("\n");
+  const raw: RawEntry[] = [];
+  for (const line of lines) {
+    const m = re.exec(line.trim());
+    if (!m) continue;
+    const rank = Number(m[1]);
+    const name = labNameFromCell(m[2]);
+    const score = Number(m[3]);
+    if (!Number.isFinite(score) || name.length < 2) continue;
+    if (!Number.isInteger(rank) || rank < 1 || rank > 400) continue;
+    raw.push({ model: name, score, rank, seq: raw.length });
+  }
+  return raw.length > 0 ? raw : null;
+}
+
 function parseArenaMarkdown(markdown: string, kind: BenchKind): RawEntry[] | null {
   if (!markdown) return null;
+  // v37.2 — pipe-table shape first (TinyFish rung), then the alternating-line
+  // walk (Hyperbrowser shape). Both produce identical RawEntry rows.
+  const tableRows = parseArenaTableRows(markdown, kind);
+  if (tableRows) return tableRows;
   const scoreRes: RegExp[] =
     kind === "arena-agent"
       ? [/^(-?\d+(?:\.\d+)?)%\u00b1\d+(?:\.\d+)?%$/] // Net Improvement %
@@ -645,6 +736,58 @@ type HbScrapeOutcome =
 function isChallengePage(markdown: string): boolean {
   const m = markdown.slice(0, 2_000).toLowerCase();
   return m.includes("performing security verification") || m.includes("security service to protect against malicious bots");
+}
+
+/**
+ * v37.2 — TinyFish board fetch (the free residential-proxy JS-reader rung).
+ * Returns the page markdown, or null when the lane is unavailable/no-key/
+ * errored or the result is itself the challenge interstitial. Never throws.
+ */
+async function tfFetchBoard(url: string): Promise<string | null> {
+  let keyLoad: Awaited<ReturnType<typeof loadTinyFishKey>>;
+  try {
+    keyLoad = await loadTinyFishKey();
+  } catch {
+    return null;
+  }
+  if (!keyLoad.ok) return null;
+  try {
+    const out = await tinyfishFetchPages(keyLoad.key, [url], { maxChars: 120_000 });
+    if (!out.ok) return null;
+    const md = out.pages[0]?.text ?? "";
+    if (md.length < 200 || isChallengePage(md)) return null;
+    return md;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * v37.2 — Firecrawl board scrape (the METERED last rung, ~1 credit/board).
+ * [MEASURED 2026-10-30: the two boards TinyFish's residential egress blocks
+ * (non-english, multi-turn) return clean 72KB pipe-table markdown through
+ * Firecrawl — a THIRD egress class, after Hyperbrowser datacenter (challenge
+ * page) and TinyFish residential (bot_blocked).] Only reached inside the
+ * challenge-page branch, i.e. only for boards the free lanes cannot pass.
+ * Name cells arrive <br>-separated with markdown links — labNameFromCell
+ * handles that shape. Null on any failure; never throws; never logs the key.
+ */
+async function fcScrapeBoard(url: string): Promise<string | null> {
+  let keyLoad: Awaited<ReturnType<typeof loadFirecrawlKey>>;
+  try {
+    keyLoad = await loadFirecrawlKey();
+  } catch {
+    return null;
+  }
+  if (!keyLoad.ok) return null;
+  try {
+    const out = await firecrawlScrape(keyLoad.key, url, { maxChars: 120_000 });
+    if (!out.ok) return null;
+    if (out.markdown.length < 200 || isChallengePage(out.markdown)) return null;
+    return out.markdown;
+  } catch {
+    return null;
+  }
 }
 
 async function hbScrape(url: string): Promise<HbScrapeOutcome> {
@@ -926,11 +1069,53 @@ export async function fetchBenchmarks(kind: BenchKind): Promise<FetchBenchmarksO
     // the HyperAgent lane fails after 9 steps. Arena boards are blocked at the
     // provider tier until the Hyperbrowser plan upgrades or the source moves.
     if (isChallengePage(hb.markdown)) {
+      // v37.2 — TINYFISH RUNG (free, US residential-proxy egress on every
+      // session — a DIFFERENT traffic class than Hyperbrowser's datacenter
+      // IPs, which is exactly what the Cloudflare interstitial fingerprints).
+      // [MEASURED 2026-10-30: api.fetch.tinyfish.ai renders JS boards
+      // (artificialanalysis.ai leaderboard) as clean markdown in one call.]
+      // If this also returns the interstitial, the honest verdict below stands.
+      const tf = await tfFetchBoard(source.url);
+      if (tf) {
+        const parsed = parseForKind(kind, "markdown", tf);
+        if (parsed.entries) {
+          return {
+            ok: true,
+            via: "tinyfish",
+            entries: parsed.entries,
+            modelCount: parsed.entries.length,
+            rangeWarnings: parsed.rangeWarnings,
+            notes: parsed.notes,
+            boardMeta: parsed.boardMeta,
+            rankSource: kind === "aa-index" ? "derived" : "board",
+          };
+        }
+      }
+      // v37.2 — FIRECRAWL RUNG (metered, ~1 credit — only the boards BOTH free
+      // lanes fail pass here): a third egress class that measured through the
+      // same Cloudflare wall on the two TinyFish-blocked boards. If this also
+      // fails, the honest verdict below stands unchanged.
+      const fc = await fcScrapeBoard(source.url);
+      if (fc) {
+        const parsed = parseForKind(kind, "markdown", fc);
+        if (parsed.entries) {
+          return {
+            ok: true,
+            via: "firecrawl",
+            entries: parsed.entries,
+            modelCount: parsed.entries.length,
+            rangeWarnings: parsed.rangeWarnings,
+            notes: parsed.notes,
+            boardMeta: parsed.boardMeta,
+            rankSource: kind === "aa-index" ? "derived" : "board",
+          };
+        }
+      }
       return {
         ok: false,
         error: {
           code: "PARSE_FAILED",
-          message: `${source.url} served a Cloudflare bot-check page — the scrape completed on the challenge interstitial, not the leaderboard. Stealth + wait variants measured insufficient on the free Hyperbrowser plan (captcha solving requires a paid plan).`,
+          message: `${source.url} served a Cloudflare bot-check page — the scrape completed on the challenge interstitial, not the leaderboard. Stealth (Hyperbrowser), the TinyFish residential rung and the Firecrawl rung all measured insufficient for this board.`,
         },
       };
     }

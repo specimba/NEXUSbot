@@ -1,5 +1,7 @@
 "use client";
 
+import { AgentLanesCard } from "@/components/panel/connectors/agent-lanes-card";
+import { AgentMailCard } from "@/components/panel/connectors/agentmail-card";
 import { CustomProvidersCard } from "@/components/panel/connectors/custom-providers-card";
 import { ExaCard } from "@/components/panel/connectors/exa-card";
 import { ExaResearchCard } from "@/components/panel/connectors/exa-research-card";
@@ -34,6 +36,8 @@ export function ConnectorsTab() {
         <HyperbrowserCard />
         <WebshareCard />
         <GitHubCard />
+        <AgentMailCard />
+        <AgentLanesCard />
       </div>
       {/* v33 — MOUNTED (was dead code since 15-b): the Deep Research card is
        * the panel lane of the same Exa Agent engine the chat now uses —

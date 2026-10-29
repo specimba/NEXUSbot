@@ -51,8 +51,9 @@ export const VYCE_TIMEOUT_MS = 15_000;
  * shows missing until the owner enables glm-5.3 on the Vyce key (honest signal,
  * intentional upgrade path). gpt-6-luna stays "batch" — degraded on the
  * platform dashboard but present on the key; glm-5.3-flash is flagged
- * unstable (26s 5m-latency) yet remains the banter persona primary — the
- * cortex race ladder fails over to beam-1.0 / deepseek-v4.1 on stalls.
+ * unstable (26.4s platform latency, 2026-10-30) and v37.1 DEMOTED it to
+ * banter backup — beam-1.0 (380ms) is the banter lead again; the cortex race
+ * ladder fails over to glm-5.3 / deepseek-v4.1 on stalls.
  */
 export const VYCE_ROLE_MODELS = {
   router: "deepseek-v4-flash-lr",

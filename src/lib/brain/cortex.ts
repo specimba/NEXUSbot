@@ -4,14 +4,17 @@ import { db } from "@/lib/db";
 import { chatComplete, type BrainMessage } from "@/lib/ai/client";
 import { loadGroqKey } from "@/lib/ai/groq";
 import { exaAnswer, exaContents, getExaKey } from "@/lib/connectors/exa";
+import { keenableSearch, loadKeenableKey } from "@/lib/connectors/keenable";
 import { classifyDeepResearch, deepResearchAvailable } from "@/lib/brain/deep-research";
 import { runPageRead } from "./search";
 import { buildNewsDigest, buildGeneralDigest } from "./exa-news";
+import { normalizeTr } from "./normalize-tr";
 import {
   answerNowPlaying,
   compileGrounding,
   exaAnswerIsRelevant,
   researchGateEnabledCached,
+  researchQueryTokens,
   todayStampTr,
 } from "./grounding";
 import { loreBlocksResearch } from "./lore";
@@ -326,7 +329,7 @@ export type CortexResult = {
   deepResearch?: { kind: string; effort: string };
   telemetry: {
     latencyMs: number;
-    webSearch: "none" | "exa-answer" | "page-read" | "web-fallback" | "skipped";
+    webSearch: "none" | "exa-answer" | "page-read" | "web-fallback" | "keenable-free" | "skipped";
     intentMs: number;
   };
 };
@@ -350,12 +353,12 @@ export type CortexResult = {
 //     "~630ms lead" was a 12-token ping lie — on real payloads tonight it was
 //     neither the fastest nor ever coherent. Every poison row ever logged in
 //     InteractionLog carries this model's label.
-const VYCE_FAST = "glm-5.3-flash"; // v36.7 — banter lead; the strong persona lane (GLM answered the live hard rows in-persona; beam-1.0 measured proxy-only 24.9s on 10-28)
+const VYCE_FAST = "beam-1.0"; // v37.1 (owner directive "update our vyce models", 2026-10-30) — glm-5.3-flash degraded to UNSTABLE 26.4s on the platform dashboard; beam-1.0 is back at 380ms, FREE, and was coherent+honest on ALL 5 in the v29.16 real-payload sweep → banter lead again
 const VYCE_FRONTIER = "claude-sonnet-4-6"; // ~1.4s measured — research lead
 // Backup lanes — DUAL, on DIFFERENT upstream queues per tier (Task 19: one
 // lane stalled together with the primary on a gateway-wide hiccup).
-const VYCE_BACKUP_BANTER = "deepseek-v4.1"; // v36.7 — primary is GLM now; deepseek is first banter backup
-const VYCE_BACKUP_BANTER_2 = "beam-1.0"; // v36.7 — the old primary as last-ditch backup
+const VYCE_BACKUP_BANTER = "glm-5.3-flash"; // v37.1 — demoted persona-strong lead: race picks it up when the platform recovers, fails over to deepseek on stalls
+const VYCE_BACKUP_BANTER_2 = "deepseek-v4.1"; // v37.1 — rotated: old backup 1 to last-ditch
 const VYCE_BACKUP_DEEP = "deepseek-v4.1"; // ~2.3s sweep / 4.3s real payload
 const VYCE_BACKUP_DEEP_2 = "beam-1.0"; // ~1.7s real payload
 // z-ai head-start handicap: the floor's z-ai leg starts at least this long
@@ -1617,7 +1620,7 @@ async function raceModel(
   //   A healthy vyce always answers inside its lead window and wins.
   // ---------------------------------------------------------------------------
   const vyceModel = deep ? VYCE_FRONTIER : VYCE_FAST;
-  const vyceLabel = deep ? "VYCE // CLAUDE 4.6" : "VYCE // GLM 5.3 FREE"; // v36.7 — GLM primary label
+  const vyceLabel = deep ? "VYCE // CLAUDE 4.6" : `VYCE // ${MODEL_ID_LABELS[VYCE_FAST] ?? VYCE_FAST.toUpperCase()}`; // v37.1 — label follows the CURRENT primary (beam-1.0), never a hardcoded predecessor
   // v34.3 — LABEL TRUTH FROM THE RESOLVED MODEL ID. The engine footer already
   // shows the gateway-resolved id (v31.6), but the display label kept the LANE
   // brand — measured live: backup wins printed "VYCE // BEAM 1.0" on rows whose
@@ -2216,9 +2219,52 @@ async function researchAnswer(
       } catch {
         /* telemetry best-effort */
       }
-      // relevance drop ≠ exa failure — health unchanged, z-ai rung is next.
+      // relevance drop ≠ exa failure — health unchanged, Keenable free rung is next.
     } else if (!ans.ok) {
       noteHealth("exa", false, Date.now() - started);
+    }
+  }
+
+  // v37.1 — KEENABLE FREE RUNG: between Exa and the z-ai fallback, a free
+  // source lane (100k request window — docs/agentmail-deep-dive.md §5).
+  // Trigger = exactly the two classes where paying again makes no sense:
+  //   (a) Exa ANSWERED but the relevance gate dropped it (the Nikolina class:
+  //   pipe-smoking guides); (b) Exa errored / no key. Gate the SNIPPETS with
+  // the same salient-token rule (≥2 of the query's salient tokens in ≥1
+  // snippet) — a Keenable off-topic rung falls through to z-ai, it never
+  // posts its own noise. Synthesis is the shared grounded raceModel ladder.
+  const keenKey = await loadKeenableKey();
+  if (keenKey.ok) {
+    const kRes = await keenableSearch(keenKey.key, stampedQuery, { maxResults: 5 });
+    if (kRes.ok && kRes.results.length > 0) {
+      const kTokens = researchQueryTokens(stampedQuery);
+      const kHaystack = normalizeTr(kRes.results.map((r) => `${r.title} ${r.snippet} ${r.description}`).join(" "));
+      const kHits = kTokens.filter((t) => kHaystack.includes(t)).length;
+      const kRelevant = kTokens.length === 0 || (kTokens.length === 1 ? kHits >= 1 : kHits >= 2);
+      if (kRelevant) {
+        const kContext = kRes.results
+          .map((r, i) => `[${i + 1}] ${r.title} (${(r.url || "").replace(/^https?:\/\//, "").split("/")[0]}): ${(r.snippet || r.description || "").slice(0, 220)}`)
+          .join("\n")
+          .slice(0, 1_600);
+        const kMessages: BrainMessage[] = [
+          { role: "system", content: buildSystemPrompt(req.sender, req.streamerName || "specimba", req.roomTranscript || "", true, selfRecap, compileGrounding(req.prompt)) },
+          ...ladder.slice(-6).map((t) => ({ role: t.role, content: t.content }) as BrainMessage),
+          { role: "user", content: `Aşağıdaki web sonuçlarına dayanarak soruyu KISA cevapla (2-3 cümle). Sonuçlar:\n${kContext}\n\nSoru: ${stampedQuery}` },
+        ];
+        const kR = await raceModel(kMessages, true, req, Math.min(deadline, Date.now() + CORTEX_DEADLINE_MS));
+        if (kR.content) {
+          return {
+            reply: cleanReply(kR.content),
+            sources: kRes.results.slice(0, 3).map((r) => ({ title: r.title || r.url, url: r.url })),
+            webSearch: "keenable-free",
+            provider: kR.provider,
+            modelLabel: kR.modelLabel,
+            modelId: kR.modelId,
+            usage: kR.usage ?? null,
+            ladderUsed: ladder.length > 0,
+          };
+        }
+      }
     }
   }
 

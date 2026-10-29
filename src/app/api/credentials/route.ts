@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { requireSession } from "@/lib/auth";
 import { decryptSecret, encryptSecret, maskSecret } from "@/lib/crypto";
 
-const SERVICES = new Set(["github", "supabase", "upstash", "hyperbrowser", "webshare", "exa"]);
+const SERVICES = new Set(["github", "supabase", "upstash", "hyperbrowser", "webshare", "exa", "agentmail", "keenable", "firecrawl", "tinyfish"]);
 
 export async function GET(req: Request) {
   const denied = await requireSession();

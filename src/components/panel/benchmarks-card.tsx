@@ -100,6 +100,10 @@ function viaLabel(via: string | null): string {
       return "hyperbrowser";
     case "pool":
       return "proxy pool";
+    case "tinyfish":
+      return "tinyfish (residential)";
+    case "firecrawl":
+      return "firecrawl (metered)";
     case "failed":
       return "failed";
     default:

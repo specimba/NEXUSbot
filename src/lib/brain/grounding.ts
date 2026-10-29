@@ -203,6 +203,18 @@ export function compileGrounding(prompt: string): string {
   const suAn = suAnLine();
   sections.push(suAn);
 
+  // v37.2 — LORE rides SECOND, right after ŞU AN. Measured 2026-10-30: with
+  // the old order (ŞU AN → YAYIN → YETENEK → LORE) a warmed YETENEK card
+  // (~650 chars) + ŞU AN pushed the block over the 900 budget and the
+  // tail-trim silently dropped the LORE card — the one section that answers
+  // THE QUESTION ASKED ("dj nikolina kimdir" → no card → "bilmiyorum").
+  // The lore card is query-specific truth; the capability card is ambient
+  // self-knowledge and remains the FIRST thing the budget may drop.
+  const loreMatches = matchLoreCached(prompt);
+  if (loreMatches.length) {
+    sections.push(loreLine(loreMatches));
+  }
+
   const snap = peekNowPlaying();
   if (snap && snapshotIsFresh(snap)) {
     const yayin = yayinLine(snap);
@@ -215,13 +227,9 @@ export function compileGrounding(prompt: string): string {
     if (capLine) sections.push(capLine);
   }
 
-  const loreMatches = matchLoreCached(prompt);
-  if (loreMatches.length) {
-    sections.push(loreLine(loreMatches));
-  }
-
   let block = sections.join("\n");
-  // Hard budget — drop from the lowest-priority tail (LORE → YETENEK).
+  // Hard budget — drop from the tail (YETENEK first — ambient, regenerable;
+  // ŞU AN and any lore match are the last things to go).
   if (block.length > GROUNDING_BUDGET) {
     const trimmed = sections.slice(0, Math.max(2, sections.length - 1)).join("\n");
     block = trimmed.length <= GROUNDING_BUDGET ? trimmed : clampStr(block, GROUNDING_BUDGET);

@@ -63,9 +63,23 @@ function invalidateLoreCache(): void {
   if (g.__nexusGrounding) g.__nexusGrounding.freshAt = 0;
 }
 
-/** Cached list read (60s TTL, hot path-safe). */
+/** Cached list read (60s TTL, hot path-safe). v37.2 — the TTL is enforced
+ * again (it had gone unused — the cache never expired, so cross-process
+ * writes were invisible to readers too, not just to writers). */
 export async function listLore(): Promise<LoreEntry[]> {
-  if (cache.entries) return cache.entries;
+  if (cache.entries && Date.now() - cache.at < LORE_TTL_MS) return cache.entries;
+  return readLoreFresh();
+}
+
+/**
+ * v37.2 — UNCACHED DB read for WRITE paths only. The lore write race
+ * [MEASURED 2026-10-30]: upsertLore did read-modify-write against the 60s
+ * in-process cache — a cross-process write (a script, a second server
+ * worker) was invisible to the cache and the next panel write persisted a
+ * STALE list, silently wiping entries. Every mutation now reads the live
+ * DB row instead of the cache; the cache stays for hot read paths only.
+ */
+async function readLoreFresh(): Promise<LoreEntry[]> {
   try {
     const row = await db.setting.findUnique({ where: { key: LORE_KEY } });
     const parsed = row ? (JSON.parse(row.value) as LoreEntry[]) : [];
@@ -115,7 +129,7 @@ export async function upsertLore(input: LoreUpsertInput): Promise<{ ok: true; en
   if (text.length < 3) return { ok: false, error: "Lore text is required (3-400 chars)." };
   const blockResearch = input.blockResearch === true;
 
-  const entries = await listLore();
+  const entries = await readLoreFresh(); // v37.2 — live DB read: cache read-modify-write wiped cross-process writes
   const now = Date.now();
   let entry: LoreEntry;
   if (input.id) {
@@ -153,7 +167,7 @@ export async function upsertLore(input: LoreUpsertInput): Promise<{ ok: true; en
 }
 
 export async function deleteLore(id: string): Promise<boolean> {
-  const entries = await listLore();
+  const entries = await readLoreFresh(); // v37.2 — live DB read (same race class)
   const next = entries.filter((e) => e.id !== id);
   if (next.length === entries.length) return false;
   await db.setting.upsert({
@@ -166,7 +180,7 @@ export async function deleteLore(id: string): Promise<boolean> {
 }
 
 export async function deleteAllLore(): Promise<number> {
-  const entries = await listLore();
+  const entries = await readLoreFresh(); // v37.2 — live DB read (same race class)
   if (!entries.length) return 0;
   await db.setting.upsert({
     where: { key: LORE_KEY },
