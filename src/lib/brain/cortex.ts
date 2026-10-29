@@ -8,6 +8,14 @@ import { classifyDeepResearch, deepResearchAvailable } from "@/lib/brain/deep-re
 import { runPageRead } from "./search";
 import { buildNewsDigest, buildGeneralDigest } from "./exa-news";
 import {
+  answerNowPlaying,
+  compileGrounding,
+  exaAnswerIsRelevant,
+  researchGateEnabledCached,
+  todayStampTr,
+} from "./grounding";
+import { loreBlocksResearchCached } from "./lore";
+import {
   COMMAND_ECHO_LINE,
   PROMPT_LEAK_DEFLECTION,
   isPromptLeak,
@@ -272,7 +280,7 @@ import {
  *     A healthy vyce always wins its race; z-ai needs ALL lanes dead.
  */
 
-export type CortexIntent = "DRAW" | "TIME" | "STATUS" | "RESEARCH" | "CHAT";
+export type CortexIntent = "DRAW" | "TIME" | "STATUS" | "RESEARCH" | "CHAT" | "NOWPLAYING";
 
 export type CortexSource = { title: string; url: string };
 
@@ -567,6 +575,40 @@ const BOT_META_COMMAND_RE =
   /nas[ıi]l\s+(?:komut|emir)\s+ver|(?:komut|emir)\s+ver(?:ir)?\s*m[iı]s[ıi]n|bana\s+(?:bir\s+)?(?:komut|emir)\s+ver\b|sen[iı]?\s+nas[ıi]l\s+(?:kullan|y[öo]net)|nas[ıi]l\s+çal[ıi][şs][ıi]yorsun/i;
 const BOT_META_RE =
   /(!\s*ai\b)|(?:sana|senin|kendi|verilen|gizli|sistem|(?:^|\s)ö[n]?\s)[^\n]{0,20}prompt|prompt[^\n]{0,10}(?:nedir|ne\b)|(?:kendin|kendine|kendini|sende\b)|test\s*(?:edersin|ersin)\b|nas[ıi]l\s+test\s*edersin|ignore\s*(?:et\b|edin\b|edelim\b)|uyar[ıi]lar[^\n]{0,20}ignore|spam\s*filtr[^\n]{0,30}(?:devre\s*d[ıi][şs][ıi]|kapat)/i;
+
+// v37 — GROUNDING-LANE REGEXES (docs/capability-upgrade-plan.md §4/§6). All
+// additions live BELOW the locked families; no existing pattern or ladder
+// position changed (probe suite re-run gates this).
+//
+// BOT_META_TOOLS_RE (D6, measured 2026-10-29 21:2x +03 live rows): questions
+// about the bot's OWN research/tools ("senin araştırmalarında öyle bi isim
+// yok mu" → Exa answered about TRDizin; "şu toollarını düzgünce kullan" →
+// pipe-smoking guide) are persona work: CHAT, never grounded research.
+// Second-person/research-possession shapes only — imperative "araştır:"
+// and third-person fact questions never match.
+const BOT_META_TOOLS_RE =
+  /sen(?:in|i)?\s+(?:araşt[ıi]rma|arast[ıi]rma)\w*|(?:araşt[ıi]rma|arast[ıi]rma)\w*[ıi]n[ıi]?da|toollar[ıi]n[ıi]?|tool\s*lar[ıi]n[ıi]?|tool[''`]?un|web\s*araşt[ıi]rma\s*hatlar/i;
+
+// TEMPORAL_RELEASE_RE (D3 routing half, measured: "bugün herkesin çok
+// beklediği bi oyun çıktı. adı neydi" → CHAT, model-only, stale priors).
+// Needs BOTH a relative-time word AND a release noun (checked at the gate)
+// — "dün maçta attığın gol" has no release noun and stays CHAT.
+const TEMPORAL_RELEASE_RE =
+  /(bug[uü]n|d[uü]n|bu\s*hafta|bu\s*ay|yeni\s*ç[ıi]kan|yeni\s*cikan|son\s*ç[ıi]kan|son\s*cikan|latest|today|yesterday|this\s*week)/i;
+
+// NOWPLAYING_RE (D2 — "şu an ne çalıyor" fell to CHAT with zero data).
+// Narrow, question-shaped only — the must-not-match corpus (probe v370):
+// "healer çalıyor abi", "bu şarkı kimin" (artist research), "müzik fena
+// çalıyo görebiliyon mu", bare Spotify URLs (stay URL-lane), "saat kaç"
+// (TIME_RE runs earlier in the ladder). Plain substring semantics — JS \b
+// is ASCII-only (house note above).
+const NOWPLAYING_RE =
+  /(?:(?:ş[uü]\s*a?n|şuan|suan|şimdi|simdi|yay[ıi]nda|yay[ıi]ndaki|dj|radio|radya|kulvarda)[^\n]{0,24}?(?:ne\s*çal|ne\s*cal|hangi\s*(?:şarkı|sarki|parça|parca)|(?:şarkı|sarki|parça|parca|m[üu]zik|muzik)[^\n]{0,10}(?:ne\b|nedir|ad[ıi]|ismi)))|(?:çalan|calan)\s+(?:şarkı|sarki|parça|parca|m[üu]zik|muzik|track)(?:[ıi]n[ıi]?n|nin|nın|un|ün)?[^\n]{0,18}(?:ne\b|nedir|ad[ıi]|ismi|kaç|kac)|hangi\s*(?:şarkı|sarki|parça|parca)[^\n]{0,18}çal|now\s*playing|nowplaying/i;
+
+// RELATIVE_TIME_Q_RE — the research query date-stamp companion (D3 second
+// half): "bugün çıkan oyun" must resolve against TODAY, not training priors.
+const RELATIVE_TIME_Q_RE =
+  /(bug[uü]n|d[uü]n|bu\s*hafta|bu\s*ay|şimdi|ş[uü]\s*a?n|şuan|suan|en\s*son|son\s*dakika|yeni\s*ç[ıi]kan|son\s*ç[ıi]kan|latest|today|yesterday|this\s*week)/i;
 
 // ---------------------------------------------------------------------------
 // v35.4 — IDENTITY LOCK (deterministic). Owner 2026-10-29 ~06:53-06:55 +03,
