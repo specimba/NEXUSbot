@@ -141,7 +141,19 @@ const IMAGE_MODEL = { id: "grok-imagine-2", label: "GROK IMAGINE 2.0" };
 //   Panel-side counterpart: src/lib/brain/cortex.ts v36.8 (URL-slip guard,
 //      SELF-NAME identity lock, SELF-REPLYQ route-lock, self-model rule,
 //      cleanReply scrub).
-const SERVICE_VERSION = "nexus-cortex-v36.8";
+// v36.9 (owner 2026-10-29 05:16-05:17 +03 — "literally 0 memory usefulness
+// no smartness at all" batch, two measured classes):
+//   1. SELF-CLAIM + TAUNT route-lock (panel SELF_REPLYQ_RE parity):
+//      "lan çayın dumanı dedin nasıl bir salaksın sen" — a viewer quoting
+//      the bot's OWN line back at it — hit the panel's \bnasıl\b research
+//      gate and Exa confabulated a Duman-band essay about a conversation it
+//      never saw. Second-person claim verbs (dedin/diyosun/söyledin/
+//      demişsin) and bot-directed taunts ("salaksın sen" class) are persona
+//      conversation, never research.
+//   2. Channel memory itself lives panel-side (the panel is the brain on the
+//      live path); the edge inherits it through the dialogue ladder the
+//      panel already forwards — no edge-side storage change needed.
+const SERVICE_VERSION = "nexus-cortex-v36.9";
 
 const SAFE_HOSTS = new Set([
   "open.spotify.com",
@@ -476,6 +488,17 @@ function classify(text: string) {
     return "MOD_ROSTER";
   if (/https?:\/\//i.test(t) || /playlist|spotify|çalma listesi/.test(t))
     return "URL_OR_PLAYLIST";
+  // v36.9 — SELF-CLAIM + TAUNT LOCK (panel SELF_REPLYQ_RE parity, measured
+  // 2026-10-29 05:16 +03): second-person "you said" verbs and bot-directed
+  // insults are conversation ABOUT the bot — persona work, never research.
+  // The edge taxonomy would mostly banter these anyway; the lock makes the
+  // class deterministic on BOTH surfaces.
+  if (
+    /\b(?:dedin|dediysen|diyon|diyosun|diyorsun|demi[sş](?:sin|tin)|s[öo]yledin|s[öo]yl[üu]yorsun|s[öo]yl[üu]yosun)\b|\b(?:salak|aptal|gerizekal[ıi]|embesil|enayi)\s*s[ıi]n\b/i.test(
+      t,
+    )
+  )
+    return "FAST_BANTER";
   // v29.11: a music intent now requires an actual QUESTION about a song /
   // artist / album. A bare "müzik/şarkı/sanatçı/techno" MENTION is bant er
   // ("müzik dinlemek istemiyorum o kadını çizmeni istiyorum") and must NOT

@@ -3,6 +3,8 @@ import { db } from "@/lib/db";
 import { clampStr, redactSecrets } from "@/lib/brain/auth";
 import { clientKey, rateLimit } from "@/lib/guard";
 import {
+  cortexChatLineAppend,
+  cortexChatLinesSnapshot,
   cortexCoalesce,
   cortexEchoLookup,
   interactionRowDuplicate,
@@ -151,6 +153,12 @@ async function processChatMessage(payload: ChatMessagePayload, messageId: string
     40,
   ).toLowerCase();
   const rawContent = clampStr(payload.content ?? "", 800);
+  // v36.9 — CHANNEL CHAT CONTEXT: every non-bot line feeds the channel
+  // chat-lines ring, so the next !ai question resolves against the RUNNING
+  // conversation (the "sen ne diyosun bu işlere kanka" → "bana tek satır
+  // geldi" class had nothing to read). The bot's own lines never reach here
+  // (self-trigger guard above).
+  cortexChatLineAppend(channel, sender, rawContent);
   if (!AI_COMMAND_RE.test(rawContent)) return; // not a bot command — plain chat
 
   const prompt = rawContent.replace(AI_COMMAND_RE, "").replace(EMOTE_RE, " ").replace(/\s+/g, " ").trim();
@@ -172,7 +180,17 @@ async function processChatMessage(payload: ChatMessagePayload, messageId: string
         prompt,
         channel,
         rosterAdmin: false,
-        start: () => runCortex({ sender, prompt, channel, streamerName: channel }),
+        // v36.9 — the same room-transcript contract the overlay widget has
+        // always used: the freshest plain-chat lines from the channel ring
+        // (includes the current line, same as the widget's snippet).
+        start: () =>
+          runCortex({
+            sender,
+            prompt,
+            channel,
+            streamerName: channel,
+            roomTranscript: cortexChatLinesSnapshot(channel, 14),
+          }),
       });
     } catch (e) {
       await writeInteractionRow({
