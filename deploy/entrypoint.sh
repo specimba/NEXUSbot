@@ -7,15 +7,19 @@ set -euo pipefail
 DATA_DIR="${DATA_DIR:-/data}"
 mkdir -p "$DATA_DIR"
 
-# 1) .env: mount one at /data/.env, else generate fresh random secrets ONCE.
+# 1) .env: mount one at /data/.env, else generate it ONCE. Any value already
+#    present in the environment (hoster-injected secrets — Render / Zeabur /
+#    Spaces-style env UI) WINS over randoms, so secrets stay stable across
+#    ephemeral reboots instead of rotating per boot.
 ENV_FILE="$DATA_DIR/.env"
+genpw() { openssl rand -base64 48 | tr -d '\n'; }
 if [[ ! -f "$ENV_FILE" ]]; then
-  echo "[entrypoint] generating $ENV_FILE with fresh random secrets"
+  echo "[entrypoint] generating $ENV_FILE (pre-set hoster env wins over randoms)"
   {
     echo "DATABASE_URL=file:$DATA_DIR/custom.db"
-    echo "PANEL_PASSWORD=$(openssl rand -base64 48 | tr -d '\n')"
-    echo "SESSION_SECRET=$(openssl rand -base64 48 | tr -d '\n')"
-    echo "ENCRYPTION_KEY=$(openssl rand -base64 48 | tr -d '\n')"
+    echo "PANEL_PASSWORD=${PANEL_PASSWORD:-$(genpw)}"
+    echo "SESSION_SECRET=${SESSION_SECRET:-$(genpw)}"
+    echo "ENCRYPTION_KEY=${ENCRYPTION_KEY:-$(genpw)}"
   } > "$ENV_FILE"
   chmod 600 "$ENV_FILE"
 fi

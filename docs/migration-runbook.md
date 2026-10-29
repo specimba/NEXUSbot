@@ -1,6 +1,9 @@
 # NEXUS OS — Migration Runbook: from the sandbox to a stable foundation
 
-_Research pass: 2026-10-29, 20:15 +03. Evidence tags per AGENTS.md §4: [MEASURED] = live-probed from
+_Research pass 1: 2026-10-29, 20:15 +03 — free-tier landscape, Oracle-first.
+Research pass 2: 2026-10-29, 20:50–21:10 +03 — CARDLESS deep-dive (the owner's Oracle signup FAILED
+at card verification, so the entire field was re-probed for "no card, ever": HF Spaces, Koyeb, Render,
+Zeabur, Serv00, ClawCloud, UptimeRobot). Evidence tags per AGENTS.md §4: [MEASURED] = live-probed from
 the sandbox tonight; [INFERRED] = strong prior knowledge, not re-verified tonight; [UNVERIFIED] = hearsay._
 
 ---
@@ -9,15 +12,19 @@ the sandbox tonight; [INFERRED] = strong prior knowledge, not re-verified tonigh
 
 | Rank | Foundation | Cost | Always-on | Persistent disk | Card needed | Verdict |
 |---|---|---|---|---|---|---|
-| **A** | **Oracle Cloud Always Free VM (Ampere A1)** | **€0 forever** | ✅ 24/7 | ✅ 200 GB | yes (not charged) | **The endgame — run everything on one real VM** |
-| **B** | **Hugging Face Space (Docker) + Neon free Postgres + UptimeRobot pinger** | **€0** | ⚠️ needs keep-alive pinger | ❌ ephemeral → DB external | no | **Best zero-card fallback; brain survives restarts via seal** |
-| **C** | **Stay in sandbox, hardened (shipped tonight)** | €0 | ❌ platform resets | ❌ per-boot | no | **Recovery now takes ~2 min, not 40 — but the URL still rotates** |
-| D | Fly.io / Render free / Koyeb / Cloud Run free / Railway | €0–€3 | mixed | mixed | mixed | Rejected — see §5 |
+| **A** | **Hardened sandbox (proven 3×: live p50 6.0 s / p95 14.5 s hours after today's wipe)** | €0 | ❌ daily reset window ~16:25–16:40Z, recovery ~2–5 min | ❌ per-boot — seal + mirror restore | no | **The workhorse: ~10× the resources of any cardless tier. Keep streaming on it.** |
+| **B** | **Render free Docker service + UptimeRobot pinger** — permanent URL, cardless | €0 | ⚠️ sleeps after 15 min idle → 5-min pinger keeps it warm; 750 h/mo covers a 24/7 service | ❌ ephemeral — seal + mirror-backfill restore (proven in prod today) | **no [MEASURED]** | **The cardless permanent-URL second host — "a bit lower resourced" (512 MB, shared CPU), exactly the owner's stated tolerance** |
+| C | Zeabur Free / Serv00 (FreeBSD) | €0 | ⚠️ auto-sleep / process limits | mixed | no | Same ~512 MB class — fallbacks behind Render |
+| D | Oracle A1 / HF Docker / Koyeb / Fly / Cloud Run / Railway | — | — | — | **yes — owner card-blocked or platform paywalled** | Rejected — see §3, §5 |
 
-**Recommendation: A.** One always-on ARM VM runs the panel, the kick-bridge, the cadence services and
-SQLite on a persistent disk, behind a stable HTTPS domain (free DuckDNS + Caddy auto-TLS). The OBS
-Browser Source becomes a FROZEN, permanent URL (Widgets → set-base to the VM origin). OAuth callbacks
-get a stable domain. The sandbox stops being load-bearing — at worst it becomes a thin dev console.
+**Recommendation (pass 2): DUAL-HOST.** Oracle died at the owner's card verification and HF's free
+Docker Space died with its 2026 paywall — so the play is: (1) keep the sandbox as the live-stream
+workhorse (biggest free resources anywhere; today's third wipe recovered in ~20 min and served
+p50 6 s traffic all evening); (2) stand up the SAME image on Render free — a PERMANENT https URL
+for OBS, the panel bookmark and OAuth callbacks, kept warm by UptimeRobot; (3) let the seal +
+auto-reseal + Supabase mirror keep both hosts rebuildable from each other in minutes (§6). When the
+owner is satisfied the Render host is solid, Widgets set-base moves there once and the OBS URL
+freezes forever.
 
 ---
 
@@ -64,7 +71,7 @@ GitHub chain). Future Drive uploads of `NEXUS-OS-source-*.zip` restore EVERYTHIN
 
 ---
 
-## 3. Option A — Oracle Cloud Always Free VM (recommended)
+## 3. Option A — Oracle Cloud Always Free VM — ❌ BLOCKED 2026-10-29 (owner card verification fails; kept for reference if a usable card ever appears)
 
 **Evidence [MEASURED 2026-10-29]:** oracle.com/cloud/free live: *"Always Free Cloud Services that can
 be used for an unlimited time"* — Ampere A1 Compute, 24 GB total RAM, per-tenant no-expiry allowance.
@@ -97,20 +104,48 @@ the UptimeRobot free pinger (50 monitors [MEASURED]) covers that too.
 
 ---
 
-## 4. Option B — zero-card fallback: HF Space + Neon + pinger
+## 4. Option B — the CARDLESS class (owner is card-blocked; re-probed 20:50–21:10 +03)
 
-**Evidence [MEASURED]:** huggingface.co live — Spaces sleep after a period unused; neon.com live —
-*"Free plan is permanent (not a trial); no credit card required"*, autosuspend after 5 min; Cloud Run —
-*"2 million requests free per month"*; UptimeRobot — free plan live.
+The owner's constraint, verbatim: *"I have tried oracle free before it not registering me due to card
+issues for free we need to card integration. We need better or equal or a bit lower resourced
+alternative."* → every candidate below was re-measured for "no card, ever".
 
-**Shape:** free HF Docker Space (2 vCPU / 16 GB [INFERRED]) runs the panel + minis; UptimeRobot pings
-`/api/health` every 5 min so the Space never sleeps; SQLite replaced by Neon free Postgres (Prisma
-provider swap, ~1 h work, no data model changes); seal + snapshot chain unchanged. Restart of the Space
-= ~2 min cold start, history safe in Neon + mirror, vault safe in the seal.
+**What died between pass 1 and pass 2 (both [MEASURED] 2026-10-29):**
 
-**Why not first choice:** sleep risk if the pinger fails, ephemeral disk (upload/ must be re-seeded),
-shared CPU, no fixed IP for potential Kick webhook hardening, and the Prisma provider swap is code churn
-the VM path does not need.
+- **HF Spaces (Docker)** — the 20:15 fallback is DEAD for free. huggingface.co/docs/hub/spaces-overview
+  (live tonight): *"Gradio and Docker Spaces run on compute and require a paid plan to create: PRO for
+  personal accounts… The default CPU Basic hardware has no hourly cost, but creating a Space that runs
+  on compute (Gradio or Docker) requires a paid plan, while Static Spaces are free for everyone."* CPU
+  Basic (2 vCPU / 16 GB / FREE) still exists — but you can no longer CREATE a Docker Space on it
+  without PRO ($9/mo).
+- **Koyeb** — koyeb.com/docs/faqs/pricing (live): *"We require a credit card to prevent fraud and
+  abuse. We verify the card you enter by placing a $29 pre…"* → same wall as Oracle.
+- **ClawCloud Run** — [UNVERIFIED, dropped]: run.claw.cloud returned 503 from the sandbox tonight and
+  web search is polluted by the unrelated "OpenClaw AI-agent hosting" brand; the "$5/mo free credit,
+  GitHub account ≥180 days" claim could NOT be re-verified. Do not build on it.
+
+**The survivors — and their honest ceiling (all [MEASURED] tonight):**
+
+| Host | Card | Resources | Sleep / wake | Runs the deploy/ kit? | Notes |
+|---|---|---|---|---|---|
+| **Render free web service** | **no** (docs: "No credit card is required") | 512 MB RAM, 0.1 CPU, 750 instance-h/mo | spins down after 15 min idle; 5-min UptimeRobot ping keeps it warm; ~1 min cold start when it slips through | ✅ Docker deploy (`deploy/Dockerfile` + root `render.yaml`, shipped tonight) | Persistent disk is a paid feature → state rides seal + Supabase mirror (the restore path proven in prod today); env-injected secrets preserved by the entrypoint fix |
+| Zeabur Free Plan | no (docs: "No credit card required — just sign up") | ~512 MB class | "Services on the Free Plan automatically sleep after a period of inactivity… wake up on the next incoming request" (docs, live) | ✅ Dockerfile deploy | Dev plan $5/mo beyond free |
+| Serv00 (FreeBSD) | no (offer page live: "completely free hosting… no ads or fees") | **512 MB RAM**, 15 system processes, 3 GB SSD, unlimited transfer, Node.js + SSH + crontab | always-on via SSH processes + crontab keepalive (no bun on FreeBSD → run panel standalone under node) | ⚠️ needs the node variant | 170k+ accounts, forum-only support, process limits actively enforced |
+
+**The uncomfortable truth [MEASURED]: every free, cardless, 24/7-capable option lands at ~512 MB RAM.**
+The sandbox gives this project ~10× that. The trade is resources vs permanence — hence DUAL-HOST (§0).
+
+**Why 512 MB is still viable for NEXUS (honest engineering):** the ~2 GB RSS seen in the sandbox is
+`next dev` mode. The deploy/ kit builds the **standalone production server** (typically 200–400 MB
+for this app) + kick-bridge (~50 MB) + backup-cadence + mem-watchdog; bench-cadence is optional there.
+p50 latency is dominated by upstream LLM waits, not local CPU share. The OBS widget is one HTML page
+plus one stream route. It fits — tightly, with the watchdog guarding. If the free-tier Docker build
+OOMs, build the image locally and deploy from a registry instead.
+
+**Neon swap no longer required (pass-2 simplification):** with the auto-reseal + state-carrying
+workspace exports + mirror backfill all proven in production TODAY, the SQLite + seal story already
+survives ephemeral disks — a restart costs at most the mirror-push window. Neon free Postgres remains
+an optional hardening later, not a migration blocker.
 
 ---
 
@@ -119,8 +154,10 @@ the VM path does not need.
 | Platform | Finding | Why rejected for NEXUS |
 |---|---|---|
 | Fly.io | pricing live — free allowances now tied to legacy/plans [MEASURED]; new orgs pay-as-you-go | Not free-certain; needs card; ~$2–5/mo realistic |
-| Render free | free tier live, spins down on idle [MEASURED] | 512 MB too tight for panel + 4 mini-services + Prisma; persistent disk is paid; WS drops on spin-down |
-| Koyeb free | free tier live [MEASURED] | 512 MB instance; ephemeral storage; same shape problems as Render |
+| Render free | PROMOTED to rank B in pass 2 — cardless [MEASURED], 512 MB, 15-min idle sleep, ephemeral disk | Survivable: production standalone (~300 MB) + seal/mirror restore + 5-min pinger; 750 h/mo fits one 24/7 service |
+| Koyeb free | docs FAQ live [MEASURED pass 2]: "We require a credit card… $29 pre-auth" | Card pre-auth — the same wall that blocked Oracle |
+| HF Spaces (Docker) | docs live [MEASURED pass 2]: "Gradio and Docker Spaces… require a paid plan to create: PRO" | The 20:15 fallback is DEAD for free — CPU Basic exists but Docker Space creation is paywalled |
+| ClawCloud Run | run.claw.cloud 503 from the sandbox; search polluted by the unrelated "OpenClaw" brand [UNVERIFIED] | The "$5/mo, GitHub ≥180d" claim could not be re-verified tonight — do not build on it |
 | Google Cloud Run | "2 million requests free per month" [MEASURED] | scale-to-zero + 60-min WebSocket cap + ephemeral disk — wrong shape for a 24/7 chat WS bot |
 | Railway / Heroku / Replit / Glitch | [INFERRED] no longer free / dead | — |
 | GitHub Codespaces | 120 core-h/mo [INFERRED] | not 24/7, recycles workspace |
@@ -128,7 +165,7 @@ the VM path does not need.
 
 ---
 
-## 6. Post-migration checklist (applies to A and B)
+## 6. Post-migration checklist (applies to any host — the seal/mirror/snapshot chain is host-agnostic)
 
 - [ ] Panel: unseal from the seal carried in the repo — vault/OBS links/tokens return in one click.
 - [ ] Widgets → set-base to the new origin; refresh the OBS source once — then never again.
@@ -140,12 +177,27 @@ the VM path does not need.
 
 ---
 
-## 7. Decision requested from the owner
+## 7. Decision — ANSWERED 2026-10-29 21:10 +03 (owner: card impossible; performance audited first, per their "wait, check this")
 
-1. **Go Oracle VM (A)?** → you do the account + instance creation (needs your card), I already shipped
-   `deploy/` and can drive the rest.
-2. **No card possible?** → say the word and I do B (HF + Neon + pinger) — ~1 day of work incl. the Prisma
-   provider swap and Space wiring.
-3. **Stay in the sandbox for now?** → the hardened stack shipped tonight (auto-reseal + state-carrying
-   Drive zips + mirror backfill) already made the next wipe a ~2-minute recovery — but the URL will keep
-   rotating and the uptime will stay hostage to platform resets.
+- **Performance verdict [MEASURED]**: healthy — 204 interactions in the DB (203 ok, 1 `direct`),
+  p50 6019 ms / p95 14543 ms (matches the panel card 6056/14603); Exa research 1.6–1.9 s; honest
+  abstention + live self-correction observed in the Turkish chat; all 3 flagged security attempts
+  contained; kick-bridge + webhooks + L0 mirror all green. NO platform defect. The "strangely good"
+  performance is real: today's rebuild + v36.9 hedged lanes + the Exa research tier are simply working
+  under live load.
+- **⚠️ The pending seal RESTORE was STOPPED for good reason [MEASURED]**: the seal on disk is still
+  the 19:15:14 pre-wipe one (3 tokens — it predates the ~20:15 OBS-token reconstruction). Restoring it
+  would revert the widget to the STALE token and re-break the OBS URL. The live DB is now NEWER than
+  the seal — the correct one-click action is **RE-SEAL**, not restore.
+- **1 owner click tonight: RE-SEAL** — Settings → Sandbox seal → passphrase → seal. With the seal-route
+  fix shipped tonight (createSeal now primes the auto-reseal cache), a re-seal keeps the seal tracking
+  every future vault/token/widget/settings mutation (≤45 s debounce) — the stale-seal class that nearly
+  cost the OBS token today is closed.
+- **This week (zero card, ~30 min): stand up Render free from the GitHub chain** — render.com →
+  New + → Blueprint → pick `specimba/NEXUSbot` (root `render.yaml`, shipped tonight) → free plan →
+  set PANEL_PASSWORD to anything (the sealed original hot-applies after seal-restore) → UptimeRobot
+  HTTP monitor on `/api/health` every 5 min → panel → Restore seal → `scripts/backfill-from-mirror.ts`.
+  That service URL is PERMANENT — point OBS/Widgets set-base there when satisfied.
+- **Then decide by experience**: run dual-host for a week; then keep both (sandbox = stream workhorse,
+  Render = permanent URL) or cut over fully. Either way the seal + mirror + snapshot chain rebuilds
+  any host from any other in minutes.

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth";
 import { clientKey, rateLimit } from "@/lib/guard";
+import { cacheSealPassphrase } from "@/lib/seal-cache";
 import { createSeal, readSealMeta, SEAL_PATH } from "@/lib/seal";
 
 /**
@@ -46,6 +47,10 @@ export async function POST(req: Request) {
 
   try {
     const meta = await createSeal(passphrase);
+    // Prime the in-process auto-reseal cache: a verified re-seal must keep the
+    // seal tracking live vault state from now on, exactly like a successful
+    // unseal does (cache is memory-only, never logged/returned — P7).
+    cacheSealPassphrase(passphrase);
     return NextResponse.json({ ok: true, meta });
   } catch (e) {
     return NextResponse.json(

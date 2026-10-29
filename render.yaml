@@ -1,0 +1,37 @@
+# Render Blueprint — NEXUS OS cardless permanent-URL host (migration-runbook §4/§7, pass 2).
+#
+# Owner flow (~30 min, ZERO card — render.com/docs/free: "no credit card is required"):
+#   1. render.com → New + → Blueprint → pick the specimba/NEXUSbot repo → Apply.
+#   2. When prompted for PANEL_PASSWORD, type anything you like — it only needs to get you
+#      through the FIRST login; Settings → Sandbox seal → Restore then hot-applies the sealed
+#      originals (SESSION_SECRET / ENCRYPTION_KEY / the real panel password) at runtime.
+#   3. Set SESSION_SECRET / ENCRYPTION_KEY the same way (or leave blank — the seal restores
+#      them; setting them just avoids one hot-apply).
+#   4. UptimeRobot (free): HTTP monitor on https://<service>.onrender.com/api/health every 5 min
+#      — keeps the free instance from its 15-min idle sleep.
+#   5. Panel → Settings → Sandbox seal → passphrase → Restore → scripts/backfill-from-mirror.ts.
+#   6. When satisfied: Widgets → set-base to the onrender.com origin — the OBS URL freezes forever.
+#
+# Honest limits (docs/migration-runbook.md §4): free tier = 512 MB RAM / shared CPU / ephemeral
+# disk / 750 instance-hours per month (a 5-min-pinged 24/7 service uses ~720). deploy/entrypoint.sh
+# preserves these hoster-injected secrets across ephemeral reboots. The sandbox remains the
+# live-stream workhorse (10x the resources); this service is the permanent-URL mirror — the seal +
+# Supabase mirror + GitHub snapshot chain rebuild either host from the other in minutes.
+services:
+  - type: web
+    name: nexus-os
+    runtime: docker
+    dockerfilePath: deploy/Dockerfile
+    plan: free
+    healthCheckPath: /api/health
+    autoDeploy: false
+    envVars:
+      # sync: false → Render prompts for a value on Blueprint apply (never stored in this file).
+      - key: PANEL_PASSWORD
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: DATA_DIR
+        value: /data
