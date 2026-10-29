@@ -2,6 +2,7 @@ import { createCipheriv, createDecipheriv, createHmac, randomBytes, scryptSync, 
 import fs from "node:fs";
 import path from "node:path";
 import { db } from "@/lib/db";
+import { cacheSealPassphrase } from "./seal-cache";
 
 /**
  * NEXUS OS — sandbox seal (v29.18, Task 25).
@@ -28,6 +29,12 @@ import { db } from "@/lib/db";
  * 32B). A cleartext `meta` block (timestamps + row counts, NO secret material)
  * lets the panel show honest seal state without the passphrase. `check` =
  * HMAC(key, "nexus-seal-check") verifies the passphrase before any restore.
+ *
+ * Auto-reseal (2026-10-29 incident fix): restoreSeal caches the VERIFIED
+ * passphrase in-process (src/lib/seal-cache.ts); the Prisma extension in
+ * src/lib/db.ts then refreshes the seal automatically after any mutation of
+ * Credential / IngestToken / Widget / Setting — so rows created AFTER an
+ * unseal (the exact way the 19:15 OBS token died) are sealed within 45 s.
  *
  * Threat model, stated honestly: the seal file is PUBLIC (rides in the public
  * snapshot repo). Its strength is exactly the passphrase — the UI instructs a
@@ -280,6 +287,12 @@ export async function restoreSeal(passphrase: string): Promise<RestoreResult> {
   const raw = fs.readFileSync(sealFilePath(), "utf8");
   const file = JSON.parse(raw) as SealFile;
   const payload = decryptPayload(file, passphrase);
+
+  // 0) The passphrase just verified against this seal — cache it in-process
+  //    so seal-cache.ts can auto-refresh the seal after any later mutation of
+  //    the seal-carried models (the 19:15 post-seal OBS-token gap never
+  //    recurs). Memory-only (dies with the process, never persisted, P7).
+  cacheSealPassphrase(passphrase);
 
   // 1) Env: live process first, then .env file.
   for (const k of SEALED_ENV_KEYS) {

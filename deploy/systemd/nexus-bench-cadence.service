@@ -1,0 +1,15 @@
+[Unit]
+Description=NEXUS OS — bench-cadence (benchmark lane, :3012)
+After=network-online.target nexus-panel.service
+
+[Service]
+Type=simple
+WorkingDirectory=__REPO__/mini-services/bench-cadence
+EnvironmentFile=__DATA__/.env
+Environment=NODE_ENV=production
+ExecStart=/usr/local/bin/bun __REPO__/mini-services/bench-cadence/index.ts
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

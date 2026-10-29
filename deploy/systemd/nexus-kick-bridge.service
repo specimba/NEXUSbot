@@ -1,0 +1,16 @@
+[Unit]
+Description=NEXUS OS — kick-bridge (Kick chat websocket, :3010)
+After=network-online.target nexus-panel.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=__REPO__/mini-services/kick-bridge
+EnvironmentFile=__DATA__/.env
+Environment=NODE_ENV=production
+ExecStart=/usr/local/bin/bun __REPO__/mini-services/kick-bridge/index.ts
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

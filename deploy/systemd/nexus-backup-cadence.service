@@ -1,0 +1,16 @@
+[Unit]
+Description=NEXUS OS — backup-cadence (snapshot chain every 6h, :3011)
+After=network-online.target nexus-panel.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=__REPO__/mini-services/backup-cadence
+EnvironmentFile=__DATA__/.env
+Environment=NODE_ENV=production
+ExecStart=/usr/local/bin/bun __REPO__/mini-services/backup-cadence/index.ts
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

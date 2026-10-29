@@ -642,6 +642,11 @@ function loadFreshPrismaModule(): { PrismaClient: typeof PrismaClient } | null {
   }
 }
 
+// Callers treat this as a raw PrismaClient (usageEvent model ops only). The
+// @/lib/db export is the auto-reseal $extends wrapper (full passthrough at
+// runtime — every model method proxies through); the one-time cast keeps the
+// public signature stable so hot callers (api/usage is polled every ~30 s)
+// never see a union type. [MEASURED: passthrough behavior, Prisma 6.11]
 export function getUsageDb(): PrismaClient | null {
   const g = globalThis as { prisma?: PrismaClient };
   const cached = g.prisma;
@@ -660,7 +665,7 @@ export function getUsageDb(): PrismaClient | null {
       // fall through to the stale singleton
     }
   }
-  if (db && "usageEvent" in db) return db;
+  if (db && "usageEvent" in db) return db as unknown as PrismaClient;
   return null;
 }
 

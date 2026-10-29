@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { execFile } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile, cp, access } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile, cp, access } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { promisify } from "node:util";
@@ -170,6 +170,22 @@ export async function GET(req: Request) {
       }
     }
 
+    // 1.5) The sandbox seal — passphrase-encrypted STATE bundle (env keys +
+    //      vault credential envelopes + widgets + settings + ingest-token
+    //      hashes). PUBLIC BY DESIGN: it already rides the GitHub snapshot
+    //      chain (scripts/secret-scan.sh ships an explicit seal exemption —
+    //      validated ciphertext envelope, no plaintext fields), so including
+    //      it here adds ZERO new exposure while making the owner's Drive
+    //      archive state-carrying: drop this zip's .seal/ into a fresh
+    //      workspace, unseal with the passphrase, and the vault + OBS links
+    //      + widgets + settings all come back (2026-10-29 incident lesson:
+    //      source-only zips cannot restore runtime state).
+    const sealSrc = path.join(root, ".seal", "nexus-seal.v1.json");
+    if (await exists(sealSrc)) {
+      await mkdir(path.join(stage, ".seal"), { recursive: true }).catch(() => {});
+      await cp(sealSrc, path.join(stage, ".seal", "nexus-seal.v1.json")).catch(() => {});
+    }
+
     // 2) RECOVERY.txt — the thing the owner actually went looking for.
     const password = process.env.PANEL_PASSWORD ?? "(not set — the durable DB hash still accepts your rotated password)";
     const recovery = [
@@ -193,14 +209,22 @@ export async function GET(req: Request) {
       "prisma/        database schema (data itself is NOT exported)",
       "scripts/       ops scripts (deploy, verify, backfill)",
       "docs/          runbook.md (section 0 = panel access)",
+      ".seal/         sandbox seal — passphrase-encrypted STATE bundle",
+      "               (env keys + vault credentials + widgets + OBS tokens",
+      "               + settings). Restores everything in one step.",
       "",
       "NOT in here (by design): .env, db/*.db, node_modules, upload/, vault files.",
+      "(The seal carries their state ENCRYPTED — it needs only your passphrase.)",
       "",
       "QUICK START (after a reset)",
       "--------------------------",
       "1. bun install && bunx prisma db push && bun run dev",
       "2. Open the panel, sign in with the password above.",
-      "3. Widgets -> re-create the OBS Browser Source URL (1 click), refresh OBS.",
+      "3. Settings -> Sandbox seal -> Restore: paste your seal passphrase",
+      "   (the .seal/nexus-seal.v1.json inside THIS zip). Vault, widgets, OBS",
+      "   tokens and settings all come back in one click.",
+      "4. No seal? Fallback: Widgets -> re-create the OBS Browser Source URL",
+      "   (1 click) and re-enter connector keys in the Connectors tab.",
       "",
     ].join("\n");
     await writeFile(path.join(stage, "RECOVERY.txt"), recovery, "utf8");

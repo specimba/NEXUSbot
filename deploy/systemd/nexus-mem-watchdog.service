@@ -1,0 +1,15 @@
+[Unit]
+Description=NEXUS OS — mem-watchdog (memory guard, :3013)
+After=nexus-panel.service
+
+[Service]
+Type=simple
+WorkingDirectory=__REPO__/mini-services/mem-watchdog
+EnvironmentFile=__DATA__/.env
+Environment=NODE_ENV=production
+ExecStart=/usr/local/bin/bun __REPO__/mini-services/mem-watchdog/index.ts
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

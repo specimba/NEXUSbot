@@ -1,0 +1,21 @@
+[Unit]
+Description=NEXUS OS — panel (Next.js standalone, :3000)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=__REPO__
+EnvironmentFile=__DATA__/.env
+Environment=DATABASE_URL=file:__DATA__/custom.db
+Environment=NODE_ENV=production
+Environment=PORT=3000
+ExecStart=/usr/local/bin/bun __REPO__/.next/standalone/server.js
+Restart=always
+RestartSec=5
+# Hardening (light — the app writes only inside the repo/data dir)
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

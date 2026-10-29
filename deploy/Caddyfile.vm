@@ -1,0 +1,13 @@
+# NEXUS OS — VM reverse proxy (auto-HTTPS via Let's Encrypt).
+# Installed to /etc/caddy/Caddyfile by deploy/vm-setup.sh.
+# Requires DNS: point __DOMAIN__ (DuckDNS) at this VM's public IP first.
+
+__DOMAIN__ {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:3000
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubdomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+	}
+}

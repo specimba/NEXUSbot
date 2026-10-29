@@ -1,0 +1,30 @@
+# NEXUS OS — one-container production stack (panel + 4 mini-services).
+# Path B for hosts without systemd (HF Space, any VPS). SQLite + .env on the
+# ./deploy/data volume so redeploys never lose state.
+#
+#   docker compose -f deploy/docker-compose.yml up -d --build
+
+services:
+  nexus:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: nexus-os:latest
+    container_name: nexus-os
+    restart: unless-stopped
+    ports:
+      - "3000:3000"   # panel (put Caddy/nginx in front for TLS)
+      # - "3010:3010" # raw kick-bridge ws — internal only by default
+    volumes:
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
