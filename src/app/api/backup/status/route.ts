@@ -20,8 +20,9 @@ export const dynamic = "force-dynamic";
  *     lastAt?, head?, tag?, lastAttemptAt?, tokenPresent, remoteConfigured,
  *     remote, recentLog[] }
  *
- * 12-d: the script state gained `tag` (immutable daily tag snapshot-YYYYMMDD of
- * the last successful push), `lastAttemptAt` (anti-hammering stamp written on
+ * 12-d: the script state gained `tag` (immutable per-run tag
+ * snapshot-YYYYMMDD-HHMM of the last successful push; re-timed 2026-10-29 —
+ * daily-only names left the 2nd+ pushes of a day unpinned), `lastAttemptAt` (anti-hammering stamp written on
  * EVERY run attempt, even throttled/failed ones — a failed attempt never erases
  * the last real outcome) and lastResult "diverged" (remote main moved on its
  * own; push refused fast-forward-only, exit 5 — no force push, §8). A throttled

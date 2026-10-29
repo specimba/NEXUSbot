@@ -19,10 +19,14 @@
 #     No force push, ever (§8). If the pre-check fetch itself fails we proceed WITHOUT
 #     it — the push stays fast-forward-only, so the worst case is an honest rejection
 #     (exit 4), never a rewritten remote chain.
-#   - Immutable daily tags: after a successful push, push tag snapshot-YYYYMMDD
-#     (TZ Europe/Istanbul) pointing at the snapshot commit. create-or-reuse: a tag
-#     that already exists on the remote is NEVER moved — skipped when it already
-#     points at this commit, left untouched (with an honest log) otherwise.
+#   - Immutable per-run tags: after a successful push, push tag
+#     snapshot-YYYYMMDD-HHMM (TZ Europe/Istanbul) pointing at the snapshot
+#     commit. create-or-reuse: a tag that already exists on the remote is NEVER
+#     moved — skipped when it already points at this commit, left untouched
+#     (with an honest log) otherwise. (2026-10-29: the daily-only name left the
+#     2nd+ pushes of a day unpinned — snapshot-20261029 stayed on the FIRST
+#     commit while main advanced to b91a986, so the newest snapshot had no
+#     restore pin of its own; minute-precision pins EVERY pushed snapshot.)
 #   - Chain-metadata commit messages: second line carries files-changed vs the
 #     previous snapshot tree (all change types — deletions count as changes; a
 #     --diff-filter subset would understate the delta) + "scan:ok" from the
@@ -319,12 +323,15 @@ else
   exit 4
 fi
 
-# 11) immutable daily tag (12-d): snapshot-YYYYMMDD in Europe/Istanbul at the
-#     snapshot commit. create-or-reuse — a tag already on the remote is NEVER
-#     moved: skip when it already points here; leave untouched (honest log)
-#     when it points elsewhere. A tag-push failure does not fail the run (the
-#     snapshot itself is already pushed; the next run retries the tag).
-TAG="snapshot-$(TZ=$TZENV date +%Y%m%d)"
+# 11) immutable per-run tag (12-d, re-timed 2026-10-29): snapshot-YYYYMMDD-HHMM
+#     in Europe/Istanbul at the snapshot commit. Daily-only tags left the 2nd+
+#     pushes of a day unpinned (the tag stayed on the first snapshot while main
+#     moved on) — minute-precision gives EVERY pushed snapshot its own pin.
+#     create-or-reuse — a tag already on the remote is NEVER moved: skip when it
+#     already points here; leave untouched (honest log) when it points elsewhere.
+#     A tag-push failure does not fail the run (the snapshot itself is already
+#     pushed; the next run retries the tag).
+TAG="snapshot-$(TZ=$TZENV date +%Y%m%d-%H%M)"
 REMOTE_TAG=$(git ls-remote --tags "$REMOTE_URL" "refs/tags/$TAG" 2>>"$STATE_DIR/backup-log.txt" | cut -f1 | head -1)
 if [[ -z "$REMOTE_TAG" ]]; then
   # Remote does not have the tag → re-pointing a stale local tag is safe (the

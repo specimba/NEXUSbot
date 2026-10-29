@@ -369,7 +369,7 @@ export function DurabilityCard() {
                           </code>
                         </>
                       )}
-                      {/* 12-d: immutable daily tag of the last successful push (script state). */}
+                      {/* 12-d: immutable per-run tag of the last successful push (script state). */}
                       {d.tag && <span className="text-xs text-muted-foreground"> · {d.tag}</span>}
                     </p>
                   ) : tokenMissing ? (
