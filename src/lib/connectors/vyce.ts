@@ -40,12 +40,28 @@ export const DEFAULT_VYCE_BASE_URL = "https://vyceai.com/v1";
  */
 export const VYCE_TIMEOUT_MS = 15_000;
 
-/** Role → model registry (R11 proposal; runtime /models list is the truth). */
+/**
+ * Role → model registry. Runtime /models list is the truth; this map mirrors
+ * the live Vyce key's accessible models [MEASURED 2026-10-30: 10 ids —
+ * agnes-3.0-flash, beam-1.0, claude-sonnet-4-6, deepseek-v4-flash,
+ * deepseek-v4-flash-lr, deepseek-v4.1, glm-5.3-flash, gpt-6-luna,
+ * grok-imagine-2, nemotron-3.5-super-vl]. The dashboard's 17-model directory
+ * is the marketplace — glm-5.3 / gpt-5.6-terra / sol / gpt-astra / grok-4.6 /
+ * deepseek-v4-pro / claude-sonnet-4-6-pro are NOT on this key; "deep" therefore
+ * shows missing until the owner enables glm-5.3 on the Vyce key (honest signal,
+ * intentional upgrade path). gpt-6-luna stays "batch" — degraded on the
+ * platform dashboard but present on the key; glm-5.3-flash is flagged
+ * unstable (26s 5m-latency) yet remains the banter persona primary — the
+ * cortex race ladder fails over to beam-1.0 / deepseek-v4.1 on stalls.
+ */
 export const VYCE_ROLE_MODELS = {
   router: "deepseek-v4-flash-lr",
   worker: "deepseek-v4-flash",
   frontier: "claude-sonnet-4-6",
   free: "glm-5.3-flash",
+  fast: "beam-1.0",
+  vision: "nemotron-3.5-super-vl",
+  deep: "glm-5.3",
   batch: "gpt-6-luna",
   image: "grok-imagine-2",
 } as const;
@@ -58,7 +74,17 @@ export type VyceTierState = "available" | "missing" | null;
 export type VyceTierMap = Record<VyceRole, VyceTierState>;
 
 export function emptyTierMap(): VyceTierMap {
-  return { router: null, worker: null, frontier: null, free: null, batch: null, image: null };
+  return {
+    router: null,
+    worker: null,
+    frontier: null,
+    free: null,
+    fast: null,
+    vision: null,
+    deep: null,
+    batch: null,
+    image: null,
+  };
 }
 
 /** Computes per-role availability from a live /models id list. */

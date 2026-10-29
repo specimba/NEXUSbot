@@ -1547,7 +1547,13 @@ type RaceAttempt = {
 const MODEL_ID_LABELS: Record<string, string> = {
   "beam-1.0": "BEAM 1.0",
   "glm-5.3-flash": "GLM 5.3 FREE",
+  "glm-5.3": "GLM 5.3",
   "deepseek-v4.1": "DEEPSEEK V4.1",
+  "nemotron-3.5-super-vl": "NEMOTRON VL",
+  "gpt-5.6-terra": "GPT 5.6 TERRA",
+  "gpt-5.6-sol": "GPT 5.6 SOL",
+  "gpt-6-luna": "GPT 6 LUNA",
+  "grok-imagine-2": "GROK IMAGINE 2",
 };
 
 export function honestLaneLabel(laneLabel: string, requested: string, resolved?: string | null): string {

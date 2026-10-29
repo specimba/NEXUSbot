@@ -640,6 +640,13 @@ type HbScrapeOutcome =
   | { kind: "timeout" }
   | { kind: "network" };
 
+// v37.1 — Cloudflare challenge-interstitial marker (measured on arena.ai
+// 2026-10-30: a 489-char markdown whose body is the verification screen).
+function isChallengePage(markdown: string): boolean {
+  const m = markdown.slice(0, 2_000).toLowerCase();
+  return m.includes("performing security verification") || m.includes("security service to protect against malicious bots");
+}
+
 async function hbScrape(url: string): Promise<HbScrapeOutcome> {
   const keyLoad = await loadHyperbrowserKey();
   if (!keyLoad.ok) return { kind: "no-key" };
@@ -649,10 +656,23 @@ async function hbScrape(url: string): Promise<HbScrapeOutcome> {
 
   let jobId: string | null = null;
   try {
+    // v37.1 (2026-10-30) — arena boards started failing PARSE_FAILED on every
+    // refresh: arena.ai's Cloudflare was serving the challenge page to the
+    // plain session, the scrape "completed", and the captcha markdown parsed
+    // to zero rows. Docs-verified fix (api-reference/create-new-scrape-job):
+    // StartScrapeJobParams = { url, sessionOptions, scrapeOptions } —
+    //   sessionOptions.useStealth (CreateSessionParams) → anti-detection
+    //   scrapeOptions.waitFor (ms) → SPA render delay for the leaderboard table
+    // solveCaptchas exists on CreateSessionParams but REQUIRES A PAID PLAN —
+    // left off; if the owner upgrades, add it next to useStealth.
     const res = await fetch(`${base}/api/scrape`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ url, formats: ["markdown"] }),
+      body: JSON.stringify({
+        url,
+        sessionOptions: { useStealth: true },
+        scrapeOptions: { formats: ["markdown"], waitFor: 3_000 },
+      }),
       cache: "no-store",
       signal: AbortSignal.timeout(20_000),
     });
@@ -897,6 +917,23 @@ export async function fetchBenchmarks(kind: BenchKind): Promise<FetchBenchmarksO
   // Layer 2 — Hyperbrowser scrape (the JS-rendering fallback)
   const hb = await hbScrape(source.url);
   if (hb.kind === "ok") {
+    // v37.1 — Cloudflare interstitial detection: the scrape "completes" on the
+    // challenge page (489 chars, "Performing security verification"), so the
+    // old generic PARSE_FAILED message misled with "SPA/layout change
+    // suspected". Name the real root cause: measured 2026-10-30 — stealth +
+    // waitFor 6/12/20s + web/fetch networkidle all return the interstitial;
+    // solveCaptchas answers 402 "Free plan does not support solving captchas";
+    // the HyperAgent lane fails after 9 steps. Arena boards are blocked at the
+    // provider tier until the Hyperbrowser plan upgrades or the source moves.
+    if (isChallengePage(hb.markdown)) {
+      return {
+        ok: false,
+        error: {
+          code: "PARSE_FAILED",
+          message: `${source.url} served a Cloudflare bot-check page — the scrape completed on the challenge interstitial, not the leaderboard. Stealth + wait variants measured insufficient on the free Hyperbrowser plan (captcha solving requires a paid plan).`,
+        },
+      };
+    }
     const parsed = parseForKind(kind, "markdown", hb.markdown);
     if (parsed.entries) {
       return {
