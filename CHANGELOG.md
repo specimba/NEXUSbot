@@ -3,6 +3,22 @@
 All notable changes to NEXUS OS are documented here. Format: Keep-a-Changelog-lite;
 versions map to milestone gates. Dates are 2026 sandbox time.
 
+## [v37.0] — 2026-10-29 — Grounding lane: Spotify now-playing + capability self-model + Lore Book
+
+Owner directive (trace 1a188df1be629f19): "multiple misunderstanding and not realised itself capabilities also our spotify stream … direct knowledge grounding sync pipeline … capability upgrade plan integration to our system without braking working sides." Full design + evidence map: docs/capability-upgrade-plan.md; regression gates: scripts/probe-v370-grounding.ts (ALL PASS) + the locked suite (v368/v369/v343×2/v354×2/search-gate — all green, zero regressions).
+
+### Added
+- **Spotify connector** (`src/lib/connectors/spotify.ts`, PKCE public client — NO client secret, read-only scopes `user-read-currently-playing user-read-playback-state`): honest six-state machine (NOT_CONFIGURED / NEEDS_REAUTH / IDLE / PAUSED / PLAYING / DEGRADED), single-flight token refresh, 3-fail circuit breaker (60s), snapshot persisted to Setting `spotify.nowplaying` + 50-entry play-history ring `spotify.history` (write-on-change only). Routes: `/api/connectors/spotify/{status,app,authorize,callback,disconnect}`. Card: Connectors tab → "Spotify Grounding" (dashboard steps + exact redirect URI + connect/disconnect). Vault rows auto-flow into the encrypted seal (generic collector).
+- **Grounding cards** (`src/lib/brain/grounding.ts`, injected into `buildSystemPrompt` as ONE ≤900-char block): ŞU AN temporal card (D3), YAYIN MÜZİĞİ now-playing card when fresh <5min (D2), YETENEK dynamic capability self-model compiled from live vault state (D1 — kills the "link açamam" lie: the URL reader lane is claimed), LORE card (D4). All sync/cached reads — zero hot-path I/O (D7). Master kill-switch: Setting `brain.grounding.enabled`.
+- **NOWPLAYING deterministic lane** (route `cortex-nowplaying`, modelId `tool:now-playing`, label `VYCE // PLAK HAT`): "şu an ne çalıyor / çalan şarkı ne / dj ne çalıyor / now playing" answered from real data, zero model, bounded ≤1.5s; history variant ("geçen parça neydi") reads the ring.
+- **Lore Book** (Setting `brain.lore`, seal-covered, 40×400 cap): owner CRUD `/api/lore` + Brain-tab card; normalizeTr alias matching (diacritic-insensitive Turkish fold); `blockResearch` flag flips RESEARCH→CHAT for pure inside jokes only (the "DJ Nikolina" class) — unflagged entities keep their research path with lore context.
+- **Research quality** (D5/D6): BOT_META_TOOLS_RE (bot's own research/tools questions → CHAT), TEMPORAL_RELEASE_RE (relative-time + release noun → RESEARCH), date-stamped research synthesis (engine gets today's date), zero-model Exa relevance gate (≥2 salient tokens or drop → Event `research.relevance-drop` → z-ai rung; exa health ladder never poisoned).
+- **Brain tab** (panel-shell): the previously-unmounted tier registry (R18-b) now lives under a Brain tab with NowPlayingCard (the 20s heartbeat keeping the snapshot warm — no background timer, no new mini-service) and LoreBookCard. `/api/brain/nowplaying` (brain-token gated) exposes the feed for OBS widgets.
+- `src/lib/capabilities.ts` (cached capability snapshot), `src/lib/brain/normalize-tr.ts` (Turkish-correct fold), probe `scripts/probe-v370-grounding.ts`.
+
+### Notes
+- Spotify is honest NOT-CONFIGURED until the owner connects (dashboard steps in the card); every lane state is a real production path, not a stub. Re-seal after connecting (auto-reseal covers the new rows automatically).
+
 ## [v35.0] — 2026-10-29 — RSI Lab (experimental): L3 eval suites + L4 evolution cycles
 
 ### Added

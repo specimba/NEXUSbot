@@ -62,11 +62,14 @@ export function normalizeTr(input: string): string {
 }
 
 /**
- * Token view of the same normalization: splits on non-alnum AFTER folding.
- * Used by the research relevance gate (query tokens vs answer tokens).
+ * Token view of the same normalization — split FIRST, then fold: folding
+ * the whole string first would merge words ("Cami Toro" → "camitoro") and
+ * the relevance gate would never find them in answers. Splits on anything
+ * that is not a Unicode letter/number, folds each token via normalizeTr.
  */
 export function normalizeTrTokens(input: string, minLen = 1): string[] {
-  return normalizeTr(input)
-    .split(/[^a-z0-9]+/)
+  return String(input ?? "")
+    .split(/[^\p{L}\p{N}]+/u)
+    .map((t) => normalizeTr(t))
     .filter((t) => t.length >= minLen);
 }

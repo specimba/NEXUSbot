@@ -6,6 +6,7 @@ import { ExaResearchCard } from "@/components/panel/connectors/exa-research-card
 import { GitHubCard } from "@/components/panel/connectors/github-card";
 import { HyperbrowserCard } from "@/components/panel/connectors/hyperbrowser-card";
 import { KickCard } from "@/components/panel/connectors/kick-card";
+import { SpotifyCard } from "@/components/panel/connectors/spotify-card";
 import { SupabaseCard } from "@/components/panel/connectors/supabase-card";
 import { UpstashCard } from "@/components/panel/connectors/upstash-card";
 import { VyceCard } from "@/components/panel/connectors/vyce-card";
@@ -25,6 +26,7 @@ export function ConnectorsTab() {
     <div className="space-y-4">
       <div className="grid gap-4 xl:grid-cols-2 [&>*]:min-w-0">
         <KickCard />
+        <SpotifyCard />
         <ExaCard />
         <VyceCard />
         <SupabaseCard />

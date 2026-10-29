@@ -8,6 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { clearSessionToken } from "@/lib/client-auth";
 import { cn } from "@/lib/utils";
 import {
+  Brain,
   FlaskConical,
   Languages,
   LayoutDashboard,
@@ -37,6 +38,7 @@ const TABS = [
   { id: "overview", label: "nav.overview", icon: LayoutDashboard },
   { id: "stream", label: "nav.stream", icon: Radio },
   { id: "pipeline", label: "nav.pipeline", icon: ScrollText },
+  { id: "brain", label: "nav.brain", icon: Brain },
   { id: "widgets", label: "nav.widgets", icon: AppWindow },
   { id: "connectors", label: "nav.connectors", icon: PlugZap },
   { id: "settings", label: "nav.settings", icon: SlidersHorizontal },
@@ -151,6 +153,17 @@ export function PanelShell() {
         {tab === "overview" && <OverviewTab />}
         {tab === "stream" && <StreamTab />}
         {tab === "pipeline" && <PipelineTab />}
+        {tab === "brain" && (
+          <div className="space-y-4">
+            {/* v37 — the Brain tab: the tier registry (R18-b, previously
+             * unmounted) + the grounding layer surfaces — NowPlayingCard is
+             * the heartbeat keeping the Spotify snapshot warm, LoreBookCard
+             * is the owner's channel-wisdom CRUD. */}
+            <BrainTab />
+            <NowPlayingCard />
+            <LoreBookCard />
+          </div>
+        )}
         {tab === "widgets" && <WidgetsTab />}
         {tab === "connectors" && <ConnectorsTab />}
         {tab === "settings" && <SettingsTab />}
@@ -176,3 +189,5 @@ import { WidgetsTab } from "./widgets";
 import { ConnectorsTab } from "./connectors";
 import { SettingsTab } from "./settings";
 import { EvalTab } from "./eval/rsi-lab";
+import { BrainTab } from "./brain-tab";
+import { NowPlayingCard, LoreBookCard } from "./brain-cards";

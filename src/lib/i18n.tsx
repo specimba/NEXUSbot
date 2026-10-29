@@ -58,6 +58,7 @@ const DICTIONARY: Record<string, { en: string; tr: string }> = {
   "nav.overview": { en: "Overview", tr: "Genel Bakış" },
   "nav.stream": { en: "Stream", tr: "Yayın" },
   "nav.pipeline": { en: "Pipeline", tr: "İşlem Hattı" },
+  "nav.brain": { en: "Brain", tr: "Beyin" },
   "nav.widgets": { en: "Widgets", tr: "Widget'lar" },
   "nav.connectors": { en: "Connectors", tr: "Bağlayıcılar" },
   "nav.settings": { en: "Settings", tr: "Ayarlar" },

@@ -56,6 +56,11 @@ const LORE_TTL_MS = 60_000;
 function invalidateLoreCache(): void {
   cache.entries = null;
   cache.at = 0;
+  // Cross-module freshness: an owner edit must reach the RESEARCH flip on
+  // the very next message — zero the grounding warmer's TTL guard too,
+  // otherwise a ≤60s window serves the old lore state.
+  const g = globalThis as typeof globalThis & { __nexusGrounding?: { freshAt: number } };
+  if (g.__nexusGrounding) g.__nexusGrounding.freshAt = 0;
 }
 
 /** Cached list read (60s TTL, hot path-safe). */
@@ -211,6 +216,21 @@ export function matchLoreCached(prompt: string): LoreMatch[] {
  */
 export function loreBlocksResearchCached(prompt: string): boolean {
   return matchLoreCached(prompt).some((m) => m.entry.blockResearch === true);
+}
+
+/**
+ * Async wrapper — the authoritative path for the cortex RESEARCH flip: one
+ * cached listLore() read (≤1 DB hit/60s, research prompts only — never the
+ * chat hot path), so an owner edit is visible on the very next message
+ * even when the sync cache was cold.
+ */
+export async function loreBlocksResearch(prompt: string): Promise<boolean> {
+  try {
+    await listLore();
+  } catch {
+    return false; // store unavailable — research keeps its lane
+  }
+  return loreBlocksResearchCached(prompt);
 }
 
 /** Async wrapper for route-level freshness: refresh cache then match. */

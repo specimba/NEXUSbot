@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { clampStr } from "@/lib/brain/auth";
-import { normalizeTrTokens } from "@/lib/brain/normalize-tr";
-import { getCapabilitySnapshot } from "@/lib/capabilities";
+import { normalizeTr, normalizeTrTokens } from "@/lib/brain/normalize-tr";
+import { getCapabilitySnapshot, type CapabilitySnapshot } from "@/lib/capabilities";
 import { listLore, matchLoreCached, LORE_KEY } from "@/lib/brain/lore";
 import {
   peekNowPlaying,
@@ -164,8 +164,6 @@ function yayinLine(snap: SpotifySnapshot): string {
 // YETENEK — dynamic capability self-model (D1)
 // ---------------------------------------------------------------------------
 
-import type { CapabilitySnapshot } from "@/lib/capabilities";
-
 function capabilityLine(caps: CapabilitySnapshot): string {
   const bits: string[] = [
     "sesi/video duyamaz, kamera ile göremezsin",
@@ -289,6 +287,12 @@ export async function answerNowPlaying(prompt: string, streamerName: string): Pr
         `Şu an kulvarda ${trackFacts(t)} gidiyor.${progress} Spotify bağlantım söylüyor, kulaklarım değil.`,
       ]);
     case "PAUSED":
+      if (!t) {
+        return pickVariant(prompt, [
+          `Kulvarda bir parça duraklatılmış ama adı panele düşmedi — birazdan tekrar sor, kaynağı tazelerim.`,
+          `Duraklatılmış bir parça var, adı henüz elime ulaşmadı — bir saniye sonra tekrar at.`,
+        ]);
+      }
       return pickVariant(prompt, [
         `Kulvarda ${trackFacts(t)} duraklatılmış bekliyor — devam ederse yine söylerim.`,
         `Şu an durmuş: ${trackFacts(t)}. Pause'a basılmış, sessizlikte muhabbet var.`,

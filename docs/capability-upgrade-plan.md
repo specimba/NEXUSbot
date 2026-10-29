@@ -1,5 +1,17 @@
 # NEXUS OS — Capability Upgrade Plan (Task 3 — v37 grounding lane)
 
+> **STATUS: SHIPPED (2026-10-29, ~22:00 +03) — PR0–PR4 implemented, all gates green.**
+> - PR0 `normalizeTr` + `capabilities.ts` ✅ · PR1 Spotify connector + 5 routes + card ✅ ·
+>   PR2 grounding cards + NOWPLAYING lane + `/api/brain/nowplaying` + Brain tab ✅ ·
+>   PR3 Lore Book + `/api/lore` + flip ✅ · PR4 research quality (BOT_META_TOOLS_RE, TEMPORAL_RELEASE_RE, date-stamp, relevance gate) ✅.
+> - Regression: `probe-v370-grounding.ts` ALL PASS (37 checks incl. the live lore round-trip —
+>   a flagged in-joke "kimdir" flipped RESEARCH→CHAT and answered from lore, live glm-5.3-flash);
+>   locked suite green: v368 / v369 / v343-routing / v343-prompt-guard / v354-routing / v354-lock / search-gate — zero regressions.
+> - `bunx tsc --noEmit`: zero errors in touched files; `bun run lint`: exit 0.
+> - Owner E2E remaining (one-time, ~5 min): Spotify dashboard app + Client ID + redirect URI +
+>   User Management email → Connectors tab → Connect. Lore entries: Brain tab → Lore Book.
+>   Re-seal after connecting (auto-reseal tracks the new vault rows + settings automatically).
+
 Owner goal: direct knowledge-grounding sync pipeline for the stream's Spotify, true capability
 self-awareness, and structured smartness upgrades — additive only, zero regression on the
 working brain. This is the executable design. All architecture claims below were verified
