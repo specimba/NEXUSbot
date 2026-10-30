@@ -11,7 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { AlertTriangle, Coins, Globe, Loader2, RefreshCw, Search, Server } from "lucide-react";
 
 /**
- * v37.1 — WEB HATLARI card: the three new web lanes from the agent-systems
+ * v37.3 — WEB LANES card: the three web lanes from the agent-systems
  * capture (docs/agentmail-deep-dive.md §4/§5).
  *   Keenable — FREE search (100k window) — the lane that found the Nikolina
  *              ticketing evidence Exa missed [MEASURED].
@@ -19,6 +19,8 @@ import { AlertTriangle, Coins, Globe, Loader2, RefreshCw, Search, Server } from 
  *              SPA reader [MEASURED on artificialanalysis.ai].
  *   Firecrawl — metered backup (1,400 credits) — last resort after both free lanes.
  * Exa stays PRIMARY; these are fallbacks. Honest states only.
+ * EN pass: v37.1 shipped the card in Turkish — the rest of the panel is EN,
+ * this card now matches (owner ask 2026-10-30).
  */
 
 type LaneStatus = {
@@ -58,9 +60,9 @@ function useLaneStatus(lane: string) {
 function laneBadge(st: LaneStatus["status"] | undefined) {
   if (!st) return <Skeleton className="h-5 w-16" />;
   if (!st.configured)
-    return <Badge variant="outline" className="text-muted-foreground">anahtar yok</Badge>;
-  if (st.apiOk) return <Badge className="bg-emerald-600 text-white hover:bg-emerald-600">canlı</Badge>;
-  return <Badge variant="destructive">hatayı gör</Badge>;
+    return <Badge variant="outline" className="text-muted-foreground">no key</Badge>;
+  if (st.apiOk) return <Badge className="bg-emerald-600 text-white hover:bg-emerald-600">live</Badge>;
+  return <Badge variant="destructive">see error</Badge>;
 }
 
 const LANES = [
@@ -68,22 +70,22 @@ const LANES = [
     key: "keenable",
     name: "Keenable",
     icon: Search,
-    role: "ÜCRETSİZ arama — 100k istek (29 Kasım'da yenilenir)",
-    detail: "Exa'nın sınıfta kaldığı Türkçe günlük dil sınıfını yakalar (Nikolina kanıtı).",
+    role: "FREE search — 100k requests (renews Nov 29)",
+    detail: "Catches the colloquial-Turkish entity class where Exa failed (Nikolina proof).",
   },
   {
     key: "tinyfish",
     name: "TinyFish",
     icon: Server,
-    role: "ÜCRETSİZ JS-sayfa okuyucu — residential proxy çıkışı",
-    detail: "arena.ai sınıfı SPA sayfaları markdown olarak okur [MEASURED].",
+    role: "FREE JS-page reader — residential proxy egress",
+    detail: "Reads arena.ai-class SPA pages as markdown [MEASURED].",
   },
   {
     key: "firecrawl",
     name: "Firecrawl",
     icon: Coins,
-    role: "ÖLÇÜLMÜŞ yedek — 1,400 kredi (29 Kasım'da sıfırlanır)",
-    detail: "Son çare: iki ücretsiz hat da aynı sayfada başarısız olursa.",
+    role: "METERED backup — 1,400 credits (resets Nov 29)",
+    detail: "Last resort: when both free lanes fail the same page.",
   },
 ] as const;
 
@@ -113,12 +115,12 @@ export function AgentLanesCard() {
     },
     onSuccess: (data) => {
       toast({
-        title: `Keenable — ${data.search.results.length} kaynak (${data.search.tookMs}ms)`,
+        title: `Keenable — ${data.search.results.length} sources (${data.search.tookMs}ms)`,
         description: data.search.results.map((r) => r.url).slice(0, 3).join(" · "),
       });
     },
     onError: (err: Error) => {
-      toast({ title: "Keenable araması başarısız", description: err.message, variant: "destructive" });
+      toast({ title: "Keenable search failed", description: err.message, variant: "destructive" });
     },
   });
 
@@ -127,12 +129,12 @@ export function AgentLanesCard() {
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Globe className="h-4 w-4" aria-hidden />
-          WEB HATLARI — ücretsiz arama/okuma katmanları
+          WEB LANES — free search/read layers
         </CardTitle>
         <CardDescription>
-          Exa birincil kalır (owner doktrini); bu üç hat düşüş anında devralır:
-          Keenable (ücretsiz arama), TinyFish (ücretsiz JS-sayfa okuma), Firecrawl
-          (kredili son çare). Bütçe etkisi: $0.
+          Exa stays primary (owner doctrine); these three lanes take over the
+          moment it drops: Keenable (free search), TinyFish (free JS-page
+          reading), Firecrawl (metered last resort). Budget impact: $0.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -155,7 +157,7 @@ export function AgentLanesCard() {
                   variant="ghost"
                   size="sm"
                   className="h-6 w-6 p-0"
-                  aria-label={`${lane.name} yenile`}
+                  aria-label={`Refresh ${lane.name}`}
                   onClick={() => q.refetch()}
                 >
                   <RefreshCw className="h-3 w-3" />
@@ -178,14 +180,14 @@ export function AgentLanesCard() {
         {keenable.data?.status.configured && (
           <div className="space-y-2 rounded-md border border-border/60 p-3">
             <div className="text-xs font-medium">
-              Ücretsiz arama testi — Nikolina kanıtını tekrarlayabilirsin
+              Free search test — you can re-run the Nikolina proof
             </div>
             <div className="flex gap-2">
               <Input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="ör. DJ Nikolina 74 Hall konser"
-                aria-label="Keenable arama sorgusu"
+                placeholder="e.g. DJ Nikolina 74 Hall concert"
+                aria-label="Keenable search query"
                 className="text-xs"
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && query.trim().length >= 2) search.mutate();
@@ -202,7 +204,7 @@ export function AgentLanesCard() {
                 ) : (
                   <Search className="h-3 w-3" />
                 )}
-                ara
+                search
               </Button>
             </div>
             {search.data && (

@@ -1,6 +1,8 @@
-# NEXUS OS — AgentMail & Agent-Systems Deep Dive (v37.1 → v37.2)
+# NEXUS OS — AgentMail & Agent-Systems Deep Dive (v37.1 → v37.3)
 
-> **STATUS: DELIVERED + LIVE-VERIFIED (2026-10-30 ~06:30 +03).**
+> **STATUS: DELIVERED + LIVE-VERIFIED (2026-10-30 ~06:30 +03). v37.3 ADDENDUM
+> below (§8) — threads, daily digest, mail→bot command lane, scan-scrub,
+> EN panel pass — all shipped 02:43–03:00 +03.**
 > - Analysis grounded in owner paste `upload/AGENTMAILautomatedNEWagentSYSTEMSguide3010.txt`
 >   (612 KB, 16.9k lines) + **live API probes with the owner's real keys,
 >   2026-10-30 04:30–06:30 +03** (all `[MEASURED]` ran against production).
@@ -228,14 +230,71 @@ any fallback ever touches money.
 2. **AgentMail webhook**: `POST /v0/webhooks` → gateway public URL, event
    `message.received` + `message.security.completed`; then Hold mode; then the
    owner-allowlist command lane (mail → panel command, verdict-gated).
+   **v37.3: the command lane is live PULL-BASED (see §8) — the webhook push
+   half stays parked (public-URL decision).**
 3. **Daily digest**: cron 06:00 → nexusagent1 → owner email: yesterday's
    InteractionLog stats, research spend, bench deltas (uses send lane + usage
-   routes; all measured already).
+   routes; all measured already). **v37.3: LIVE — see §8.**
 4. **Keenable SELECT** (table answers) once free-window behavior confirmed.
 5. **Supermemory**: namespaces per viewer → memory graph; needs its own key.
 6. **InstaCloud**: hosting redundancy for a bot failover instance.
 7. **Hyperbrowser Stealth & Proxies** root-cause probe — deprioritized: the
    bench no longer needs it.
+
+---
+
+## 8. v37.3 addendum (2026-10-30 ~02:45 +03) — shipped + verified
+
+Owner feedback on v37.1: (a) the two new panel cards shipped in Turkish while
+the whole panel is EN; (b) the snapshot push kept failing "secret scan found
+hits" even after a fresh GitHub handshake; (c) re-check the guide for missed
+platform capabilities. All three, root-caused:
+
+1. **Scan-abort root cause — plaintext keys in the import script.**
+   v37.1's `scripts/import-agent-creds.ts` embedded the five owner keys as
+   literals; the Tinyfish key (`sk-tinyfish-…`) matches the scanner's
+   openai-style pattern → every run from 02:33 correctly aborted (the GitHub
+   handshake was never broken — the scan fires before any push). The other
+   four literals matched no pattern: had the scanner been pattern-unlucky the
+   keys would be on the public repo now. Fix: the script carries ZERO literals
+   and extracts keys structurally from `upload/…` (never leaves the sandbox) at
+   runtime; re-run measured idempotent (same 5 masked prefixes, 19 vault
+   credentials). **SCAN OK → PUSH OK 9f6c85a + TAG snapshot-20261030-0244.**
+2. **EN pass**: AGENT MAIL + WEB LANES cards fully rewritten in EN (badges,
+   feeds, toasts, placeholders, aria-labels) — panel language is consistent
+   again.
+3. **Threads** (the "threads" promised in the P2 surface, §4.3):
+   `listAgentMailThreads` (lib) + `GET /api/connectors/agentmail/threads` +
+   an inbox⇄threads toggle in the AGENT MAIL card. Thread rows are mapped
+   defensively (field names picked with fallbacks — the live feed decides).
+4. **Daily digest** (§7.3): `buildAgentMailDigest` (Istanbul calendar-day
+   aggregates: InteractionLog ok/error/viewers/latency/models, UsageEvent
+   llm/image, vault count, backup state — DB+fs only) +
+   `sendDailyDigest` (yesterday → owner) + `POST /api/connectors/agentmail/digest`
+   (body `{}` sends, `{preview:true}` builds without sending) + card buttons
+   (send now / preview).
+5. **Mail→bot command lane** (P3, §4.2 design, pull-based — no webhook needed):
+   `pollAgentMailCommands` + `POST /api/connectors/agentmail/commands`.
+   **Triple gate** before any execution, exactly as the platform docs
+   prescribe: (1) sender = owner only (`specimba@gmail.com`, display-name
+   aware), (2) `agent_armor.verdict === "clear"` — "review"/"unavailable"
+   treated exactly as the docs tell listing agents to treat held mail,
+   (3) strict subject whitelist `help|status|digest|ping|uptime` (optionally
+   `nexus <cmd>`) — no LLM, no body parsing, no injection surface. Replies ride
+   the send lane. Cursor semantics (Setting `agentmail.commands.cursor`):
+   initialized to now (mail predating the feature is never auto-executed);
+   owner messages still armor-"pending" stay behind the cursor and are
+   re-examined next poll (scans finish in seconds; "unavailable" is terminal
+   and advances past).
+6. **Cadence**: `scripts/mail-cadence.ts` (one-shot: command poll every run +
+   digest once per Istanbul day in the 05:00–12:00 window, dedupe =
+   Setting `agentmail.digest.lastDate` — a panel digest never claims the day)
+   spawned by `mini-services/mail-cadence` (:3013, every 30 min, registered in
+   scripts/spawn-minis.ts). First live runs measured honest: `COMMANDS OK:
+   scanned 11, nothing to run (…old 11)` + `DIGEST SKIP: outside window`.
+
+**§7 queue after this pass:** #2 webhook-push half only; #3 closed; #1/#4/#5
+remain (SELECT window, Supermemory key, InstaCloud).
 
 ---
 

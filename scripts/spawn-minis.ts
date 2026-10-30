@@ -58,6 +58,15 @@ const SERVICES: Array<{ dir: string; cmd: string; log: string; hint: string; lab
     log: "/home/z/my-project/mini-services/mem-watchdog/watchdog.log",
     hint: "bun",
   },
+  {
+    // 2026-10-30 v37.3: mail-cadence (:3013) — AgentMail command-lane poll +
+    // daily digest; runs scripts/mail-cadence.ts every 30 min.
+    label: "mail-cadence",
+    dir: "/home/z/my-project/mini-services/mail-cadence",
+    cmd: "exec bun run dev >> /home/z/my-project/.zscripts/mini-service-mail-cadence.log 2>&1 < /dev/null",
+    log: "/home/z/my-project/.zscripts/mini-service-mail-cadence.log",
+    hint: "bun",
+  },
 ];
 
 /** Live process with cwd === dir and cmdHint in its cmdline, or null. */
