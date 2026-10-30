@@ -3,6 +3,21 @@
 All notable changes to NEXUS OS are documented here. Format: Keep-a-Changelog-lite;
 versions map to milestone gates. Dates are 2026 sandbox time.
 
+## [v38.3] — 2026-10-30 — Emote-dupe key normalization + full state restoration after recycle #2
+
+The second same-day sandbox recycle (18:30Z) reset the workspace to the Oct-29 19:15+03 state — v38.2 (morning) and the first v38.3 (midday) both died unpushed (the GitHub token died with the vault in recycle #1's aftermath). Restored via the owner's Drive artifacts + the GitHub chain, then the fix re-applied and improved.
+
+### Fixed
+- **Emote-lane key mismatch (the 2026-10-30 live emote-dupe class)**: the same viewer message arrives on two lanes with different emote token forms — the webhook strips numeric `[emote:<digits>:<name>]` at the door (EMOTE_RE) while the OBS overlay renders name-only `[emote:<name>]` and passes it to `/api/brain/cortex` + `/api/brain/log` unstripped. trim+lowercase+collapse keyed the forms apart → echo guard, single-flight and row-dedupe all missed → the second lane double-generated or bounced off the 8s rate guard ("Hız limiti…" as a second row — the smoking gun in the recovered log: berxx `[emote:5748014:collectiblesSCATTER]` @ Oct-27 22:33Z, 1686ms guard-path reply). Fix: shared `emoteFreeNorm()` (`/\[emote:[^\]]*\]/gi` → space, literal prefix so `[link]`/`[spoiler]` untouched, **result trimmed** — edge-position emotes leave edge spaces that collapse-only normalization doesn't trim) consumed by BOTH identity keys: `echoKey()` (echo guard + single-flight + result trail) and `interactionRowDuplicate()` (row dedupe — stripped before clamp so both lane forms clamp at the same offset).
+
+### Added
+- `scripts/probe-v383-emote-key.ts` — PREFIX/POSTFIX probe: runs row-identity checks against the pristine pre-fix module (DEFECT-CONFIRMED) and the fixed module (PASS), plus live lanes: P1 real generation → P2/P3 emote-form replays (cortex-echo, identical reply, ~9-11ms, zero rate-guard) and B4 true in-flight JOIN (follower with emote form fired 120ms mid-generation returns the leader's identical reply). ALL PASS 17/17.
+- Restoration chain: v9 tar (01:32+03: .git + worklog + artifacts) + newest Drive zip (06:51+03 src: v37.2-37.5, v38, four connectors) + remote tip e5a0238 (07:26+03: worklog 2409 lines + seal 07:18+03) → worktree at the latest state anywhere + the re-applied fix → **PUSH OK c3af82a + TAG snapshot-20261030-2257** (files-changed 2 — exactly the fix + probe).
+
+### Notes
+- No schema/deps/Caddyfile changes (byte-identical across all layers). DB untouched (owner's seal-restore + fresh GitHub credential preserved). The 22:29 cadence double-boot race (exit-5 diverged + exit-4 fetch-lock fail-open) is documented in the worklog; the rejected push proved the re-minted token authenticates.
+- Recurrence note (RSI Ledger, 2nd occurrence): "shipped-but-unpushed work dies on recycle" — now mitigated: token live, chain current, 6h cadence + auto-reseal bound the next unpushed window.
+
 ## [v38.0] — 2026-10-30 — Double-reply incident fix: send-ladder ambiguous-failure guard + 60s send-side idempotency
 
 Live incident (reported in chat 04:37 +03 by Robotic_Darkelf_Jedi: "yukarda bir mesajima iki cevap atti, kayitlara gecsin"): one viewer `!ai` message drew TWO identical bot replies in live Kick chat. The InteractionLog held one row per exchange (its row dedupe hides identical seconds), so the duplication lived at the transport.
