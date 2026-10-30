@@ -30,7 +30,7 @@
  * ok/via/modelCount/error-code ONLY. No tokens, no passwords, no bodies (P7).
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync, unlinkSync, readlinkSync } from "node:fs";
 
 const PORT = 3012;
 const PROJECT_ROOT = "/home/z/my-project";
@@ -57,6 +57,10 @@ type KindResult = {
 
 let token: string | null = null; // in-memory only — NEVER logged (P7)
 let password: string | null = null; // in-memory only — NEVER logged (P7)
+// v38.4 (cron-20261031-0021): honest distinction between "the panel answered
+// with a rejection" and "we could not talk to the panel at all" — the old
+// single "panel-unreachable" label masked a live 401 login storm for hours.
+let lastPanelFailure: "login-exhausted" | "panel-unreachable" | null = null;
 let running = false;
 let lastRunAt: number | null = null;
 let nextRunAt: number | null = null;
@@ -112,7 +116,11 @@ function loadPanelPassword(): string | null {
 }
 
 async function panelLogin(): Promise<boolean> {
-  if (!password) password = loadPanelPassword();
+  // v38.4: RELOAD the password on EVERY login attempt (boot, backoff retry,
+  // 401 recovery). The old cache-once made a pre-restore generation storm
+  // 401s forever after the workspace restore swapped .env — the file was
+  // re-read never, so the new PANEL_PASSWORD was invisible to it.
+  password = loadPanelPassword();
   if (!password) {
     log(`[bench-cadence ${new Date().toISOString()}] login failed=PANEL_PASSWORD missing from ${ENV_PATH}`);
     return false;
@@ -175,9 +183,11 @@ async function panelFetch(
       return res;
     } catch {
       token = null;
+      lastPanelFailure = "panel-unreachable";
       return null; // transport-level panel failure — retry next cycle honestly
     }
   }
+  lastPanelFailure = "login-exhausted";
   return null;
 }
 
@@ -197,7 +207,8 @@ async function runCycle(trigger: string): Promise<{ accepted: boolean; results: 
     const getRes = await panelFetch("/api/benchmarks");
     if (!getRes || !getRes.ok) {
       const status = getRes ? getRes.status : null;
-      log(`[bench-cadence ${started}] trigger=${trigger} get=/api/benchmarks failed${status !== null ? ` http=${status}` : "=panel-unreachable"}`);
+      const why = status !== null ? ` http=${status}` : `=${lastPanelFailure ?? "panel-unreachable"}`;
+      log(`[bench-cadence ${started}] trigger=${trigger} get=/api/benchmarks failed${why}`);
       return { accepted: true, results: null };
     }
     const body = (await getRes.json().catch(() => null)) as
@@ -233,7 +244,7 @@ async function runCycle(trigger: string): Promise<{ accepted: boolean; results: 
       timeoutMs: REFRESH_TIMEOUT_MS,
     });
     if (!postRes) {
-      log(`[bench-cadence ${started}] trigger=${trigger} refresh=panel-unreachable (retry next cycle)`);
+      log(`[bench-cadence ${started}] trigger=${trigger} refresh=${lastPanelFailure ?? "panel-unreachable"} (retry next cycle)`);
       return { accepted: true, results: null };
     }
     if (postRes.status === 429) {
@@ -288,57 +299,162 @@ async function runCycle(trigger: string): Promise<{ accepted: boolean; results: 
 // ---------------------------------------------------------------------------
 // HTTP surface
 // ---------------------------------------------------------------------------
+// v38.4 (cron-20261031-0021) — two hardening layers born from the measured
+// incident: a bun --hot reload during the 2026-10-30 restore overlay stacked
+// timer generations in one pid (double cycles, a zombie 401-storming
+// generation with a stale cached PANEL_PASSWORD) and finally left a ZOMBIE
+// SERVER: /health answered while the interval generation was dead (log silent
+// 20:59Z→00:55Z, nextRunAt 3.5h in the past).
+//   Layer 1 — cross-process single-instance pidfile guard (same doctrine as
+//   mem-watchdog): a second launch whose pid differs from a live service-cwd
+//   process exits honestly instead of stacking.
+//   Layer 2 — generation-safe timers on globalThis: a --hot re-eval first
+//   tries its own Bun.serve; only if the port was won does it clear the
+//   previous generation's timers and schedule its own. A failed serve
+//   (port owned by the live generation) stands down WITHOUT touching the
+//   previous generation's timers — fail-open, the old generation keeps
+//   running. One pid fires each cycle at most once, ever.
+const PID_FILE = `${PROJECT_ROOT}/.zscripts/bench-cadence.pid`;
 
-Bun.serve({
-  port: PORT,
-  fetch(req) {
-    const url = new URL(req.url);
-    if (url.pathname === "/health") {
-      return Response.json({
-        ok: true,
-        service: "bench-cadence",
-        intervalMs: CHECK_INTERVAL_MS,
-        minKindGapMs: MIN_KIND_GAP_MS,
-        staleAfterHours: STALE_AFTER_HOURS,
-        running,
-        lastRunAt: lastRunAt ? new Date(lastRunAt).toISOString() : null,
-        nextRunAt: nextRunAt ? new Date(nextRunAt).toISOString() : null,
-        lastResults,
-      });
+function pidAliveAndOurs(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+  } catch {
+    return false;
+  }
+  try {
+    return readlinkSync(`/proc/${pid}/cwd`).endsWith("/mini-services/bench-cadence");
+  } catch {
+    return false;
+  }
+}
+
+function acquireSingleInstance(): boolean {
+  try {
+    const prev = parseInt(readFileSync(PID_FILE, "utf8").trim(), 10);
+    if (Number.isFinite(prev) && prev !== process.pid && pidAliveAndOurs(prev)) {
+      log(`[bench-cadence ${new Date().toISOString()}] second launch refused: pid ${prev} already serving — exiting`);
+      return false;
     }
-    if (url.pathname === "/run" && req.method === "POST") {
-      // Awaited so the response is honest about what actually happened.
-      return runCycle("http").then((r) =>
-        Response.json({
+  } catch {
+    /* no/stale pidfile — proceed */
+  }
+  try {
+    writeFileSync(PID_FILE, String(process.pid));
+  } catch {
+    /* best-effort; single-instance is a guard, not a dependency */
+  }
+  return true;
+}
+
+if (!acquireSingleInstance()) process.exit(0);
+for (const sig of ["SIGTERM", "SIGINT"] as const) {
+  process.on(sig, () => {
+    try {
+      if (readFileSync(PID_FILE, "utf8").trim() === String(process.pid)) unlinkSync(PID_FILE);
+    } catch {
+      /* best-effort */
+    }
+    process.exit(0);
+  });
+}
+
+const GEN_KEY = "__nexusBenchCadenceTimers";
+const g = globalThis as Record<string, unknown>;
+const generation = Number(g.__nexusBenchCadenceGen ?? 0) + 1;
+g.__nexusBenchCadenceGen = generation;
+g.__nexusBenchCadenceStartedAt = new Date().toISOString();
+// Per-evaluation timer registry. Only a generation that WINS the port claims
+// the global slot (g[GEN_KEY] = myTimers below) — a stand-down generation must
+// never replace the winner's registry, or the next reload would clear an
+// empty array and leak the live generation's timers forever.
+const myTimers: unknown[] = [];
+const track = <T>(t: T): T => {
+  myTimers.push(t);
+  return t;
+};
+
+let serveWon = false;
+try {
+  Bun.serve({
+    port: PORT,
+    fetch(req) {
+      const url = new URL(req.url);
+      if (url.pathname === "/health") {
+        return Response.json({
           ok: true,
-          accepted: r.accepted,
-          results: r.results,
-          reason: r.accepted ? undefined : "dropped: a cycle is already running",
-        }),
-      );
+          service: "bench-cadence",
+          intervalMs: CHECK_INTERVAL_MS,
+          minKindGapMs: MIN_KIND_GAP_MS,
+          staleAfterHours: STALE_AFTER_HOURS,
+          generation,
+          startedAt: g.__nexusBenchCadenceStartedAt,
+          pid: process.pid,
+          running,
+          lastRunAt: lastRunAt ? new Date(lastRunAt).toISOString() : null,
+          nextRunAt: nextRunAt ? new Date(nextRunAt).toISOString() : null,
+          lastResults,
+        });
+      }
+      if (url.pathname === "/run" && req.method === "POST") {
+        // Awaited so the response is honest about what actually happened.
+        return runCycle("http").then((r) =>
+          Response.json({
+            ok: true,
+            accepted: r.accepted,
+            results: r.results,
+            reason: r.accepted ? undefined : "dropped: a cycle is already running",
+          }),
+        );
+      }
+      return new Response("bench-cadence: see /health", { status: 404 });
+    },
+  });
+  serveWon = true;
+} catch (err) {
+  log(
+    `[bench-cadence ${new Date().toISOString()}] generation ${generation} serve failed (${err instanceof Error ? err.message : "unknown"}) — standing down, existing generation keeps :${PORT}`,
+  );
+}
+
+// Only the generation that WON the port schedules timers; it inherits and
+// clears whatever timers an earlier generation left behind (hot-reload stack).
+if (serveWon) {
+  const prevTimers = g[GEN_KEY] as unknown[] | undefined;
+  if (Array.isArray(prevTimers)) {
+    for (const t of prevTimers) {
+      clearTimeout(t as never);
+      clearInterval(t as never);
     }
-    return new Response("bench-cadence: see /health", { status: 404 });
-  },
-});
+    log(
+      `[bench-cadence ${new Date().toISOString()}] generation ${generation}: cleared ${prevTimers.length} inherited timer(s) from a previous generation`,
+    );
+  }
+  g[GEN_KEY] = myTimers;
 
 // ---------------------------------------------------------------------------
 // Boot
 // ---------------------------------------------------------------------------
 
-nextRunAt = Date.now() + FIRST_DELAY_MS;
-log(
-  `[bench-cadence ${new Date().toISOString()}] listening on :${PORT} — staleness check every ${CHECK_INTERVAL_MS / 60000} min (first in ${FIRST_DELAY_MS / 1000} s), stale after ${STALE_AFTER_HOURS} h, per-kind min-gap ${MIN_KIND_GAP_MS / 60000} min`,
-);
+  nextRunAt = Date.now() + FIRST_DELAY_MS;
+  log(
+    `[bench-cadence ${new Date().toISOString()}] listening on :${PORT} (pid ${process.pid}, generation ${generation}) — staleness check every ${CHECK_INTERVAL_MS / 60000} min (first in ${FIRST_DELAY_MS / 1000} s), stale after ${STALE_AFTER_HOURS} h, per-kind min-gap ${MIN_KIND_GAP_MS / 60000} min`,
+  );
 
-setTimeout(async () => {
-  await runCycle("boot");
-  nextRunAt = Date.now() + CHECK_INTERVAL_MS;
-}, FIRST_DELAY_MS);
+  track(
+    setTimeout(async () => {
+      await runCycle("boot");
+      nextRunAt = Date.now() + CHECK_INTERVAL_MS;
+    }, FIRST_DELAY_MS),
+  );
 
-setInterval(async () => {
-  await runCycle("interval");
-  nextRunAt = Date.now() + CHECK_INTERVAL_MS;
-}, CHECK_INTERVAL_MS);
+  track(
+    setInterval(async () => {
+      await runCycle("interval");
+      nextRunAt = Date.now() + CHECK_INTERVAL_MS;
+    }, CHECK_INTERVAL_MS),
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Watchdog sitter (cron-20261028-0825)
@@ -396,10 +512,19 @@ function spawnWatchdog(): void {
   }
 }
 
-setInterval(() => {
-  if (!watchdogRunning()) spawnWatchdog();
-}, SITTER_INTERVAL_MS);
-// One boot-delayed probe too (the boot cycle waits 30s; the sitter acts sooner).
-setTimeout(() => {
-  if (!watchdogRunning()) spawnWatchdog();
-}, 10_000);
+// v38.4: the sitter's timers ride the same generation-safe registry — a stale
+// hot-reload generation must never keep a duplicate sitter probe alive (the
+// duplicate-sitter class is how two mem-watchdogs ended up running tonight).
+if (serveWon) {
+  track(
+    setInterval(() => {
+      if (!watchdogRunning()) spawnWatchdog();
+    }, SITTER_INTERVAL_MS),
+  );
+  // One boot-delayed probe too (the boot cycle waits 30s; the sitter acts sooner).
+  track(
+    setTimeout(() => {
+      if (!watchdogRunning()) spawnWatchdog();
+    }, 10_000),
+  );
+}
