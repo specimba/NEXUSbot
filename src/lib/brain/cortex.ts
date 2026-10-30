@@ -2909,6 +2909,27 @@ export type ConvoTurn = { role: "user" | "assistant"; content: string; ts: numbe
 const CONVO_RING_TTL_MS = 45 * 60_000;
 const CONVO_RING_MAX_PER_SENDER = 30;
 
+// v38.3 — EMOTE-FREE KEY NORMALIZATION (shared helper). The two chat
+// lanes carry the SAME viewer message with DIFFERENT emote token forms:
+// the webhook lane strips numeric [emote:<digits>:<name>] at the door
+// (EMOTE_RE, webhook route) while the OBS overlay lane renders name-only
+// [emote:<name>] and passes it through to /api/brain/cortex +
+// /api/brain/log UNSTRIPPED. trim+lowercase+collapse alone keyed the two
+// forms apart → echo guard, single-flight and result-trail all missed →
+// the second lane double-generated (or bounced off RATE_GUARD) — the
+// 2026-10-30 live emote-dupe class. Both identity-key consumers below
+// (echoKey + interactionRowDuplicate) normalize through this helper so
+// every emote form of one message resolves to ONE identity. Literal
+// "emote:" prefix only — [link]/[spoiler] and other brackets untouched.
+// The result is TRIMMED: an emote at the string edge leaves an edge space
+// after stripping, and the row key's collapse only squeezes INTERNAL runs —
+// without the trim, "[emote:x] selam" and "selam" would still key apart
+// (probe A3). The webhook door-strip already trim()s; this brings the shared
+// helper to the same contract.
+function emoteFreeNorm(text: string): string {
+  return text.replace(/\[emote:[^\]]*\]/gi, " ").trim();
+}
+
 function echoKey(sender: string, prompt: string): string {
   // v31.5 — INTERNAL WHITESPACE COLLAPSE. The 08:36 +03 owner paste: the
   // webhook lane collapses runs of spaces ("@naturaldai bu kim") while the
@@ -2918,7 +2939,9 @@ function echoKey(sender: string, prompt: string): string {
   // duplicate row carrying a DIFFERENT response than the chat actually got.
   // Every consumer of this key (echo guard, single-flight coalescing, result
   // trail) must treat whitespace runs as insignificant.
-  const norm = prompt.trim().toLowerCase().replace(/\s+/g, " ").slice(0, 200);
+  // v38.3 — emote tokens stripped BEFORE collapse/slice so both lane forms
+  // (numeric-stripped webhook vs name-only overlay) share one key.
+  const norm = emoteFreeNorm(prompt).trim().toLowerCase().replace(/\s+/g, " ").slice(0, 200);
   return `${sender.toLowerCase()}::${norm}`;
 }
 
@@ -3224,8 +3247,12 @@ export function interactionRowDuplicate(
   // carries the prompt as typed ("@naturaldai  bu kim") while the webhook row
   // carries it collapsed — without this they are two different rows for one
   // exchange, which is exactly the doubled-row class in the owner's paste.
-  const msgNorm = clampStr(message, 200).toLowerCase().replace(/\s+/g, " ");
-  const resNorm = clampStr(response, 120).toLowerCase().replace(/\s+/g, " ");
+  // v38.3 — emote tokens stripped BEFORE clamping (clamp would otherwise
+  // truncate the emote-laden lane at a different offset than the stripped
+  // lane, re-splitting the key): both lane forms of one message collapse to
+  // the same row identity within the TTL.
+  const msgNorm = clampStr(emoteFreeNorm(message), 200).toLowerCase().replace(/\s+/g, " ");
+  const resNorm = clampStr(emoteFreeNorm(response), 120).toLowerCase().replace(/\s+/g, " ");
   const key = `${(username || "").toLowerCase()}::${msgNorm}::${resNorm}`;
   const now = Date.now();
   if (recentLogRows.size > 400) {
