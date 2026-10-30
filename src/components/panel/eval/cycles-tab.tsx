@@ -224,7 +224,13 @@ function CycleDetail({ cycleId, onClosed }: { cycleId: string; onClosed: () => v
   const detail = useQuery<RsiCycleDetail>({
     queryKey: ["rsi-cycle-detail", cycleId],
     queryFn: () => fetchRsiJson<RsiCycleDetail>(`/api/rsi/cycles/${cycleId}`),
-    refetchInterval: 10_000,
+    // v38 — was an unconditional 10s poll. Terminal cycles (aborted/promoted/
+    // rejected) are immutable — polling them forever burned API + render work
+    // on the long-lived tab. Poll only while the cycle can still advance.
+    refetchInterval: (query) => {
+      const st = query.state.data?.cycle.status;
+      return st && !isTerminal(st) ? 10_000 : false;
+    },
   });
 
   const invalidate = () => {
@@ -496,7 +502,16 @@ function CycleDetail({ cycleId, onClosed }: { cycleId: string; onClosed: () => v
             <p className="text-sm text-muted-foreground">No events recorded.</p>
           ) : (
             <div className={cn("max-h-96 space-y-1", LIST_SCROLLBAR)} aria-label="Cycle event chain">
-              {d.events.map((e) => (
+              {/* v38 — render cap: the ledger grows monotonically per cycle;
+                 long chains re-rendered uncapped every (formerly unconditional)
+                 poll tick. Show the newest 60; the count below stays the full
+                 chain length. */}
+              {d.events.length > 60 ? (
+                <p className="px-1 pb-1 font-mono text-[10px] text-muted-foreground">
+                  showing latest 60 of {d.events.length} (chain-verified count above)
+                </p>
+              ) : null}
+              {d.events.slice(-60).map((e) => (
                 <div key={e.id} className="flex flex-wrap items-center gap-2 rounded-md border border-border/50 px-2.5 py-1.5">
                   <Badge variant="outline" className="shrink-0 font-mono text-[10px] text-muted-foreground">
                     #{String(e.seq).padStart(2, "0")}

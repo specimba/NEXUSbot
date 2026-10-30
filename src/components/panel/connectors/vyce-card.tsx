@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Toaster } from "@/components/ui/sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { VyceStatusPayload } from "@/lib/connectors/vyce";
 import { cn } from "@/lib/utils";
@@ -25,9 +24,8 @@ import { AlertTriangle, BrainCircuit, KeyRound, PlugZap, RefreshCw, Trash2 } fro
  * again — the card only ever receives a masked ••••tail preview. The Supabase
  * edge-secret fallback path is surfaced as a note (no value ever displayed).
  *
- * Toast note: the task mandates sonner; the root layout mounts only the radix
- * <Toaster/>, so the sonner <Toaster/> is mounted at this card's root (same
- * pattern as durability-card).
+ * Toast note: the task mandates sonner; the root layout now mounts the ONE
+ * global sonner <Toaster/> (v38 dedupe — cards no longer mount their own).
  */
 
 type StatusResponse = { ok: true; status: VyceStatusPayload };
@@ -180,7 +178,6 @@ export function VyceCard() {
 
   return (
     <Card>
-      <Toaster position="bottom-right" richColors closeButton />
       <CardHeader className="flex-row items-start justify-between space-y-0 pb-3">
         <div className="space-y-1">
           <CardTitle className="flex items-center gap-2 font-mono">

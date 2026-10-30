@@ -28,7 +28,6 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { Toaster } from "@/components/ui/sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
@@ -780,7 +779,6 @@ export function CustomProvidersCard() {
 
   return (
     <Card>
-      <Toaster position="bottom-right" richColors closeButton />
       <CardHeader className="flex-row items-start justify-between space-y-0 pb-3">
         <div className="space-y-1">
           <CardTitle className="flex items-center gap-2 font-mono">

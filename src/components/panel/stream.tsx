@@ -280,7 +280,11 @@ export function StreamTab() {
           ) : (
             <ul
               className="max-h-96 divide-y divide-border/60 overflow-y-auto pr-1"
-              aria-live="polite"
+              // v38 — aria-live="polite" on a 100-child <ul> made Chrome
+              // recompute live-region announcements for the whole mutated list
+              // on every 10s poll tick (freeze report 2026-10-31). The list
+              // itself stays scrollable/keyboard-navigable without the live
+              // region.
             >
               {visible.map((e) => (
                 <li key={e.id} className="flex items-center justify-between gap-2 py-2.5">

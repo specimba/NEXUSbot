@@ -10,7 +10,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
-import { Toaster } from "@/components/ui/sonner";
 import { cn } from "@/lib/utils";
 import {
   AlertTriangle,
@@ -258,7 +257,6 @@ export function KickCard() {
 
   return (
     <>
-      <Toaster richColors position="bottom-right" />
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between gap-2">

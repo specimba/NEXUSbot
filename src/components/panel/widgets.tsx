@@ -28,7 +28,6 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Toaster } from "@/components/ui/sonner";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
@@ -270,16 +269,19 @@ function WidgetEditor({
   const [draft, setDraft] = useState<Draft>(() => toDraft(widget));
   const [saved, setSaved] = useState<Draft>(() => toDraft(widget));
   const [previewDoc, setPreviewDoc] = useState<string>(() =>
-    buildWidgetDocument({
-      id: widget.id,
-      name: widget.name || "widget",
-      width: widget.width,
-      height: widget.height,
-      html: widget.html,
-      css: widget.css,
-      js: widget.js,
-      variables: widget.variables,
-    }),
+    buildWidgetDocument(
+      {
+        id: widget.id,
+        name: widget.name || "widget",
+        width: widget.width,
+        height: widget.height,
+        html: widget.html,
+        css: widget.css,
+        js: widget.js,
+        variables: widget.variables,
+      },
+      { preview: true },
+    ),
   );
   const [previewGen, setPreviewGen] = useState(0);
   const [previewSource, setPreviewSource] = useState<"saved" | "draft">("saved");
@@ -541,16 +543,19 @@ function WidgetEditor({
   const applyToPreview = useCallback(
     (source: Draft, origin: "saved" | "draft") => {
       setPreviewDoc(
-        buildWidgetDocument({
-          id: widget.id,
-          name: source.name || "widget",
-          width: source.width,
-          height: source.height,
-          html: source.html,
-          css: source.css,
-          js: source.js,
-          variables: serializeWidgetVariables(source.variables),
-        }),
+        buildWidgetDocument(
+          {
+            id: widget.id,
+            name: source.name || "widget",
+            width: source.width,
+            height: source.height,
+            html: source.html,
+            css: source.css,
+            js: source.js,
+            variables: serializeWidgetVariables(source.variables),
+          },
+          { preview: true },
+        ),
       );
       setPreviewGen((g) => g + 1);
       setPreviewSource(origin);
@@ -593,8 +598,6 @@ function WidgetEditor({
 
   return (
     <div className="space-y-4">
-      <Toaster position="bottom-right" richColors closeButton />
-
       <div className="flex flex-wrap items-center gap-2">
         <Button variant="ghost" className="min-h-11 font-mono" onClick={onBack} aria-label="Back to widget list">
           <ArrowLeft className="size-4" aria-hidden="true" />

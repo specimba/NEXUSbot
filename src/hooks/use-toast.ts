@@ -9,7 +9,11 @@ import type {
 } from "@/components/ui/toast"
 
 const TOAST_LIMIT = 1
-const TOAST_REMOVE_DELAY = 1000000
+// v38 — was 1_000_000 (~16.7 min): every dismissed toast kept its object in
+// memoryState plus a live setTimeout for a quarter hour on the owner's
+// long-lived panel tab (freeze report 2026-10-31, "Page unresponsive").
+// 5s is plenty for the exit animation.
+const TOAST_REMOVE_DELAY = 5_000
 
 type ToasterToast = ToastProps & {
   id: string

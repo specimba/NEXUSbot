@@ -9,7 +9,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Toaster } from "@/components/ui/sonner";
 import { Music4, PlugZap, Link2Off, Trash2, Copy, AlertTriangle, Check } from "lucide-react";
 
 /**
@@ -193,7 +192,6 @@ export function SpotifyCard() {
 
   return (
     <>
-      <Toaster richColors position="bottom-right" />
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between gap-2">

@@ -6,7 +6,6 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Toaster } from "@/components/ui/sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import {
@@ -36,9 +35,10 @@ import {
  * P7: no token value is ever requested, stored or rendered here — the card
  * only ever sees a boolean `tokenPresent`. Log tails are server-scrubbed.
  *
- * Note on toasts: the task mandates sonner; the root layout mounts only the
- * radix <Toaster/> and layout edits are outside this task's file scope, so the
- * sonner <Toaster/> is mounted once at this card's root instead.
+ * Note on toasts: the task mandates sonner;
+ * v38: the root layout now mounts ONE global sonner <Toaster/> (dedupe of
+ * five simultaneously-mounted card-level toasters — Connectors tab — that
+ * doubled render/subscription work on the long-lived panel tab).
  */
 
 type BackupStatus = {
@@ -250,9 +250,6 @@ export function DurabilityCard() {
 
   return (
     <Card>
-      {/* Sonner toaster (see note above) — scoped to this card per task file scope. */}
-      <Toaster position="bottom-right" closeButton />
-
       <CardHeader className="flex-row items-start justify-between space-y-0 pb-3">
         <div className="space-y-1.5">
           <CardTitle className="flex items-center gap-2 font-mono">

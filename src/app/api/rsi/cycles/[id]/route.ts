@@ -47,7 +47,9 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
       status: cycle.status,
       stageData: cycle.stageData,
       baselineSnapshotChars: cycle.baselineSnapshot.length,
-      baselineSnapshot: cycle.baselineSnapshot,
+      // v38 — the full snapshot text (6.8 KB+ today, grows with lore) was
+      // shipped on EVERY 10s detail poll but never rendered (chars only).
+      // Strip it; the runner reads it server-side from the DB row directly.
       pluginId: cycle.pluginId,
       suiteIds: cycle.suiteIds,
       gateResults: cycle.gateResults,

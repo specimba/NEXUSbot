@@ -464,7 +464,25 @@ const TIME_RE =
 const STATUS_RE =
   /(yoğun\s*mu|yogun\s*mu|meşgul\s*mü|mesgul\s*mü|meşgul|busy|hatlar\s*açık|bağlantılar|baglantilar|durum\s*(?:ne|nedir|napıyorsun)|status|çalışıyor\s*musun|calisiyor\s*musun|ne\s*yapıyorsun|ai\s*durumu)/i;
 const RESEARCH_RE =
-  /(araştır|arastir|gündem|gundem|son\s*dakika|en\s*son|yeni\s*çıkan|yeni\s*cikan|\bhaber\b|\bkimdir\b|kim\s*bu|\bkim\b|\bnedir\b|\bnasıl\b|\bnasil\b|\bniçin\b|\bneden\b|\bne\s*oldu\b|hakk[ıi]nda|kaç\s*tl|kac\s*tl|\bfiyat\b|\bskor\b|maç|\bbitcoin\b|\bdolar\b|\beuro\b|\baltın\b|hava\s*durumu|\bwhen\b|\bwho\s*is\b|\bwhat\s*is\b|\bhow\s*(?:to|do)\b|\bnews\b|\blatest\b|\bprice\b|\bscore\b)/i;
+  /(araştır|arastir|gündem|gundem|son\s*dakika|en\s*son|yeni\s*çıkan|yeni\s*cikan|\bhaber\b|\bkimdir\b|kim\s*bu|\bkim\b|\bnedir\b|\bnasıl\b|\bnasil\b|\bniçin\b|\bneden\b|\bne\s*oldu\b|(?:neler|ne)\s*oluyo(?:r)?\b|ne\s*d[öo]n[uü]yor|oluyo(?:r)?\s*m[ıi]\b|son\s*durum|g[uü]ncel(?:\s*(?:durum|bilgi|veri|haber))?\b|bulam[ıi]y(?:o|or)|aras[ıia]na\b|hakk[ıi]nda|kaç\s*tl|kac\s*tl|\bfiyat\b|\bskor\b|maç|\bbitcoin\b|\bdolar\b|\beuro\b|\baltın\b|hava\s*durumu|\bwhen\b|\bwho\s*is\b|\bwhat\s*is\b|\bhow\s*(?:to|do)\b|\bnews\b|\blatest\b|\bprice\b|\bscore\b)/i;
+// v38 — CURRENT-EVENTS shapes added to RESEARCH_RE after the 2026-10-31
+// 00:59–01:07 +03 live class (owner-flagged "dumbness" rows): "polonyada
+// neler oluyor" and "yani polonyada darbe oluyo ve sen bunu bulamıyo musun
+// amk" both fell to CHAT lanes that honestly said "haber akışım yok" while
+// the grounded Exa lane sat armed one route away; "lan exa ile arasana"
+// also missed (no araştır substring). New shapes, all inheriting the
+// upstream guards (BOT_META / SELF_REPLYQ / SMALLTALK ≤80):
+//   (neler|ne) oluyor\b — "what's happening [in X]" (word-boundary keeps
+//     second-person "ne oluyorsun" in CHAT);
+//   oluyo(r) mı — "is X happening?" event checks;
+//   ne dönüyor / son durum / güncel [durum|bilgi|veri|haber] — freshness
+//     asks ("güncelle" does NOT match: \b fails inside the word);
+//   bulamıyo(r) — "you can't find it" complaints → go find it;
+//   arasana/arasına — "search it then" imperatives ("arasında" excluded).
+// Known residual (deferred, needs context-aware query synthesis): bare
+// "bilmiyosan bak amk" research-demands with no topic in the message, and
+// imperative-only research rows ("haber sitelerine bak acil") whose Exa
+// query is built from the raw message instead of the prior topic.
 // v29.18 — capability questions: install/use verb or "X ile" + "neler
 // yapabilirim". ("tablete kali lunix kurunca neler yapabiliyorum" matched NO
 // gate in either brain → refusal "elimde bilgi kaynağı bulunmadığı".)

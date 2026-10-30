@@ -731,6 +731,11 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: transparen
 export type BuiltWidgetDocOptions = {
   /** Bundle mode adds the OBS usage comment header. */
   bundle?: boolean;
+  /** Preview mode (panel editor srcDoc): stubs slow setInterval loops
+   * (≥9s — telemetry/heartbeat fetchers) so the guest widget cannot churn
+   * the shared tab renderer while the operator edits. OBS/bundle exports
+   * are unaffected. v38 freeze report. */
+  preview?: boolean;
 };
 
 /**
@@ -775,6 +780,20 @@ ${widget.html}
 <script>
 ${shim}
 </script>
+${
+  opts.preview
+    ? `<script>
+(function(){
+  "use strict";
+  var _setInterval = window.setInterval.bind(window);
+  window.setInterval = function(fn, ms){
+    if (ms >= 9000) { return 0; }
+    return _setInterval(fn, ms);
+  };
+})();
+</script>`
+    : ""
+}
 <script>
 ${escapeForEmbed(widget.js)}
 </script>

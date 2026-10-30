@@ -147,7 +147,6 @@ export type RsiCycleDetail = {
     status: string;
     stageData: string;
     baselineSnapshotChars: number;
-    baselineSnapshot: string;
     pluginId: string | null;
     suiteIds: string;
     gateResults: string;

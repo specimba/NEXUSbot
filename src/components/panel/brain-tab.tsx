@@ -663,7 +663,7 @@ export function BrainTab() {
   // Benchmarks are delivered by a parallel workstream (R18-c) — missing route,
   // failure or empty entries all degrade silently to alphabetical + the hint.
   const benchmarks = useQuery<BenchmarksResponse>({
-    queryKey: ["brain-benchmarks"],
+    queryKey: ["benchmarks"],
     queryFn: async () => {
       const res = await fetch("/api/benchmarks", { cache: "no-store" });
       if (!res.ok) throw new Error("benchmarks unavailable");

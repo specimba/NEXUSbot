@@ -31,12 +31,18 @@ const execFileAsync = promisify(execFile);
  * allow-downloads eat <a download>.click() with no error and no toast):
  *
  *   1. Session  — plain GET with the panel cookie/Bearer (panel button flow).
- *   2. One-time URL token — POST here (session-gated) mints a single-use
- *      token; GET ?dl=<token> then serves the SAME zip to ANY browser tab
- *      with no cookie at all. The token is hashed at rest, expires in 5
- *      minutes, burns on first successful use, and only ever unlocks this
- *      one zip endpoint. Copy-paste-proof: the owner can always get the file
- *      by pasting the link into a fresh tab, even from a locked-down iframe.
+ *   2. One-time URL token — POST here (session-gated) mints a token; GET
+ *      ?dl=<token> then serves the SAME zip to ANY browser tab with no cookie
+ *      at all. The token is hashed at rest, and only ever unlocks this one zip
+ *      endpoint. Copy-paste-proof: the owner can always get the file by pasting
+ *      the link into a fresh tab, even from a locked-down iframe.
+ *
+ * v38 — token links are now REUSABLE for 30 minutes instead of single-use
+ * 5-minute burners (owner report 2026-10-31: browser restarts after a freeze
+ * killed the link before the zip landed, forcing re-mints). Still hashed at
+ * rest, still zip-scoped, still pruned on expiry — a leaked link is a
+ * 30-minute window to a sanitized SOURCE zip that already rides the public
+ * GitHub snapshot chain.
  */
 const INCLUDE_DIRS = ["src", "prisma", "scripts", "docs", "edge", "mini-services", "ops", "public", ".zscripts"];
 const INCLUDE_FILES = [
@@ -50,10 +56,10 @@ const INCLUDE_FILES = [
   "bun.lock",
 ];
 
-const DOWNLOAD_TOKEN_TTL_MS = 5 * 60 * 1000;
+const DOWNLOAD_TOKEN_TTL_MS = 30 * 60 * 1000;
 
 /** sha256(token) → expiry. Module-scope: survives across requests, dies with
- * the process (which is fine — tokens are 5-minute single-use throwaways). */
+ * the process (which is fine — tokens are 30-minute throwaways). */
 const downloadTokens = new Map<string, number>();
 
 function hashToken(token: string): string {
@@ -114,8 +120,8 @@ export async function GET(req: Request) {
     const hash = hashToken(dlToken);
     const exp = downloadTokens.get(hash);
     if (exp && exp > Date.now()) {
-      // Burn BEFORE building — a token can never be replayed or raced.
-      downloadTokens.delete(hash);
+      // v38 — no burn: the token stays valid until expiry so a browser
+      // restart / retry mid-download can re-fetch the same link.
       tokenAuth = true;
     } else {
       return NextResponse.json(
@@ -123,7 +129,7 @@ export async function GET(req: Request) {
           ok: false,
           error: {
             code: "TOKEN_EXPIRED",
-            message: "This download link was already used or expired (links are single-use, 5 minutes). Press Download workspace again.",
+            message: "This download link expired (links are valid for 30 minutes). Press Download workspace for a fresh one.",
           },
         },
         { status: 410 },
