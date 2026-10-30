@@ -66,6 +66,11 @@ const PKCE_TTL_MS = 10 * 60_000;
 const PUBLIC_KEY_TTL_MS = 60 * 60_000;
 const CHAT_SEND_GAP_MS = 1_500; // polite floor between bot posts
 const HTTP_TIMEOUT_MS = 15_000;
+// v38 — send-side idempotency window: the SAME normalized content posted twice
+// within this window is a double-reply bug, never a feature (2026-10-30 live
+// incident: one viewer !ai message drew TWO identical bot lines in chat).
+const SEND_DEDUPE_MS = 60_000;
+const SEND_DEDUPE_MAX = 64;
 
 export type KickApp = { clientId: string; clientSecret: string };
 
@@ -98,6 +103,8 @@ type KickRuntime = {
   lastChatSentAt: number;
   /** Serialized bot-send queue so bursts never violate the gap. */
   sendChain: Promise<unknown>;
+  /** v38 — sha256(content) → posted-at ms: the send-side double-reply guard. */
+  recentSends: Map<string, number>;
 };
 
 const g = globalThis as typeof globalThis & { __nexusKickRuntime?: KickRuntime };
@@ -111,7 +118,19 @@ const rt: KickRuntime =
     chatroom: null,
     lastChatSentAt: 0,
     sendChain: Promise.resolve(),
+    recentSends: new Map(),
   });
+// v38.1 — SELF-HEALING RUNTIME (live dev incident, caught in dev.log): the
+// globalThis cache survives HMR recompiles, so an older module generation can
+// seed the runtime BEFORE `recentSends` existed — the new code then read
+// `rt.recentSends.get` on undefined and every bot send crashed silently (the
+// webhook's fire-and-forget catch swallowed it; chat went quiet for minutes).
+// Backfilling here (and inside the dedupe helpers) makes any mixed-generation
+// state impossible, in dev AND in production warm reloads.
+if (!rt.recentSends) rt.recentSends = new Map();
+if (!(rt.seenEventIds instanceof Map)) rt.seenEventIds = new Map();
+if (!(rt.pkce instanceof Map)) rt.pkce = new Map();
+if (!(rt.sendChain instanceof Promise)) rt.sendChain = Promise.resolve();
 
 // ---------------------------------------------------------------------------
 // Vault
@@ -660,9 +679,57 @@ const EMOJI_RE = /[\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F\u200D\u
  */
 export type KickSendIdentity = "bot" | "bot+chatroom" | "user";
 
+/**
+ * v38 — SEND-SIDE IDEMPOTENCY (2026-10-30 live incident fix).
+ *
+ * The incident: one viewer !ai message got TWO identical bot replies in live
+ * chat. The DB log showed a single row (interactionRowDuplicate dedupes the
+ * second identical row) — the duplication happened at the TRANSPORT: the
+ * identity ladder below re-POSTs the same content when an earlier attempt
+ * fails AMBIGUOUSLY (timeout / 5xx — cases where Kick may already have
+ * posted the first copy). The ladder now stops on ambiguous failures, and
+ * this window is the belt-and-suspenders: whatever path double-fires
+ * (ladder retry, webhook redelivery, echo miss, future code), the channel
+ * sees the same line ONCE per 60s window.
+ *
+ * `now` is injectable so the verify probe can exercise TTL expiry
+ * deterministically (production always uses Date.now()).
+ */
+export function kickSendDedupeCheck(text: string, now = Date.now()): boolean {
+  rt.recentSends ??= new Map<string, number>(); // mixed-generation guard (v38.1)
+  const key = crypto.createHash("sha256").update(text).digest("hex").slice(0, 32);
+  const at = rt.recentSends.get(key);
+  return typeof at === "number" && now - at < SEND_DEDUPE_MS;
+}
+
+export function kickSendDedupeRecord(text: string, now = Date.now()): void {
+  rt.recentSends ??= new Map<string, number>(); // mixed-generation guard (v38.1)
+  const key = crypto.createHash("sha256").update(text).digest("hex").slice(0, 32);
+  rt.recentSends.set(key, now);
+  if (rt.recentSends.size > SEND_DEDUPE_MAX) {
+    // FIFO prune — same discipline as the webhook seen-id map.
+    const oldest = rt.recentSends.keys().next().value;
+    if (oldest !== undefined) rt.recentSends.delete(oldest);
+  }
+}
+
+/**
+ * v38 — when may the identity ladder advance to the NEXT attempt shape?
+ * ONLY on a definitive rejection: an HTTP status that PROVES Kick did not
+ * post the message (validation 400/422, auth 401, permissions 403, the
+ * historical bot-not-approved 404). Everything else — 408/429/5xx — is
+ * AMBIGUOUS: the request may have been processed server-side, so sending
+ * the same content again would put a SECOND identical line in live chat.
+ * A missed reply is recoverable; a doubled one is not.
+ */
+export function sendLadderAdvance(status: number): boolean {
+  return status === 400 || status === 401 || status === 403 || status === 404 || status === 422;
+}
+
 export async function kickSendBotMessage(
   content: string,
-): Promise<{ ok: boolean; code?: string; messageId?: string; identity?: KickSendIdentity }> {
+  opts?: { allowDuplicate?: boolean },
+): Promise<{ ok: boolean; code?: string; messageId?: string; identity?: KickSendIdentity; deduped?: boolean }> {
   const oauth = await loadKickOAuth();
   if (!oauth) return { ok: false, code: "NOT_CONNECTED" };
   const broadcasterUserId = oauth.account?.userId;
@@ -680,6 +747,12 @@ export async function kickSendBotMessage(
   if (!chatroomId) return { ok: false, code: "NO_CHATROOM" };
 
   const exec = async () => {
+    // v38 — send-side dedupe (inside the serialized chain, so two racing
+    // callers can never both pass the check before either records).
+    if (!opts?.allowDuplicate && kickSendDedupeCheck(text)) {
+      console.info("[kick-send] duplicate suppressed — identical content delivered in the last 60s");
+      return { ok: true, deduped: true, code: "DUPLICATE_SEND" };
+    }
     // Gap enforcement (serialized through the same chain).
     const wait = rt.lastChatSentAt + CHAT_SEND_GAP_MS - Date.now();
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
@@ -715,15 +788,30 @@ export async function kickSendBotMessage(
         if (!res.ok) {
           const detail = (body.message ?? "").slice(0, 160);
           last = { ok: false, code: detail ? `HTTP_${res.status}: ${detail}` : `HTTP_${res.status}` };
+          // v38 — AMBIGUOUS-FAILURE GUARD (the live double-reply root cause):
+          // the old ladder advanced on EVERY failure, so a timeout/5xx — where
+          // Kick may ALREADY have posted this attempt — was followed by an
+          // identical re-POST and the channel got the same line twice. Only a
+          // definitive rejection (4xx shape proving "not posted") may advance.
+          if (!sendLadderAdvance(res.status)) {
+            console.warn(`[kick-send] ambiguous failure (${last.code}) — ladder STOPPED, no re-post`);
+            return last;
+          }
           continue;
         }
         if (body.data?.is_sent === false) {
+          // Explicit "not posted" verdict — definitive, safe to try the next shape.
           last = { ok: false, code: "NOT_SENT" };
           continue;
         }
+        kickSendDedupeRecord(text);
         return { ok: true, messageId: body.data?.message_id, identity: attempt.identity };
       } catch (e) {
+        // Network error / AbortSignal timeout — the POST may be live on Kick's
+        // side already. NEVER re-send the same content after this class.
         last = { ok: false, code: e instanceof Error ? e.message : "NETWORK" };
+        console.warn(`[kick-send] transport failure (${last.code}) — ladder STOPPED, no re-post`);
+        return last;
       }
     }
     return last;

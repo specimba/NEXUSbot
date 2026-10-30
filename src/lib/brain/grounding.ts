@@ -157,7 +157,11 @@ function yayinLine(snap: SpotifySnapshot): string {
   const progress = t.durationMs > 0 ? `, ilerleme ${fmtMs(t.progressMs)}/${fmtMs(t.durationMs)}` : "";
   const url = t.url && !t.isLocal ? `, Spotify: ${t.url}` : "";
   const state = snap.isPlaying ? "çalıyor" : "duraklatılmış";
-  return `YAYIN MÜZİĞİ (panelinden, GERÇEK): şu an ${trackFacts(t)} ${state}${progress}${url}. Sesi duyamazsın ama bu kartı görürsün — müzik sorularına bu veriyle cevap ver, parça adı uydurma.`;
+  // v37.4 — mention≠playback rule (measured live 2026-10-30 04:18: viewer pasted
+  // "Venüs — Ben Senden Vazgeçtim (Official Video)" and the model said "Venüs
+  // dinliyoruz" while this card said Epica; owner had to correct on-stream).
+  // A bare track-title message is a MENTION/RECOMMENDATION, never playback state.
+  return `YAYIN MÜZİĞİ (panelinden, GERÇEK): şu an ${trackFacts(t)} ${state}${progress}${url}. Sesi duyamazsın ama bu kartı görürsün — müzik sorularına bu veriyle cevap ver, parça adı uydurma. Chat'te yazılan şarkı adı BAHİS'tir, çalan parça DEĞİLDİR: çalanı yalnız bu kart bilir; kartla çelişen adı "dinliyoruz" deme, öneri/bahis diye ayır.`;
 }
 
 // ---------------------------------------------------------------------------

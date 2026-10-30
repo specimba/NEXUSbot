@@ -31,6 +31,9 @@ export async function POST(req: Request) {
       ? body.content.trim().slice(0, 480)
       : "VYCE hattı canlı — Kick bağlantısı kuruldu.";
 
+  // v38 — no allowDuplicate escape hatch on purpose: a manual re-test of the
+  // SAME line inside 60s is exactly the double-post class the guard exists
+  // for. The response says so honestly instead of pretending a fresh send.
   const res = await kickSendBotMessage(content);
   if (!res.ok) {
     // Surface the REAL Kick rejection (e.g. "HTTP_422: chatroom_id required")
@@ -46,5 +49,15 @@ export async function POST(req: Request) {
       { status: 502 },
     );
   }
-  return NextResponse.json({ ok: true, sent: true, messageId: res.messageId ?? null, identity: res.identity ?? null });
+  if (res.deduped) {
+    return NextResponse.json({
+      ok: true,
+      sent: false,
+      deduped: true,
+      messageId: res.messageId ?? null,
+      identity: res.identity ?? null,
+      note: "Identical content was already delivered in the last 60s — duplicate suppressed.",
+    });
+  }
+  return NextResponse.json({ ok: true, sent: true, deduped: false, messageId: res.messageId ?? null, identity: res.identity ?? null });
 }

@@ -1,0 +1,19 @@
+Autonomous NEXUS OS improvement cycle (4h). Workspace /home/z/my-project. NOT a status pass: every cycle ships a measured fix/upgrade, or an evidenced nothing-to-do verdict WITH numbers. No theater. Full spec: docs/cron-harness-v2.md.
+
+DUTY SLOT = floor(Istanbul hour / 4) mod 4 → 0 DEFECT, 1 RSI-EVAL, 2 UPGRADE, 3 DURABILITY. State the slot in the worklog entry.
+
+HEALTH GATE (every slot, ≤15 min): tails of worklog.md / dev.log / mini-services/mem-watchdog/watchdog.log (~150 lines each); GET localhost:3000 = 200; curl 127.0.0.1:3010/health expect ok true; free -m. Hunt: page errors, "Blocked cross-origin" warnings, kick webhook 401/422 storms, /api/kick/test-chat 502, one !ai message producing TWO model generations, ANY emoji in bot replies (absolute ban), rate-guard noise rows, routes consistently >15s, watchdog OOM. Any real hit → run DEFECT slot NOW, rotation resumes next cycle.
+
+SLOT 0 DEFECT: root-cause pass (not symptoms) over logs + readonly sqlite probes of db/custom.db (patterns: scripts/cron-20261030-0825-*.ts). Fix the TOP issue only, properly in src. No defect found → prove it with numbers, then do SLOT 1 work instead.
+
+SLOT 1 RSI-EVAL: sample last ~200 InteractionLog rows: route accuracy (research misfires, lore hits, relevance drops, EXA off-topic answers that got posted), p50/p95 latency per route, emoji/dupes/regressions. Pick ONE recurring failure class → implement the smallest real fix (pattern, guard) or a measured eval against an existing RsiSuite, recording results in RsiRun + RsiImprovementEdge. Log class + evidence + change.
+
+SLOT 2 UPGRADE: take the top unshipped slice from docs/capability-upgrade-plan.md §5 queue, docs/hyperbrowser-integration.md phases, docs/agentmail-deep-dive.md parked queue, or the latest worklog RSI Ledger notes. Ship ONE additive slice (≤150 lines), probe-gated, no edits to locked regex/ladder/persona lines. Owner-gated items (new keys, secrets, lore content, 3rd-party OAuth) → skip and do SLOT 1 work instead.
+
+SLOT 3 DURABILITY: .zscripts/backup-state.json — lastOk >20h → force push (NEXUS_BACKUP_FORCE=1), verify scan + PUSH + TAG lines; seal freshness vs DB row counts (drift → report in worklog, NEVER auto-seal); mini-services health (:3010 kick-bridge, :3012 bench-cadence, :3013 mail-cadence); watchdog restarts + memory trend since last cycle.
+
+CONSTRAINTS (non-negotiable): Next.js 16 App Router, port 3000 only, api routes not server actions, z-ai-web-dev-sdk backend-only, never bun run build, never edit .env, never touch Credential/vault/owner DB rows (readonly queries fine), never send test messages to the live Kick chat, never stop the dev server without an immediate verified respawn, lore is owner-authored (propose in worklog only), no OAuth re-auth — log the exact symptom and stop that thread.
+
+GATES after any src change: bun x tsc --noEmit (zero NEW errors), bun run lint clean, agent-browser golden path (login password = PANEL_PASSWORD in .env; Connectors tab renders + /api/kick/status 200).
+
+ALWAYS: APPEND (never overwrite) to worklog.md a section starting with --- and: Task ID: cron-<yyyymmdd-hhmm>, Agent: cron cycle <slot name>, Task, Work Log (evidence-tagged), Stage Summary (shipped vs deferred + why), RSI Ledger (recurring failure classes as routing-upgrade candidates). Truly nothing shippable → one-line heartbeat WITH the numbers that prove it. Final reply <120 words.

@@ -2371,6 +2371,35 @@ async function runCortexCore(req: CortexRequest): Promise<CortexResult> {
     };
   }
 
+  // v37.5 — TRIVIAL-INPUT GATE (measured live 2026-10-30 04:23: berxx's "!ai a"
+  // spam burst — the rate guard caught b/c but the FIRST 1-char message burned
+  // a full beam-1.0 generation, 4287 prompt tokens, just to reply "Bu kelimeyi
+  // bilmiyorum, ne demek?"). A single-character prompt is never a meaningful
+  // Turkish sentence — keystroke tests, spam and emote pastes live here.
+  // Deterministic like TIME/EMPTY: zero model, 0ms, rotating honest variants,
+  // same prompt → same reply. Additions only — the intent ladder below is
+  // untouched; multi-char slang ("sa", "gg", "hm") still reaches the model.
+  if (prompt.length <= 1) {
+    const sum = prompt.charCodeAt(0);
+    const trivialVariants = [
+      "Tek harf geldi kanka — harf tamam ama cümle eksik. Ne demek istediğini biraz daha yaz, anında buradayım.",
+      "Bir harf, bir de merak — birleşince soru olur. Sorduğun şeyi net yazarsan hemen dönüyorum.",
+      "Bu tek harf, kartonda kalmış not gibi — içinde ne var bilmiyorum. Biraz aç, anlatayım.",
+    ];
+    const reply = trivialVariants[sum % trivialVariants.length];
+    noteHealth("tool", true, 0);
+    return {
+      ok: true,
+      intent: "CHAT",
+      reply,
+      modelLabel: "VYCE // KISA HAT",
+      modelId: "tool:trivial-guard", // v37.5 — deterministic, no engine
+      provider: "tool",
+      route: "cortex-trivial",
+      telemetry: { latencyMs: Date.now() - started, webSearch: "none", intentMs: 0 },
+    };
+  }
+
   const intentStart = Date.now();
   let intent = classifyIntent(prompt);
   const intentMs = Date.now() - intentStart;

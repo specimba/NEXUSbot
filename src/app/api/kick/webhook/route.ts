@@ -245,6 +245,10 @@ async function processChatMessage(payload: ChatMessagePayload, messageId: string
   const send = await kickSendBotMessage(reply);
   if (!send.ok) {
     console.warn(`[kick-webhook] bot send failed code=${send.code ?? "?"}`);
+  } else if (send.deduped) {
+    // v38 — the identical line was already delivered moments ago (ladder
+    // guard / redelivery class): suppressed at the transport, chat stays clean.
+    console.info(`[kick-webhook] reply deduped at transport (code=${send.code ?? "?"}) — no second post`);
   } else if (send.identity === "user") {
     console.warn(`[kick-webhook] bot send fell back to USER identity — bot lanes failed (code=${send.code ?? "n/a"})`);
   }
