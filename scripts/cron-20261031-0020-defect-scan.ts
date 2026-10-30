@@ -101,12 +101,12 @@ if (tables.some((t) => t.name === "InteractionLog")) {
 if (tables.some((t) => t.name === "Event")) {
   const ev = db
     .query(
-      "SELECT id, createdAt, type, level, substr(message,1,100) m FROM Event ORDER BY id DESC LIMIT 15"
+      "SELECT id, ts, type, level, substr(payload,1,100) p FROM Event ORDER BY id DESC LIMIT 15"
     )
     .all() as any[];
   console.log("events(last 15):");
   for (const e of ev)
-    console.log(`  #${e.id} ${e.createdAt} [${e.level}] ${e.type}: ${e.m}`);
+    console.log(`  #${e.id} ${e.ts} [${e.level}] ${e.type}: ${e.p}`);
 }
 db.close();
 console.log("SCAN DONE (readonly)");

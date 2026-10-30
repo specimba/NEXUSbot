@@ -89,6 +89,39 @@ state_flush() {
 # 0) anti-hammering bookkeeping: EVERY invocation stamps lastAttempt* first.
 S_ATTEMPT="$TS"; S_ATTEMPT_EPOCH="$NOW_EPOCH"
 
+# 0.05) resident mini-service ensure (cron-20261031-0021): the harness reaps every
+#     agent-spawned process at tool-call teardown (measured 3/3 tonight, plus a
+#     bare `setsid sleep` control), so a mini-service that dies mid-session used
+#     to stay dead until the next sandbox boot — bench-cadence sat as a zombie
+#     server (HTTP up, scheduler dead) for 3.5h that way. This script is the one
+#     mid-session path whose parent chain is RESIDENT (backup-cadence + the
+#     panel backup route both run it), so it doubles as supervisor of last
+#     resort: a dead port-service is respawned detached and inherits the
+#     resident chain, which the reap does not touch. The sweep runs BEFORE the
+#     push throttle on purpose — service liveness must not depend on whether
+#     this particular run is allowed to push. Idempotent — a healthy port is
+#     never touched — and best-effort: nothing here can fail the backup run
+#     itself (durability always comes first). mem-watchdog is deliberately
+#     excluded: it carries its own pidfile guard and the bench-cadence sitter.
+ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+ensure_service() {
+  local name="$1" port="$2"
+  if curl -s -o /dev/null --max-time 3 "http://127.0.0.1:${port}/health"; then
+    return 0
+  fi
+  local dir="$ROOT_DIR/mini-services/${name}" logf="$ROOT_DIR/$STATE_DIR/mini-service-${name}.log"
+  if [[ ! -f "$dir/package.json" ]]; then
+    log "ensure: $name skipped (no package.json)"
+    return 0
+  fi
+  log "ensure: $name :$port dead — respawning detached (resident-parented)"
+  ( cd "$dir" && setsid nohup bun run dev >> "$logf" 2>&1 < /dev/null & ) || true
+}
+ensure_service kick-bridge 3010
+ensure_service bench-cadence 3012
+ensure_service mail-cadence 3013
+log "ensure: mini-service sweep done"
+
 # 0.1) push throttle (12-d): skip honestly when the last successful push is
 # younger than MIN_PUSH_GAP_S. Panel button + service /run land here; two
 # documented bypasses exist (TIME-THROTTLE ONLY — dedupe, the fail-closed
@@ -349,36 +382,6 @@ elif [[ "$REMOTE_TAG" == "$COMMIT" ]]; then
 else
   log "TAG $TAG already exists on remote at ${REMOTE_TAG:0:12} (≠ ${COMMIT:0:12}) — left untouched (tags are immutable)"
 fi
-
-# 12) resident mini-service ensure (cron-20261031-0021): the harness reaps every
-#     agent-spawned process at tool-call teardown (measured 3/3 tonight, plus a
-#     bare `setsid sleep` control), so a mini-service that dies mid-session used
-#     to stay dead until the next sandbox boot — bench-cadence sat as a zombie
-#     server (HTTP up, scheduler dead) for 3.5h that way. This script is the one
-#     mid-session path whose parent chain is RESIDENT (backup-cadence + the
-#     panel backup route both run it), so it doubles as supervisor of last
-#     resort: a dead port-service is respawned detached and inherits the
-#     resident chain, which the reap does not touch. Idempotent — a healthy
-#     port is never touched — and best-effort: nothing here can fail the backup
-#     run itself (durability always comes first). mem-watchdog is deliberately
-#     excluded: it carries its own pidfile guard and the bench-cadence sitter.
-ensure_service() {
-  local name="$1" port="$2"
-  if curl -s -o /dev/null --max-time 3 "http://127.0.0.1:${port}/health"; then
-    return 0
-  fi
-  local dir="mini-services/${name}"
-  if [[ ! -f "$dir/package.json" ]]; then
-    log "ensure: $name skipped (no package.json)"
-    return 0
-  fi
-  log "ensure: $name :$port dead — respawning detached (resident-parented)"
-  ( cd "$dir" && setsid nohup bun run dev >> "$STATE_DIR/mini-service-${name}.log" 2>&1 < /dev/null & ) || true
-}
-ensure_service kick-bridge 3010
-ensure_service bench-cadence 3012
-ensure_service mail-cadence 3013
-log "ensure: mini-service sweep done"
 
 state_flush
 exit 0
