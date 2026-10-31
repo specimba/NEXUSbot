@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { AlertTriangle, Coins, Globe, Loader2, RefreshCw, Search, Server } from "lucide-react";
+import { AlertTriangle, Coins, Globe, KeyRound, Loader2, RefreshCw, Search, Server } from "lucide-react";
 
 /**
  * v37.3 — WEB LANES card: the three web lanes from the agent-systems
@@ -21,6 +21,12 @@ import { AlertTriangle, Coins, Globe, Loader2, RefreshCw, Search, Server } from 
  * Exa stays PRIMARY; these are fallbacks. Honest states only.
  * EN pass: v37.1 shipped the card in Turkish — the rest of the panel is EN,
  * this card now matches (owner ask 2026-10-30).
+ * v38.7 — KEY ENTRY (owner ask 2026-10-31 ~04:15 +03: "still empty no key
+ * entry parts for me to fill"): each lane now carries its own paste-and-seal
+ * field. The secret goes through POST /api/credentials (AES vault, masked
+ * preview only — the plaintext never leaves the process) and the lane status
+ * refetches immediately, so the owner can arm Keenable/TinyFish/Firecrawl
+ * without touching the .env or the seal file by hand.
  */
 
 type LaneStatus = {
@@ -89,6 +95,114 @@ const LANES = [
   },
 ] as const;
 
+/** v38.7 — per-lane paste-and-seal key field. Save → vault → status refetch. */
+function LaneKeyField({
+  laneKey,
+  laneName,
+  configured,
+  masked,
+  onSaved,
+}: {
+  laneKey: string;
+  laneName: string;
+  configured: boolean;
+  masked: string | null;
+  onSaved: () => void;
+}) {
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [value, setValue] = useState("");
+
+  const save = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/credentials", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ service: laneKey, secret: value.trim(), label: "default" }),
+      });
+      const body = await res.json();
+      if (!res.ok || !body.ok) throw new Error(body?.error?.message || `HTTP ${res.status}`);
+      return body;
+    },
+    onSuccess: () => {
+      setValue("");
+      setOpen(false);
+      toast({ title: `${laneName} key sealed into the vault`, description: "Lane status re-checks now." });
+      onSaved();
+    },
+    onError: (err: Error) => {
+      toast({ title: `${laneName} key save failed`, description: err.message, variant: "destructive" });
+    },
+  });
+
+  if (!open) {
+    return configured ? (
+      <span className="flex min-w-0 items-center gap-1">
+        <KeyRound className="h-3 w-3 shrink-0 text-emerald-600" aria-hidden />
+        <span className="truncate font-mono text-[11px] text-muted-foreground" title="vault credential (masked)">
+          {masked || "sealed"}
+        </span>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 shrink-0 px-2 text-[11px] text-muted-foreground"
+          aria-label={`Replace ${laneName} key`}
+          onClick={() => setOpen(true)}
+        >
+          replace
+        </Button>
+      </span>
+    ) : (
+      <Button
+        variant="outline"
+        size="sm"
+        className="h-6 shrink-0 gap-1 px-2 text-[11px]"
+        aria-label={`Add ${laneName} key`}
+        onClick={() => setOpen(true)}
+      >
+        <KeyRound className="h-3 w-3" aria-hidden />
+        add key
+      </Button>
+    );
+  }
+
+  return (
+    <span className="flex w-full min-w-0 items-center gap-1">
+      <Input
+        type="password"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder={`paste ${laneName} API key`}
+        aria-label={`${laneName} API key`}
+        className="h-7 min-w-0 flex-1 font-mono text-[11px]"
+        autoFocus
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && value.trim().length >= 8) save.mutate();
+          if (e.key === "Escape") { setOpen(false); setValue(""); }
+        }}
+      />
+      <Button
+        size="sm"
+        className="h-7 shrink-0 gap-1 px-2 text-[11px]"
+        disabled={save.isPending || value.trim().length < 8}
+        onClick={() => save.mutate()}
+      >
+        {save.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <KeyRound className="h-3 w-3" />}
+        seal
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-7 shrink-0 px-2 text-[11px]"
+        aria-label="Cancel key entry"
+        onClick={() => { setOpen(false); setValue(""); }}
+      >
+        cancel
+      </Button>
+    </span>
+  );
+}
+
 export function AgentLanesCard() {
   const { toast } = useToast();
   const [query, setQuery] = useState("");
@@ -134,7 +248,8 @@ export function AgentLanesCard() {
         <CardDescription>
           Exa stays primary (owner doctrine); these three lanes take over the
           moment it drops: Keenable (free search), TinyFish (free JS-page
-          reading), Firecrawl (metered last resort). Budget impact: $0.
+          reading), Firecrawl (metered last resort). Budget impact: $0. Keys
+          are pasted here and sealed into the vault — no .env editing.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -145,31 +260,41 @@ export function AgentLanesCard() {
             return (
               <li
                 key={lane.key}
-                className="flex flex-wrap items-center gap-2 rounded-md border border-border/60 p-2 text-xs"
+                className="space-y-1.5 rounded-md border border-border/60 p-2 text-xs"
               >
-                <lane.icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                <span className="font-medium">{lane.name}</span>
-                {laneBadge(st)}
-                <span className="text-muted-foreground min-w-0 flex-1 truncate" title={lane.role}>
-                  {lane.role}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 w-6 p-0"
-                  aria-label={`Refresh ${lane.name}`}
-                  onClick={() => q.refetch()}
-                >
-                  <RefreshCw className="h-3 w-3" />
-                </Button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <lane.icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                  <span className="font-medium">{lane.name}</span>
+                  {laneBadge(st)}
+                  <span className="text-muted-foreground min-w-0 flex-1 truncate" title={lane.role}>
+                    {lane.role}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 w-6 p-0"
+                    aria-label={`Refresh ${lane.name}`}
+                    onClick={() => q.refetch()}
+                  >
+                    <RefreshCw className="h-3 w-3" />
+                  </Button>
+                </div>
+                {/* v38.7 — the owner-facing key entry: paste → seal → vault */}
+                <LaneKeyField
+                  laneKey={lane.key}
+                  laneName={lane.name}
+                  configured={Boolean(st?.configured)}
+                  masked={st?.credential?.masked ?? null}
+                  onSaved={() => q.refetch()}
+                />
                 {q.isError && (
-                  <span className="w-full text-destructive">
+                  <span className="block w-full text-destructive">
                     <AlertTriangle className="mr-1 inline h-3 w-3" />
                     {(q.error as Error).message}
                   </span>
                 )}
                 {st?.error && (
-                  <span className="w-full text-destructive">{st.error}</span>
+                  <span className="block w-full text-destructive">{st.error}</span>
                 )}
               </li>
             );
