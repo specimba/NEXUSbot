@@ -2433,13 +2433,50 @@ async function researchAnswer(
     ];
     const r = await raceModel(messages, true, req, Math.min(deadline, Date.now() + CORTEX_DEADLINE_MS));
     const sources = res.snippets.slice(0, 3).map((s) => ({ title: s.title, url: s.url }));
+    // v38.6 — GROUNDED ZERO-MODEL FALLBACK (search lane): the URL lane got
+    // this exact fix in v29.22, the search lane never did. Live row 03:48 +03
+    // ("erlik kimdir"): exa leg dropped, keenable keyless, z-ai snippets OK in
+    // hand — then the 17s-degraded model ladder returned content:null and the
+    // lane posted the canned "model sıkıştı" line with a borrowed VYCE // EXA
+    // RESEARCH badge after burning the full 17000ms deadline. The snippets are
+    // REAL search results: quote the top one verbatim, label the truth.
+    if (!r.content) {
+      const top = res.snippets[0];
+      const groundedReply = top
+        ? `Kaynaklar elimde ama derleyici model sıkıştı — ${top.host} aynen diyor ki: "${clampStr(top.text, 170)}"`
+        : "Web sonuçları geldi ama model sıkıştı — birkaç saniye sonra tekrar sor, tam isabet gelir.";
+      try {
+        void db.event
+          .create({
+            data: {
+              source: "connector",
+              type: "research.zero-model-grounded",
+              level: "info",
+              payload: JSON.stringify({ query: stampedQuery.slice(0, 200), host: top?.host ?? "" }),
+            },
+          })
+          .catch(() => {});
+      } catch {
+        /* telemetry best-effort */
+      }
+      return {
+        reply: groundedReply,
+        sources,
+        webSearch: "web-fallback",
+        provider: "static",
+        modelLabel: "VYCE // GROUNDED SNIPPET",
+        modelId: "grounded-snippet", // v31.6 truth: verbatim quote, no engine
+        usage: null,
+        ladderUsed: ladder.length > 0,
+      };
+    }
     return {
-      reply: r.content || "Web sonuçları geldi ama model sıkıştı — birkaç saniye sonra tekrar sor, tam isabet gelir.",
+      reply: r.content,
       sources,
       webSearch: "web-fallback",
       provider: r.provider,
-      modelLabel: r.content ? r.modelLabel : "VYCE // EXA RESEARCH",
-      modelId: r.content ? r.modelId : "web-fallback",
+      modelLabel: r.modelLabel,
+      modelId: r.modelId,
       usage: r.usage ?? null,
       ladderUsed: ladder.length > 0,
     };
