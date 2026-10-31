@@ -342,13 +342,34 @@ const TR_EN_STOPWORDS = new Set([
 ]);
 
 /**
- * Salient tokens of a research query (normalized, stopword-stripped, len≥4,
- * capped 8) — the relevance gate compares these against the engine answer.
+ * Salient tokens of a research query (normalized, stopword-stripped, len≥4).
+ * v38.5 — TURKISH STEM VARIANTS: Turkish is agglutinative — the query says
+ * "polonyada" (locative) while the answer says "Polonya"; a bare suffix
+ * token can never substring-match its own stem in the answer (measured
+ * drop: the on-topic "Polonya şu an büyük bir krizle sarsılıyor…" answer
+ * failed the gate). For tokens ≥6 chars, the high-frequency case suffixes
+ * are stripped and the stem rides ALONGSIDE the full form (both kept — the
+ * full form still matches exact echoes). Stems <4 chars are not emitted, so
+ * short English words ("plane") are never mangled.
  */
+const TR_CASE_SUFFIXES = ["larin","lerin","lardan","lerden","dan","den","tan","ten","lar","ler","nin","nun","da","de","ta","te"];
+
 export function researchQueryTokens(query: string): string[] {
-  const tokens = normalizeTrTokens(query, 4).filter((t) => !TR_EN_STOPWORDS.has(t));
-  const uniq = [...new Set(tokens)];
-  return uniq.slice(0, 8);
+  const base = normalizeTrTokens(query, 4).filter((t) => !TR_EN_STOPWORDS.has(t));
+  const withStems: string[] = [];
+  for (const t of base) {
+    withStems.push(t);
+    if (t.length >= 6) {
+      for (const suf of TR_CASE_SUFFIXES) {
+        if (t.endsWith(suf) && t.length - suf.length >= 4) {
+          withStems.push(t.slice(0, -suf.length));
+          break; // at most one suffix strip — no cascading
+        }
+      }
+    }
+  }
+  const uniq = [...new Set(withStems)];
+  return uniq.slice(0, 12);
 }
 
 /**
@@ -357,14 +378,26 @@ export function researchQueryTokens(query: string): string[] {
  * single-token queries). A false pass = a bad answer; a false drop = one
  * extra z-ai web-fallback rung (which already exists) — conservative by
  * design, tuned from logged `research.relevance-drop` events, never vibes.
+ * v38.5 — CITATION RESCUE (third tier): the lane instructs TURKISH answers,
+ * but query tokens are often ENGLISH — measured drop (2026-10-31 03:0x +03):
+ * query "China mysterious space plane Pentagon images" produced a perfectly
+ * on-topic Turkish answer ("Pentagon… Çin'in Shenlong uzay uçağını…") that
+ * failed the token gate on a pure language mismatch. The CITATIONS are the
+ * English sources Exa actually used — if they match the salient tokens, the
+ * answer is topical (it cites exactly what was asked about). Rescue only:
+ * citations can pass an answer the token tier dropped, never weaken it.
  */
-export function exaAnswerIsRelevant(query: string, answer: string): boolean {
+export function exaAnswerIsRelevant(query: string, answer: string, citationText = ""): boolean {
   const tokens = researchQueryTokens(query);
   if (!tokens.length) return true; // nothing salient to check — let it pass
-  const haystack = normalizeTr(answer);
-  const hits = tokens.filter((t) => haystack.includes(t)).length;
   const need = tokens.length === 1 ? 1 : 2;
-  return hits >= need;
+  const haystack = normalizeTr(answer);
+  if (tokens.filter((t) => haystack.includes(t)).length >= need) return true;
+  if (citationText.trim()) {
+    const citeHay = normalizeTr(citationText);
+    if (tokens.filter((t) => citeHay.includes(t)).length >= need) return true;
+  }
+  return false;
 }
 
 // Re-export for route consumers (lore key shared with /api/lore).

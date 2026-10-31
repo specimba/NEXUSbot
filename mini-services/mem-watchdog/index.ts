@@ -14,6 +14,23 @@
  *     sat below steady state: the watchdog permanently wanted to kill.
  *   - server dead (:3000 refused)      -> detached respawn (same cooldown)
  *
+ * 2026-10-31 v38.5 — PROACTIVE IDLE RECYCLE + GC-THRASH GAP. Measured
+ * (cron-20261031-0519 follow-up): the harness-started server runs with
+ * --max-old-space-size=2020 and its RSS climbs to ~2000MB within ~4h of dev
+ * uptime (1845 -> 1999MB in ~90min on 2026-10-31 night), where it pins AT
+ * the V8 cap and GC-thrashes — responses slow, the owner's Chrome preview
+ * tab freezes — while per-process RSS may NEVER cleanly cross the 2200 hard
+ * line (the cap holds it just under). New tier: 2 consecutive readings in
+ * (PROACTIVE_RSS_MB, RSS_LIMIT_MB] WHILE THE STREAM IS IDLE (kick-bridge
+ * reports upstream != live, or viewers == 0 with no chat for 15 min) ->
+ * same supervised respawn BEFORE the thrash can hurt an active stream. The
+ * respawn's own NODE_OPTIONS=1024 cap then keeps the fresh generation
+ * tighter than the harness env. Also: a 30-min trend line (RSS +
+ * MemAvailable) so DURABILITY slots get the memory trend for free, and a
+ * hot-reload-safe timer registry (the bench-cadence lesson: bun --hot
+ * re-evals leave the previous generation's setInterval alive -> double
+ * polls, double strikes, premature kills).
+ *
  * 2026-10-28 fix (cron-20261028-0025): the RSS-sustained path was DEAD CODE —
  * respawn()'s grace-window liveness gate ran on it too, but a LIVE server is
  * the precondition of the RSS path, so every attempt aborted with "server came
@@ -77,6 +94,11 @@ const RSS_LIMIT_MB = 2200;
 const STRIKES_NEEDED = 2;
 const POLL_MS = 30_000;
 const COOLDOWN_MS = 10 * 60_000;
+// v38.5 — proactive tier: recycle a pinned-at-the-V8-cap server while the
+// stream is idle, before GC-thrash can degrade an active session.
+const PROACTIVE_RSS_MB = 2000;
+const KICK_BRIDGE_HEALTH_URL = "http://127.0.0.1:3010/health";
+const IDLE_CHAT_QUIET_MS = 15 * 60_000;
 
 // Global-pressure defense (see header, 2026-10-28 cron-20261028-1225).
 const GLOBAL_FLOOR_MB = 700; // 4GB box, no swap: below ~700MB available the kernel OOM zone is close
@@ -138,7 +160,17 @@ async function waitForPort(totalMs: number): Promise<boolean> {
 }
 
 let strikes = 0;
+let proactiveStrikes = 0;
 let lastActionAt = 0;
+let tickCount = 0;
+
+// v38.5 — cooldown state survives hot re-evals (a fresh generation must not
+// forget a respawn that just happened — the 10-min cooldown would reset and
+// a second kill could fire within the same window).
+const WATCHDOG_STATE = globalThis as typeof globalThis & {
+  __nexusMemWatchdogState?: { lastActionAt: number };
+};
+lastActionAt = WATCHDOG_STATE.__nexusMemWatchdogState?.lastActionAt ?? 0;
 
 function log(line: string) {
   const ts = new Date().toISOString();
@@ -244,6 +276,32 @@ function portUp(): Promise<boolean> {
     const child = spawn("curl", ["-s", "-o", "/dev/null", "--max-time", "4", `http://127.0.0.1:${PORT}/`]);
     child.on("error", () => resolve(false));
     child.on("close", (code) => resolve(code === 0));
+  });
+}
+
+/** v38.5 — is the Kick stream idle? curl per the loopback house rule (bun
+ * sockets cannot reach loopback — measured, header above). TRUE only when
+ * the stream is offline (upstream != live) AND nobody is chatting through
+ * the bot (viewers == 0, last bot-processed chat > 15 min). The proactive
+ * recycle then lands in a quiet window; a LIVE stream never gets one.
+ * Fail-closed: bridge unreachable/no parse -> false (no proactive action). */
+function kickStreamIdle(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const child = spawn("curl", ["-s", "--max-time", "4", KICK_BRIDGE_HEALTH_URL]);
+    let out = "";
+    child.stdout?.on("data", (d) => (out += String(d)));
+    child.on("error", () => resolve(false));
+    child.on("close", () => {
+      try {
+        const h = JSON.parse(out) as { upstream?: string; viewers?: number; lastChatAt?: string };
+        if (h.upstream === "live") return resolve(false);
+        const last = h.lastChatAt ? Date.parse(h.lastChatAt) : NaN;
+        const chatQuiet = !Number.isFinite(last) || Date.now() - last > IDLE_CHAT_QUIET_MS;
+        resolve((h.viewers ?? 0) === 0 && chatQuiet);
+      } catch {
+        resolve(false);
+      }
+    });
   });
 }
 
@@ -354,6 +412,7 @@ async function respawn(reason: string, opts: { graceCheck?: boolean } = {}) {
     return;
   }
   lastActionAt = now;
+  WATCHDOG_STATE.__nexusMemWatchdogState = { lastActionAt: now };
   // FINAL liveness gate — DEATH PATH ONLY (opts.graceCheck !== false): there,
   // an external actor (harness, human, another restart) may have brought the
   // server back during the double-probe window — never kill a server that
@@ -435,10 +494,41 @@ async function tick() {
   } else {
     if (strikes > 0) log(`RSS ${rss}MB back under limit, strikes reset`);
     strikes = 0;
+    // v38.5 — PROACTIVE IDLE TIER: RSS pinned in the GC-thrash band
+    // (2000, 2200] while the stream is idle -> supervised recycle BEFORE
+    // the thrash can degrade an active session. Shares the 10-min cooldown
+    // and the same respawn path; a live stream never fires it.
+    if (rss > PROACTIVE_RSS_MB) {
+      proactiveStrikes++;
+      if (proactiveStrikes >= STRIKES_NEEDED && (await kickStreamIdle())) {
+        proactiveStrikes = 0;
+        await respawn(`RSS ${rss}MB proactive (stream idle)`, { graceCheck: false });
+      }
+    } else {
+      proactiveStrikes = 0;
+    }
+  }
+  // v38.5 — 30-min trend line: the DURABILITY slot's "memory trend since
+  // last cycle" evidence, for free.
+  tickCount++;
+  if (tickCount % 60 === 0) {
+    log(`trend RSS=${rss}MB avail=${memAvailableMb() ?? "?"}MB proactive-strikes=${proactiveStrikes}`);
   }
 }
 
 if (!acquireSingleInstance()) process.exit(0);
-log(`mem-watchdog started pid=${process.pid} (limit ${RSS_LIMIT_MB}MB x${STRIKES_NEEDED}, poll ${POLL_MS / 1000}s, cooldown ${COOLDOWN_MS / 60000}min, rss-grace death-path-only)`);
-setInterval(tick, POLL_MS);
+log(`mem-watchdog started pid=${process.pid} (limit ${RSS_LIMIT_MB}MB x${STRIKES_NEEDED}, proactive ${PROACTIVE_RSS_MB}MB idle-only, poll ${POLL_MS / 1000}s, cooldown ${COOLDOWN_MS / 60000}min, rss-grace death-path-only)`);
+
+// v38.5 — hot-reload-safe timer registry (the bench-cadence lesson): a
+// bun --hot re-eval leaves the PREVIOUS generation's setInterval alive.
+// The winner generation clears every inherited timer before scheduling its
+// own — exactly one tick loop per process, ever.
+const TIMER_REG = globalThis as typeof globalThis & {
+  __nexusMemWatchdogTimer?: ReturnType<typeof setInterval>;
+};
+if (TIMER_REG.__nexusMemWatchdogTimer) {
+  clearInterval(TIMER_REG.__nexusMemWatchdogTimer);
+  log("hot-reload: cleared inherited tick timer from a previous generation");
+}
+TIMER_REG.__nexusMemWatchdogTimer = setInterval(tick, POLL_MS);
 tick();

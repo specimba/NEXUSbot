@@ -462,9 +462,37 @@ const DRAW_RE =
 const TIME_RE =
   /(saat\s*kaç|saati\s*ne|kaç\s*oldu|what\s*time|time\s*(?:is\s*it|in)|şu\s*an\s*saat|suan\s*saat|kaç\s* geçiyor|saat\s*öğren)/i;
 const STATUS_RE =
-  /(yoğun\s*mu|yogun\s*mu|meşgul\s*mü|mesgul\s*mü|meşgul|busy|hatlar\s*açık|bağlantılar|baglantilar|durum\s*(?:ne|nedir|napıyorsun)|status|çalışıyor\s*musun|calisiyor\s*musun|ne\s*yapıyorsun|ai\s*durumu)/i;
+  /(yoğun\s*mu|yogun\s*mu|meşgul\s*mü|mesgul\s*mü|meşgul|busy|hatlar\s*açık|bağlantılar|baglantilar|status|çalışıyor\s*musun|calisiyor\s*musun|ne\s*yapıyorsun|ai\s*durumu)/i;
+// v38.5 — the "durum ne/nedir" family moved OUT of STATUS_RE: a durum
+// question WITH a research topic ("güncel durum ne türkiyede" — the v38
+// corpus row) is a current-events question, not a bot health probe; the v38
+// probe's simplified replica (no STATUS gate) asserted RESEARCH while the
+// REAL ladder answered STATUS all along. Now: durum stays STATUS only when
+// NO research shape is present (bare "durum ne" keeps its health answer).
+const STATUS_DURUM_RE = /durum\s*(?:ne|nedir)\b/i;
 const RESEARCH_RE =
-  /(araştır|arastir|gündem|gundem|son\s*dakika|en\s*son|yeni\s*çıkan|yeni\s*cikan|\bhaber\b|\bkimdir\b|kim\s*bu|\bkim\b|\bnedir\b|\bnasıl\b|\bnasil\b|\bniçin\b|\bneden\b|\bne\s*oldu\b|(?:neler|ne)\s*oluyo(?:r)?\b|ne\s*d[öo]n[uü]yor|oluyo(?:r)?\s*m[ıi]\b|son\s*durum|g[uü]ncel(?:\s*(?:durum|bilgi|veri|haber))?\b|bulam[ıi]y(?:o|or)|aras[ıia]na\b|hakk[ıi]nda|kaç\s*tl|kac\s*tl|\bfiyat\b|\bskor\b|maç|\bbitcoin\b|\bdolar\b|\beuro\b|\baltın\b|hava\s*durumu|\bwhen\b|\bwho\s*is\b|\bwhat\s*is\b|\bhow\s*(?:to|do)\b|\bnews\b|\blatest\b|\bprice\b|\bscore\b)/i;
+  /(araştır|arastir|gündem|gundem|son\s*dakika|en\s*son|yeni\s*çıkan|yeni\s*cikan|\bhaber\b|\bkimdir\b|kim\s*bu|\bkim\b|\bnedir\b|\bnasıl\b|\bnasil\b|\bniçin\b|\bneden\b|\bne\s*oldu\b|(?:neler|ne)\s*oluyo(?:r)?\b|ne\s*d[öo]n[uü]yor|oluyo(?:r)?\s*m[ıi]\b|son\s*durum|g[uü]ncel(?:\s*(?:durum|bilgi|veri|haber))?\b|bulam[ıi]y(?:o|or)|aras[ıia]na\b|hakk[ıi]nda|kaç\s*tl|kac\s*tl|\bfiyat\b|\bskor\b|maç|\bbitcoin\b|\bdolar\b|\beuro\b|\baltın\b|hava\s*durumu|\bwhen\b|\bwho\s*is\b|\bwhat\s*is\b|\bhow\s*(?:to|do)\b|\bnews\b|\blatest\b|\bprice\b|\bscore\b|(?:^|\s)haber|n[ou]lm[uü][şs]|bilmiy(?:osan|orsan)|oku\w*[^\n]{0,16}anlat|anlat[^\n]{0,16}oku\w*|(?:^|\s)exa(?=[\s'’:,.;!?)])|deep\s?search|web\s?search|(?:^|\s)search\b|internet[td]e[n]?\s+(?:ara|bak)|web'?[dt]e[n]?\s+(?:ara|bak)|googl[ea]'?(?:da|de)\s+(?:ara|bak)|arama\s+yap|\bara(?!\s*ver)\b|\barar\s+m[ıi]s[ıi]n\b)/i;
+// v38.5 — NEWS-EXPLAIN + CAPABILITY-CALL shapes (owner-flagged 2026-10-31
+// 02:15-02:23 +03 rows, the second "nonsense dumbness" batch): three CHAT
+// refusals while the grounded lane sat armed —
+//   "…Pentagon images bu haberi acikla, nolmus" — \bhaber\b FAILED on the
+//     suffixed "haberi" (the ASCII-\b-vs-Turkish-suffix trap documented at
+//     the top of this section); the prefix form (?:^|\s)haber admits every
+//     suffix (haberi/habere/haberler…), \bhaber\b stays for hyphen/paren
+//     edges. "nolmus" joins "ne oldu" as its colloquial twin.
+//   "senin gorevin bu oku anlat" — the read-and-explain imperative pair
+//     (oku…anlat within 16 chars, oku\w* admits okuyup/okuyuver).
+//   "…exa ile deep search yapsana mal" — the viewer NAMES the tool; exa/
+//     deep search/web search/search/internette-ara/webde-ara/google'da-ara/
+//     arama-yap are command shapes, and bare "ara" (negative lookahead
+//     excludes the "ara ver" break idiom) + "arar mısın" cover the plain
+//     imperative. "bilmiyorsan" joins "bulamıyo" (the "if you don't know,
+//     look it up" demand).
+// All additions inherit the upstream guards (BOT_META / SELF_REPLYQ /
+// SMALLTALK ≤80 — "ne oluyo kanka" stays CHAT via the kanka guard, probe
+// v385 asserts). Known residual: meta questions about the tools themselves
+// ("exa nedir") route to research — a grounded answer about Exa.ai is the
+// correct outcome anyway.
 // v38 — CURRENT-EVENTS shapes added to RESEARCH_RE after the 2026-10-31
 // 00:59–01:07 +03 live class (owner-flagged "dumbness" rows): "polonyada
 // neler oluyor" and "yani polonyada darbe oluyo ve sen bunu bulamıyo musun
@@ -719,6 +747,10 @@ export function classifyIntent(prompt: string): CortexIntent {
     return "TIME";
   }
   if (pNoUrl.length <= 160 && STATUS_RE.test(pNoUrl)) return "STATUS";
+  // v38.5 — durum family: STATUS only without a research topic (see
+  // STATUS_DURUM_RE above); "güncel durum ne türkiyede" now reaches the
+  // research gate as the v38 corpus always intended.
+  if (pNoUrl.length <= 160 && STATUS_DURUM_RE.test(pNoUrl) && !RESEARCH_RE.test(pNoUrl)) return "STATUS";
   if (DRAW_RE.test(pNoUrl) && p.length <= 160) return "DRAW";
   if (URL_RE.test(p)) return "RESEARCH";
   if (NEWS_RE.test(p)) return "RESEARCH";
@@ -1310,7 +1342,15 @@ export function buildSystemPrompt(
     // memory:yes and the bot quoting prior chat back. A wrong self-model is
     // a lie told to the viewer's face; the bot describes itself accurately:
     // what it HAS, what it can't DO).
-    `KENDİNİ DOĞRU TANIT: Kick sohbetine bağlısın — bu kanala yazılan mesajları okur, son mesajları hatırlarsın (hafızan var), arkanda bir kontrol panelin ve web araştırma hatların var. Bunları İNKÂR ETMEZSİN — "panelim yok", "entegrasyonum yok", "geçmişim yok", "sadece buraya yazılanı okurum, o kadar" DEMEZSİN. Sınırlarını da doğru söylersin: kendin panel açıp bakamazsın, eski sohbeti baştan sona tarayamazsın, yayını izleyemezsin — doğrusu: "kanala bağlıyım, son sohbeti hatırlıyorum; eski kaydı taramam, panelleri kendim açamam."`,
+    `KENDİNİ DOĞRU TANIT: Kick sohbetine bağlısın — bu kanala yazılan mesajları okur, son mesajları hatırlarsın (hafızan var), arkanda bir kontrol panelin ve web araştırma hatların var. Bunları İNKÂR ETMEZSİN — "panelim yok", "entegrasyonum yok", "geçmişim yok", "sadece buraya yazılanı okurum, o kadar" DEMEZSİN. Sınırlarını da doğru söylersin: panelleri ve kamerayı kendin açıp bakamazsın, eski sohbeti baştan sona tarayamazsın, yayını izleyemezsin. AMA web araştırması YAPABİLİRSİN — "internete kendim dalıp bakamam", "o hatta yetkim yok", "haber akışım yok", "Exa'yı specimba açsın" gibi cümleler YANLIŞ self-modeldir, ASLA söylemezsin; güncel sorunun cevabı ARA HATTI kuralından gelir.`,
+    // v38.5 — RESEARCH ESCALATION SENTINEL: the chat model hands current-
+    // events asks to the grounded lane itself. Measured class (2026-10-31
+    // 02:15-02:23 +03): three CHAT-lane refusals while Exa sat armed one
+    // route away; the router regex cannot enumerate every shape, so the
+    // MODEL — which sees the full conversation context — emits the search
+    // query itself. runCortexCore intercepts [ARA: ...] and swaps in
+    // researchAnswer for that query (route "cortex-escalated").
+    `ARA HATTI: Güncel olay, haber, son durum, fiyat, skor, "şu an X mi" bilgisi gereken her soruda VE "ara / araştır / bak / oku / açıkla / deep search" emrinde cevabın SADECE şu satır olur: [ARA: kısa arama sorgusu] — örnek: "[ARA: Çin uzay uçağı Pentagon görüntüleri]". Sorguyu konuşmanın KONUSUNDAN seçersin; önceki mesajdaki başlık neyse odur. Bu satırı yazınca web hattın devralır, cevabı o yazar — sen sorguyu kurarsın. Genel sohbet, espri, kelime/anlam soruları, kişiler ve bildiğin genel bilgide bu satırı ASLA kullanmazsın; sohbet normal devam eder.`,
     // v31.5 — RELEVANCE CORE (owner paste 2026-10-29: the 08:28 row answered
     // "kulakların yorulunca su mu içilir" with "bir tutam çılgın meme ve
     // kulaklıkla dans" — and the owner himself mocked it in chat: "bir tutam
@@ -2141,6 +2181,61 @@ async function answerNewsDigest(req: CortexRequest): Promise<{ reply: string; so
   };
 }
 
+// ---------------------------------------------------------------------------
+// v38.5 — [ARA: sorgu] SENTINEL + IMPERATIVE-ONLY QUERY SYNTHESIS
+// (owner-flagged 2026-10-31 02:15-02:23 +03 "nonsense dumbness" rows: the
+// chat lanes honestly refused current-events asks — "O haberi görmedim",
+// "Deep search yapamam kanka, o yetkim yok", "Exa'yı specimba açsın" —
+// while the grounded Exa lane sat one route away. Two complementary fixes:
+//   1. The CHAT persona is taught an escalation sentinel: on current-events
+//      questions / research demands the model replies "[ARA: query]" and
+//      runCortexCore swaps in the grounded researchAnswer for that query —
+//      the MODEL synthesizes the search query from the conversation context
+//      (the deferred "context-aware query building" class, closed by design).
+//   2. Imperative-only RESEARCH prompts ("haber sitelerine bak acil",
+//      "exa ile deep search yapsana mal") build the Exa query from the last
+//      CONTENT-BEARING ladder topic instead of the raw command — the
+//      measured "Gazze/X hesabı" off-topic class (the raw imperative was the
+//      query, so the relevance gate blessed junk).
+// ---------------------------------------------------------------------------
+
+/** "[ARA: kısa arama sorgusu]" — the persona's research escalation token.
+ * Capture bounded at 600 (pathology guard) but CLAMPED to 200 in code: a
+ * {2,200} capture would EXCLUDE over-long queries instead of clamping them
+ * (probe v385 C-clamp caught it). */
+const ARA_SENTINEL_RE = /\[ARA[:\s]+([^\]]{2,600})\]/i;
+
+export function parseAraSentinel(text: string): string | null {
+  const m = String(text || "").match(ARA_SENTINEL_RE);
+  if (!m || !m[1]) return null;
+  const q = m[1].replace(/\s+/g, " ").trim();
+  return q.length >= 2 ? clampStr(q, 200) : null;
+}
+
+/** Command verbs that make a prompt a research DEMAND (vs a topic).
+ * Word-boundary house rule (top of the router section): entries must END in
+ * an ASCII letter for \b; "özetle" starts with ö (non-word char — \b can
+ * never precede it) so it uses the (?:^|\s) form. */
+const RESEARCH_CMD_RE =
+  /\b(?:bak|baksana|bakal[ıi]m|oku|okuyuver|anlat|(?:aç|ac)[ıi]kla|ara|araştır|arastir|arasana|yapsana|yap|dene|derle|ozetle|search)\b|(?:^|\s)özetle\b/i;
+
+/** Filler stripped when testing whether a research prompt carries a TOPIC.
+* Same \b rule: every entry ENDS in an ASCII letter; şu/şunu/şey START with
+* ş (non-word) so they use the (?:^|\s) form with a trailing lookahead. */
+const RESEARCH_FILLER_RE =
+  /\b(?:bak|baksana|bakal[ıi]m|bakalim|oku|okuyuver|anlat|açıkla|acikla|ara|araştır|arastir|arasana|yapsana|yap|dene|derle|ozetle|search|acil|hemen|lan|amk|oc|mal|salak|aptal|enayi|senin|görevin|gorevin|görev|gorev|işin|isin|bu|bunu|de|da|ya|ile|bir|sitelerine|siteye|sitelere|kaynaklara|kaynaktan|internette|internetten|webde|webden|web|exa|deep)\b|(?:^|\s)(?:şu|şunu|şey)(?=\s|$)/gi;
+
+/** The content residue of a research prompt after command/filler stripping —
+* what is LEFT is the topic the query should be built from. */
+export function researchResidue(prompt: string): string {
+  return String(prompt || "")
+    .replace(/\[emote:[^\]]*\]/gi, " ")
+    .replace(RESEARCH_FILLER_RE, " ")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 async function researchAnswer(
   req: CortexRequest,
   deadline: number,
@@ -2148,6 +2243,9 @@ async function researchAnswer(
   // lanes read the same window as chat lanes, so follow-ups ("evet isterim",
   // "peki o zaman") keep their antecedent when research falls to a model.
   ladder: Array<{ role: "user" | "assistant"; content: string }> = [],
+  // v38.5 — sentinel mode: the prompt IS a model-synthesized query (complete
+  // by construction) — skip fragment enrichment and imperative-only logic.
+  opts: { sentinelQuery?: boolean } = {},
 ): Promise<{ reply: string; sources: CortexSource[]; webSearch: CortexResult["telemetry"]["webSearch"]; provider: string; modelLabel: string; modelId?: string; usage?: { prompt: number | null; completion: number | null } | null; ladderUsed?: boolean }> {
   // URL prompts get the fetch-first path — never a blind prior answer.
   const selfRecap = await buildSelfRecap(req.channel || "specimba");
@@ -2180,21 +2278,46 @@ async function researchAnswer(
   // Henry") asked which director instead of answering Ilya Naishuller.
   // Short fragments ride the last ladder topics into the query so the
   // search resolves the THING, not the fragment.
-  const fragmentLike = req.prompt.length <= 80 && !URL_RE.test(req.prompt);
+  const fragmentLike = !opts.sentinelQuery && req.prompt.length <= 80 && !URL_RE.test(req.prompt);
   // v34.3 — leak-free ladder: a viewer-pasted system prompt must never RIDE
   // into the exa query through the antecedent enrichment (the engine would
   // happily quote it back with citations).
-  const pastTopics = fragmentLike
-    ? leakFreeTopics(
-        ladder
-          .filter((t) => t.role === "user" && t.content.trim() && t.content.trim() !== req.prompt.trim())
-          .slice(-2)
-          .map((t) => t.content.trim().slice(0, 60)),
-      )
-    : [];
-  const exaQuery = pastTopics.length
-    ? clampStr(`${stampedQuery} — geçmiş konuşma: ${pastTopics.map((c) => `"${c}"`).join(" | ")}`, 400)
-    : stampedQuery;
+  // v38.5 — topic candidates keep up to 160 chars (topic-primary queries
+  // carry the real headline, not a 60-char cut), drop the ring's "@sender:"
+  // prefixes, and filter for CONTENT-BEARING turns (imperative noise like
+  // "senin gorevin bu oku anlat" must never become the search topic).
+  const topicCandidates = leakFreeTopics(
+    ladder
+      .filter((t) => t.role === "user" && t.content.trim() && t.content.trim() !== req.prompt.trim())
+      .slice(-4)
+      .map((t) => t.content.trim().replace(/^@\S+\s*/, "").slice(0, 160))
+      .filter((t) => researchResidue(t).length >= 8),
+  );
+  const pastTopics = fragmentLike ? topicCandidates.slice(-2) : [];
+  // v38.5 — IMPERATIVE-ONLY RESEARCH PROMPTS ("haber sitelerine bak acil",
+  // "exa ile deep search yapsana mal" — the measured 02:15-02:23 +03 class):
+  // the raw command carries NO topic, so the old code searched the imperative
+  // itself and the relevance gate blessed off-topic junk (the "Gazze/X
+  // hesabı" row). With a command verb and <8 residue chars, the query is
+  // built from the last CONTENT-BEARING ladder topic instead — the thing the
+  // viewer actually asked about.
+  const imperativeOnly =
+    !opts.sentinelQuery &&
+    RESEARCH_CMD_RE.test(req.prompt) &&
+    researchResidue(req.prompt).length < 8 &&
+    !URL_RE.test(req.prompt);
+  let exaQuery: string;
+  if (imperativeOnly && topicCandidates.length) {
+    const topicQ = topicCandidates.slice(-2).join(" — ");
+    exaQuery = clampStr(
+      RELATIVE_TIME_Q_RE.test(topicQ) ? `Bugünün tarihi: ${todayStampTr()}. ${topicQ}` : topicQ,
+      400,
+    );
+  } else if (pastTopics.length) {
+    exaQuery = clampStr(`${stampedQuery} — geçmiş konuşma: ${pastTopics.map((c) => `"${c}"`).join(" | ")}`, 400);
+  } else {
+    exaQuery = stampedQuery;
+  }
   const exaArmed = await getExaKey();
   if (exaArmed) {
     const started = Date.now();
@@ -2217,7 +2340,16 @@ async function researchAnswer(
       // (≥1 for single-token queries); drop = Event research.relevance-drop,
       // fall through to the z-ai rung, and the exa HEALTH LADDER STAYS
       // TRUTHFUL (Exa answered — it was off-topic, not unhealthy).
-      const relevant = !researchGateEnabledCached() || exaAnswerIsRelevant(exaQuery, ans.answer);
+      // v38.5 — the citation text joins the gate (grounding.ts citation
+      // rescue): English query tokens vs a Turkish answer text no longer drop
+      // an on-topic answer whose English SOURCES match the query.
+      const relevant =
+        !researchGateEnabledCached() ||
+        exaAnswerIsRelevant(
+          exaQuery,
+          ans.answer,
+          (ans.citations ?? []).map((c) => `${c.title ?? ""} ${c.url ?? ""}`).join(" "),
+        );
       if (relevant) {
         noteHealth("exa", true, Date.now() - started);
         const sources = (ans.citations ?? []).slice(0, 3).map((c) => ({ title: c.title ?? "", url: c.url ?? "" }));
@@ -2361,6 +2493,16 @@ export async function runCortex(req: CortexRequest): Promise<CortexResult> {
   // quoted mentions stay; a reply that was ONLY the token gets a persona line.
   clean = stripLeadingCommandToken(clean);
   if (!clean) clean = COMMAND_ECHO_LINE;
+  // v38.5 — SENTINEL-REMNANT CHOKE: a malformed/empty [ARA:] the escalation
+  // path could not use (or a viewer planting the token) never reaches chat;
+  // a reply that was ONLY the sentinel becomes a short honest invite.
+  if (/\[ARA[:\s]*[^\]]*\]/i.test(clean)) {
+    clean =
+      clean
+        .replace(/\[ARA[:\s]*[^\]]*\]/gi, " ")
+        .replace(/ {2,}/g, " ")
+        .trim() || "Hattı kurdum kanka — sorguyu net yaz, kaynaktan söyleyeyim.";
+  }
   // v34.3 — PROMPT-ECHO CHOKE (2-of-N canary vote). The exa leg already
   // fuses on its own instruction (1-hit); this is the last choke for the chat
   // ladder: a reply that quotes the system prompt is replaced wholesale.
@@ -2847,6 +2989,45 @@ Kayıtta mesaj varsa: kim olduğunu bu mesajlardan çıkar, 1-3 cümle esprili �
   // cannot handle unknown-word questions without word-salad.
   const deep = wordQuestion;
   const r = await raceModel(messages, deep, req, deadline);
+  // v38.5 — [ARA: sorgu] SENTINEL ESCALATION: the chat model used its
+  // conversation context to decide this ask needs the grounded lane (the
+  // persona's ARA HATTI rule). The model-synthesized query rides the SAME
+  // researchAnswer the regex-routed lane uses — honest route label, real
+  // webSearch telemetry. Bounded: one escalation per request (the research
+  // result is returned directly, never re-processed through the chat race);
+  // the deadline gets a +8s extension (capped at now+14s) so the exa leg has
+  // a fair window after a slow chat race.
+  const araQuery = parseAraSentinel(r.content || "");
+  if (araQuery) {
+    try {
+      void db.event
+        .create({
+          data: {
+            source: "connector",
+            type: "research.ara-escalation",
+            level: "info",
+            payload: JSON.stringify({ from: clampStr(prompt, 120), query: araQuery }),
+          },
+        })
+        .catch(() => {});
+    } catch {
+      /* telemetry best-effort */
+    }
+    const rr = await researchAnswer(
+      { ...req, prompt: araQuery },
+      Math.min(deadline + 8_000, Date.now() + 14_000),
+      memoryTurns,
+      { sentinelQuery: true },
+    );
+    return {
+      ok: true, intent: "RESEARCH", reply: rr.reply,
+      modelLabel: rr.modelLabel, modelId: rr.modelId, provider: rr.provider, route: "cortex-escalated", sources: rr.sources,
+      promptTokens: rr.usage?.prompt ?? r.usage?.prompt ?? null,
+      completionTokens: rr.usage?.completion ?? r.usage?.completion ?? null,
+      memoryUsed,
+      telemetry: { latencyMs: Date.now() - started, webSearch: rr.webSearch, intentMs },
+    };
+  }
   return {
     ok: true, intent, reply: r.content || r.fallbackLine || "Hat bir an karıştı — tekrar at, toparlıyorum.",
     modelLabel: r.modelLabel, modelId: r.modelId, provider: r.provider, route: "cortex-chat",
